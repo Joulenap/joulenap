@@ -1,0 +1,114 @@
+# =====================================================================
+# Joulenap — example configuration
+# Copy to config.yaml and fill in your values. config.yaml is git-ignored.
+# All secrets (tokens, passwords, ssh key) live here — keep it private.
+# =====================================================================
+
+app:
+  language: en              # UI language: en, it, ...
+  theme: dark               # dark | light
+  port: 8080                # web UI port
+  timezone: ""              # IANA tz for the scheduler, e.g. "Europe/Rome".
+                            # Empty -> the TZ env var, then UTC. Set this (or TZ) or
+                            # "backup at 02:00" runs at 02:00 UTC in a container.
+  secret_key: "CHANGE_ME"   # random string for session signing
+  auth:
+    username: admin
+    # password is stored hashed (bcrypt); set it on first run via the UI, or
+    # pre-hash it here. Never store plaintext. Generate a hash with:
+    #   docker exec -it joulenap python -m app.hashpw
+    # (or, from a local checkout:  cd backend && python -m app.hashpw)
+    # Quote the value — the hash contains '$' characters.
+    password_hash: ""
+
+# --- Proxmox VE (where the guests live; used to list + trigger backups) ---
+# Leave these blank and let the setup wizard fill them in on first run, or set them here.
+pve:
+  host: ""                  # e.g. 192.168.1.10 or pve.lan
+  port: 8006
+  node: ""                  # node name, e.g. pve
+  verify_tls: false         # self-signed cert on most homelabs
+  api_token_id: ""          # e.g. "root@pam!joulenap" — token with PVEAuditor (VM.Audit) + VM.Backup + Datastore.AllocateSpace
+  api_token_secret: ""
+  storage_id: ""            # the PBS storage as named in PVE (Datacenter > Storage), e.g. pbs
+
+# --- Proxmox Backup Server (the box that sleeps) ---
+# Leave blank for the wizard, or fill in. host/mac + a token are what mark PBS "configured".
+pbs:
+  host: ""                  # e.g. 192.168.1.20 or pbs.lan
+  port: 8007
+  datastore: ""             # e.g. backup
+  fingerprint: ""           # PBS dashboard > Show Fingerprint, e.g. "aa:bb:cc:..."
+  api_token_id: ""          # e.g. "root@pam!joulenap" — token for GC / status (DatastoreAdmin or similar)
+  api_token_secret: ""
+  # Wake-on-LAN
+  mac: ""                             # PBS NIC MAC, e.g. "00:11:22:33:44:55"
+  wol_broadcast_iface: ""             # interface on the Joulenap host used to send the magic packet, e.g. eth0 (blank = auto-detect)
+  wait_timeout: 180                   # seconds to wait for PBS to become reachable (per wake attempt)
+  wol_retries: 2                      # extra Wake-on-LAN re-sends if PBS doesn't come up in time
+  # Power-off (no PBS API for this -> SSH)
+  poweroff_task_wait: 600             # wait up to N s for a running PBS task to finish before power-off (0 = no wait)
+  ssh_user: root
+  ssh_key_path: /app/data/id_ed25519  # dedicated key; ideally restricted to a poweroff command on PBS
+
+# --- Backup job ---
+backup:
+  enabled: true
+  schedule: "0 4 * * *"     # cron (here: every day at 04:00)
+  mode: snapshot            # snapshot | suspend | stop
+  bwlimit: 0                # KiB/s, 0 = unlimited
+  min_free_percent: 0       # abort backup if PBS datastore free space is below this % (0 = disabled)
+  guests:
+    mode: all               # all | include | exclude
+    # auto_include_new applies when mode = all
+    auto_include_new: true
+    # used when mode = include / exclude
+    list: []                # e.g. [104, 106, 202]
+  retention:
+    keep_last: 0
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    keep_yearly: 0
+
+# --- Maintenance (run while PBS is awake, before power-off) ---
+maintenance:
+  gc:
+    enabled: true           # on: run GC after each backup, before power-off. no schedule of its own.
+  verify:
+    after_backup: false     # quick verify of new snapshots after each backup (PBS already awake)
+    enabled: false          # scheduled full verification on its own wake/verify/power-off cycle
+    schedule: "0 3 1 * *"   # cron for the scheduled verify (here: 03:00 on the 1st of each month)
+    reverify_days: 30       # re-verify snapshots older than N days; 0 = re-verify everything each run
+  history:
+    retention_days: 14      # auto-delete run history + activity-log entries older than N days (0 = keep forever)
+
+# --- Notifications ---
+# Delivered via Apprise (one engine, 100+ services). The friendly fields below
+# are turned into Apprise URLs under the hood; use custom_urls for anything else.
+notifications:
+  on_success: true
+  on_failure: true
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+  ntfy:
+    enabled: false
+    url: ""                          # self-hosted, e.g. http://192.168.1.30, or https://ntfy.sh
+    topic: ""                        # e.g. homelab
+  email:
+    enabled: false                  # SMTP client
+    smtp_host: ""
+    smtp_port: 587
+    smtp_user: ""
+    smtp_password: ""
+    from_addr: "joulenap@example.com"
+    to_addr: ""
+  discord:
+    enabled: false
+    webhook_url: ""
+  # Catch-all: any Apprise URL (https://github.com/caronc/apprise) or a plain webhook.
+  # e.g. tgram://token/chatid, ntfy://host/topic, gotify://host/token,
+  #      pover://user@token, slack://..., matrixs://..., json://your-endpoint
+  custom_urls: []

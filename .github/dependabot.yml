@@ -1,0 +1,40 @@
+# Automated dependency-update PRs + security alerts. Weekly, grouped, low-noise.
+# Pairs with the CI `security` job (pip-audit + npm audit): Dependabot proposes the
+# bumps, CI proves they still pass.
+#
+# Grouping strategy: each group bundles only minor + patch updates (the low-risk,
+# usually-safe bumps, incl. most security fixes) into a single weekly PR. Major
+# updates are deliberately left OUT of the groups, so each breaking major arrives
+# as its own individual PR that can be reviewed and tested on its own — this keeps
+# a security patch (e.g. vite 6.x) from riding in with an untested framework major
+# (e.g. React 19).
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      backend:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

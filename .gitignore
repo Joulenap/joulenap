@@ -1,0 +1,47 @@
+# --- Joulenap secrets & local state (NEVER commit) ---
+config.yaml
+*.key
+*.pem
+id_*
+.env
+.env.*
+data/
+design/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / frontend ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+frontend/dist/
+frontend/.vite/
+
+# --- Local planning notes (NEVER commit) ---
+TODO.md
+pre-release-steps.md
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

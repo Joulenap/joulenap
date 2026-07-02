@@ -1,0 +1,32 @@
+# Keep the build context small and never bake secrets or local state into the image.
+
+# Secrets / runtime state — must never enter the image
+config.yaml
+data/
+*.db
+*.sqlite*
+
+# Python
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+
+# Node / frontend build (deps reinstalled, dist rebuilt inside the image)
+**/node_modules/
+frontend/dist/
+
+# Not needed at runtime (Dockerfile only copies backend/, frontend/, README, config.example)
+.git/
+.github/
+.vscode/
+.idea/
+design/
+assets/
+docs/
+TODO.md
+pre-release-steps.md
+*.md
+!README.md

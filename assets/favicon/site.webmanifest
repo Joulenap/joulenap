@@ -1,0 +1,11 @@
+{
+  "name": "Joulenap",
+  "short_name": "Joulenap",
+  "icons": [
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" }
+  ],
+  "theme_color": "#1f1f1f",
+  "background_color": "#1f1f1f",
+  "display": "standalone"
+}

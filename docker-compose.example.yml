@@ -1,0 +1,27 @@
+# Joulenap — example docker-compose
+# Host networking is recommended so the container can send the Wake-on-LAN
+# magic packet on your LAN broadcast.
+#
+# You do NOT need to create config.yaml first: on first run the container seeds it
+# into ./data automatically, and you fill everything in through the setup wizard.
+
+services:
+  joulenap:
+    image: catubba/joulenap:latest
+    container_name: joulenap
+    restart: unless-stopped
+    network_mode: host          # needed for Wake-on-LAN broadcast on the LAN
+    environment:
+      # Neutral default. You pick your real timezone on the first-run screen (pre-detected
+      # from your browser), which sets app.timezone in config.yaml — and that takes
+      # precedence over this TZ. Without either, schedules run in UTC.
+      - TZ=Etc/UTC
+    volumes:
+      # One writable directory holds everything that must persist across updates:
+      # config.yaml (self-seeded on first run), SQLite history, logs, and the SSH key.
+      - ./data:/app/data
+    # If you prefer not to use host networking, drop network_mode and map the port,
+    # but then run the WoL from a host with LAN broadcast access. Match the container
+    # port to app.port in config.yaml (default 8080):
+    # ports:
+    #   - "8080:8080"

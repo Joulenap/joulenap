@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a problem with Joulenap
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please **redact secrets** (API tokens, SSH keys, bot tokens) from
+        anything you paste. For **security vulnerabilities**, do not file a public issue — see
+        [SECURITY.md](https://github.com/Joulenap/joulenap/blob/main/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Joulenap version
+      description: Shown in the UI footer.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running Joulenap?
+      options:
+        - Docker (compose)
+        - Docker (run)
+        - Proxmox LXC
+        - From source
+    validations:
+      required: true
+  - type: input
+    id: proxmox-versions
+    attributes:
+      label: Proxmox VE and PBS versions
+      placeholder: "PVE 8.2, PBS 3.2"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect to happen, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Container logs and/or activity-log lines. Redact secrets.
+      render: shell
+    validations:
+      required: false

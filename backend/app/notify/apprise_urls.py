@@ -1,0 +1,84 @@
+"""Turn the friendly notification config into Apprise URLs.
+
+The UI offers simple forms for the common channels (Telegram, ntfy, email, Discord);
+under the hood every channel — plus the free-form ``custom_urls`` list — becomes an
+Apprise URL so a single engine (apprise) does the delivery. A channel only
+contributes a URL when it is enabled *and* has the fields it needs, so a half-filled
+form silently produces nothing rather than a broken URL.
+"""
+
+from __future__ import annotations
+
+from urllib.parse import quote, urlencode, urlparse
+
+from ..config import (
+    DiscordConfig,
+    EmailConfig,
+    NotificationsConfig,
+    NtfyConfig,
+    TelegramConfig,
+)
+
+
+def build_urls(n: NotificationsConfig) -> list[str]:
+    """All Apprise URLs for the enabled channels, followed by any custom URLs."""
+    urls: list[str] = []
+    for builder, channel in (
+        (_telegram_url, n.telegram),
+        (_ntfy_url, n.ntfy),
+        (_email_url, n.email),
+        (_discord_url, n.discord),
+    ):
+        url = builder(channel) if channel.enabled else None
+        if url:
+            urls.append(url)
+    urls.extend(u for u in n.custom_urls if u.strip())
+    return urls
+
+
+def _telegram_url(t: TelegramConfig) -> str | None:
+    if not (t.bot_token and t.chat_id):
+        return None
+    return f"tgram://{t.bot_token}/{t.chat_id}"
+
+
+def _ntfy_url(n: NtfyConfig) -> str | None:
+    if not (n.url and n.topic):
+        return None
+    parsed = urlparse(n.url if "://" in n.url else f"http://{n.url}")
+    if not parsed.netloc:
+        return None
+    scheme = "ntfys" if parsed.scheme == "https" else "ntfy"
+    return f"{scheme}://{parsed.netloc}/{n.topic}"
+
+
+def _email_url(e: EmailConfig) -> str | None:
+    if not (e.smtp_host and e.from_addr and e.to_addr):
+        return None
+    auth = ""
+    if e.smtp_user:
+        auth = f"{quote(e.smtp_user, safe='')}:{quote(e.smtp_password, safe='')}@"
+    # 587 = STARTTLS, 465 = implicit TLS; anything else is treated as plain SMTP.
+    if e.smtp_port == 465:
+        scheme, mode = "mailtos", "ssl"
+    elif e.smtp_port == 587:
+        scheme, mode = "mailtos", "starttls"
+    else:
+        scheme, mode = "mailto", None
+    params = {"from": e.from_addr, "to": e.to_addr}
+    if mode:
+        params["mode"] = mode
+    return f"{scheme}://{auth}{e.smtp_host}:{e.smtp_port}?{urlencode(params)}"
+
+
+def _discord_url(d: DiscordConfig) -> str | None:
+    raw = d.webhook_url.strip()
+    if not raw:
+        return None
+    if raw.startswith("discord://"):
+        return raw
+    # Convert a Discord webhook URL (…/api/webhooks/{id}/{token}) to discord://{id}/{token}.
+    parts = [p for p in urlparse(raw).path.split("/") if p]
+    if len(parts) < 2:
+        return None
+    return f"discord://{parts[-2]}/{parts[-1]}"
