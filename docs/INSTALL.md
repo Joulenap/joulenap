@@ -77,6 +77,14 @@ apt update && apt install -y curl
 curl -fsSL https://get.docker.com | sh
 ```
 
+> **Seeing `perl: warning: Setting locale failed` messages?** Fresh Debian LXCs ship without a
+> generated locale — the warnings are harmless and the install still succeeds. To silence them:
+>
+> ```bash
+> update-locale LANG=C.UTF-8            # permanent, picked up by future logins
+> export LANG=C.UTF-8 LC_ALL=C.UTF-8    # applies to the current shell right away
+> ```
+
 That's it — Docker now runs inside your LXC.
 
 ### 5. Run Joulenap
