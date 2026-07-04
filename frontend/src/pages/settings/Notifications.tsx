@@ -12,6 +12,8 @@ import { c, ghostBtn, inputStyle, labelStyle, panelStyle, primaryBtn } from '../
 
 type ChannelKey = 'telegram' | 'ntfy' | 'email' | 'discord'
 
+const REDACTED = '***REDACTED***'
+
 export function Notifications() {
   const { t } = useTranslation()
   const { config, save } = useConfig()
@@ -20,10 +22,14 @@ export function Notifications() {
   const [busy, setBusy] = useState(false)
   const [savedNote, setSavedNote] = useState(false)
   const [testState, setTestState] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+  const [replacing, setReplacing] = useState(false)
 
   // (Re)seed the editable draft whenever the loaded config changes.
   useEffect(() => {
-    if (config) setDraft(structuredClone(config.notifications))
+    if (config) {
+      setDraft(structuredClone(config.notifications))
+      setReplacing(false)
+    }
   }, [config])
 
   const dirty = useMemo(
@@ -178,7 +184,8 @@ export function Notifications() {
           field(t(`${ns}.webhookUrl`), draft.discord.webhook_url, (v) => patchChannel('discord', { webhook_url: v }), { type: 'password' }),
         )}
 
-        {/* custom Apprise URLs */}
+        {/* custom Apprise URLs — write-only: existing entries arrive redacted, so we either
+            keep them untouched or replace the whole list (a mixed list is rejected server-side). */}
         <div style={{ background: c.panelAlt, border: `1px solid ${c.borderSoft}`, borderRadius: 10, padding: '16px 18px' }}>
           <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: c.textMid, marginBottom: 4 }}>
             {t(`${ns}.customTitle`)}
@@ -186,16 +193,31 @@ export function Notifications() {
           <span style={{ display: 'block', fontSize: 12, color: c.textFaint, marginBottom: 12 }}>
             {t(`${ns}.customDesc`)}
           </span>
-          <textarea
-            value={draft.custom_urls.join('\n')}
-            onChange={(e) =>
-              patch({ custom_urls: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean) })
-            }
-            rows={3}
-            spellCheck={false}
-            placeholder={'tgram://token/chatid\nntfy://host/topic\ngotify://host/token'}
-            style={{ ...inputStyle, resize: 'vertical', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
-          />
+          {draft.custom_urls.length > 0 && draft.custom_urls.every((u) => u === REDACTED) && !replacing ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <span style={{ fontSize: 13, color: c.textMuted }}>
+                {t(`${ns}.customConfigured`, { n: draft.custom_urls.length })}
+              </span>
+              <button
+                type="button"
+                onClick={() => { setReplacing(true); patch({ custom_urls: [] }) }}
+                style={{ ...ghostBtn, padding: '6px 14px' }}
+              >
+                {t(`${ns}.customReplace`)}
+              </button>
+            </div>
+          ) : (
+            <textarea
+              value={draft.custom_urls.join('\n')}
+              onChange={(e) =>
+                patch({ custom_urls: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean) })
+              }
+              rows={3}
+              spellCheck={false}
+              placeholder={'tgram://token/chatid\nntfy://host/topic\ngotify://host/token'}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
+            />
+          )}
         </div>
       </div>
 

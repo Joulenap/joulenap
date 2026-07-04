@@ -171,6 +171,8 @@
       "webhookUrl": "URL del webhook",
       "customTitle": "URL Apprise personalizzati",
       "customDesc": "Un URL per riga — qualsiasi servizio Apprise o webhook semplice.",
+      "customConfigured": "{{n}} URL personalizzati configurati",
+      "customReplace": "Sostituisci tutti",
       "apply": "Applica modifiche",
       "sendTest": "Invia prova",
       "saveFirst": "Salva le modifiche prima di inviare una prova.",
