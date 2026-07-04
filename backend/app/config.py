@@ -306,6 +306,37 @@ def redacted_dict(cfg: Config) -> dict[str, Any]:
 # --- merge incoming (partially-redacted) config -------------------------------
 
 
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``override`` onto ``base``.
+
+    Dict values are merged key-by-key; every other value — including lists — replaces the
+    value in ``base``. Returns a new top-level dict; ``base`` is not mutated at the top level.
+    """
+    out = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def enforce_server_managed(merged: dict[str, Any], current: Config) -> dict[str, Any]:
+    """Force server-owned secrets to their stored values, ignoring whatever the client sent.
+
+    ``app.secret_key`` (session-signing key) and ``app.auth.password_hash`` (owned solely by
+    PUT /api/account) must never be set or cleared through PUT /api/config. Mutates and
+    returns ``merged``.
+    """
+    app = merged.get("app")
+    if isinstance(app, dict):
+        app["secret_key"] = current.app.secret_key
+        auth = app.get("auth")
+        if isinstance(auth, dict):
+            auth["password_hash"] = current.app.auth.password_hash
+    return merged
+
+
 def restore_secrets(incoming: dict[str, Any], current: Config) -> dict[str, Any]:
     """Return a copy of ``incoming`` with redacted secrets filled in from ``current``.
 

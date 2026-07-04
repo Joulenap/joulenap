@@ -107,6 +107,37 @@ def test_config_put_rejects_invalid(app_ctx):
     assert client.put("/api/config", json=cfg).status_code == 422
 
 
+def test_config_put_partial_body_preserves_secrets(app_ctx, temp_config):
+    client, _app = app_ctx
+    before = load_config(temp_config)
+    # A partial body (only backup.schedule) must not reset anything else.
+    r = client.put("/api/config", json={"backup": {"schedule": "15 5 * * *"}})
+    assert r.status_code == 200
+
+    after = load_config(temp_config)
+    assert after.backup.schedule == "15 5 * * *"
+    assert after.backup.mode == before.backup.mode              # untouched within section
+    assert after.pve.api_token_secret == "test-pve-secret"      # secret survived
+    assert after.app.secret_key == before.app.secret_key
+    assert after.app.auth.password_hash == before.app.auth.password_hash
+    assert after.app.auth.username == before.app.auth.username
+
+
+def test_config_put_ignores_client_managed_secrets(app_ctx, temp_config):
+    client, _app = app_ctx
+    before = load_config(temp_config)
+    cfg = client.get("/api/config").json()
+    cfg["app"]["secret_key"] = "attacker-known-key"
+    cfg["app"]["auth"]["password_hash"] = ""   # attempt to reset to first-run
+    assert client.put("/api/config", json=cfg).status_code == 200
+
+    after = load_config(temp_config)
+    assert after.app.secret_key == before.app.secret_key
+    assert after.app.auth.password_hash == before.app.auth.password_hash
+    # Not dropped back to open first-run setup.
+    assert client.get("/api/auth/status").json()["setup_needed"] is False
+
+
 # --- scheduler toggle --------------------------------------------------------
 
 

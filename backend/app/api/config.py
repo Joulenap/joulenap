@@ -12,7 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 
-from ..config import Config, redacted_dict, restore_secrets
+from ..config import (
+    Config,
+    deep_merge,
+    enforce_server_managed,
+    redacted_dict,
+    restore_secrets,
+)
 from ..core.config_store import ConfigStore
 from .deps import get_config_store, get_scheduler, require_auth
 
@@ -30,8 +36,13 @@ def put_config(
     store: ConfigStore = Depends(get_config_store),
     scheduler=Depends(get_scheduler),
 ) -> dict[str, Any]:
-    # Restore any secret the client left as ***REDACTED*** before validating.
-    merged = restore_secrets(incoming, store.config)
+    # Deep-merge over the stored config so PUT means "apply these changes", not "replace
+    # everything": an omitted section/field keeps its current value (a partial body can no
+    # longer wipe secrets). Then resolve any ***REDACTED*** the client echoed back, and force
+    # server-managed secrets (secret_key, password_hash) to the stored values.
+    base = store.config.model_dump(mode="python")
+    merged = restore_secrets(deep_merge(base, incoming), store.config)
+    merged = enforce_server_managed(merged, store.config)
     try:
         new_config = Config.model_validate(merged)
     except ValidationError as exc:
