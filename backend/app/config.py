@@ -376,6 +376,9 @@ def _unmask(value: Any, current: Any) -> Any:
         #   all ***REDACTED** -> unchanged: keep the full stored list
         #   all real values   -> replace the whole list
         #   mixed             -> ambiguous (can't map a sentinel to a stored entry) -> reject
+        # Load-bearing order: the empty-list check MUST precede the all-sentinel check
+        # below — `all(... for v in [])` is vacuously True, so reordering would silently
+        # turn "clear" into "keep the stored list". Do not reorder.
         if not value:
             return []
         if all(v == REDACTED for v in value):

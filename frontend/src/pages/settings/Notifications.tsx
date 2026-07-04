@@ -207,16 +207,29 @@ export function Notifications() {
               </button>
             </div>
           ) : (
-            <textarea
-              value={draft.custom_urls.join('\n')}
-              onChange={(e) =>
-                patch({ custom_urls: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean) })
-              }
-              rows={3}
-              spellCheck={false}
-              placeholder={'tgram://token/chatid\nntfy://host/topic\ngotify://host/token'}
-              style={{ ...inputStyle, resize: 'vertical', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
-            />
+            <>
+              <textarea
+                value={draft.custom_urls.join('\n')}
+                onChange={(e) =>
+                  patch({ custom_urls: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean) })
+                }
+                rows={3}
+                spellCheck={false}
+                placeholder={'tgram://token/chatid\nntfy://host/topic\ngotify://host/token'}
+                style={{ ...inputStyle, resize: 'vertical', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
+              />
+              {/* Only reachable after "Replace all" cleared a stored (redacted) list: let the
+                  user back out and keep the existing URLs instead of wiping them on save. */}
+              {replacing && config.notifications.custom_urls.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setReplacing(false); patch({ custom_urls: config.notifications.custom_urls }) }}
+                  style={{ ...ghostBtn, padding: '6px 14px', marginTop: 8, alignSelf: 'flex-start' }}
+                >
+                  {t(`${ns}.customCancel`)}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

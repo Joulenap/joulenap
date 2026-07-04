@@ -374,6 +374,16 @@ def test_account_update_empty_password_keeps_current(app_ctx, temp_config):
     assert login.status_code == 200
 
 
+def test_account_update_omitted_password_keeps_current(app_ctx, temp_config):
+    client, _app = app_ctx
+    # Password key entirely absent (not just "") also means "keep current".
+    r = client.put("/api/account", json={"username": "admin4"})
+    assert r.status_code == 200
+    client.post("/api/logout")
+    login = client.post("/api/login", json={"username": "admin4", "password": "secret"})
+    assert login.status_code == 200
+
+
 def test_account_update_short_password_rejected(app_ctx, temp_config):
     client, _app = app_ctx
     r = client.put("/api/account", json={"username": "admin", "password": "ab"})
