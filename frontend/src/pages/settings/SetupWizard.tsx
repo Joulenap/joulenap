@@ -644,10 +644,10 @@ export function SetupWizard() {
 
       {/* Token setup first + default: "no root required" is the more trustworthy opener. */}
       <div style={{ display: 'inline-flex', background: c.inputBg, border: `1px solid ${c.inputBorder}`, borderRadius: 8, padding: 3, gap: 3, margin: '16px 0 14px' }}>
-        <button style={seg(!rapido)} onClick={() => setW(fresh('manuale'))}>
+        <button style={seg(!rapido)} onClick={() => setW((s) => ({ ...s, mode: 'manuale' }))}>
           {t('settings.setup.manual')}
         </button>
-        <button style={seg(rapido)} onClick={() => setW(fresh('rapido'))}>
+        <button style={seg(rapido)} onClick={() => setW((s) => ({ ...s, mode: 'rapido' }))}>
           {t('settings.setup.quick')}
         </button>
       </div>
