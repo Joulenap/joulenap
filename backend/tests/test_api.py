@@ -48,9 +48,12 @@ def _wait_run(client, run_id, *, timeout=5.0):
 
 def test_protected_endpoints_require_auth(temp_config, temp_db):
     with TestClient(create_app()) as client:
-        for path in ("/api/status", "/api/config", "/api/guests", "/api/runs"):
-            assert client.get(path).status_code == 401
-        assert client.post("/api/backup/run").status_code == 401
+        for path in ("/api/status", "/api/config", "/api/guests", "/api/runs",
+                     "/api/logs", "/api/tasklog"):
+            assert client.get(path).status_code == 401, path
+        for path in ("/api/backup/run", "/api/gc/run", "/api/power/on", "/api/power/off",
+                     "/api/notify/test", "/api/scheduler/toggle", "/api/wol/test"):
+            assert client.post(path).status_code == 401, path
 
 
 # --- status ------------------------------------------------------------------
