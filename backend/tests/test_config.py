@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from app import config as cfgmod
 from app import paths
-from app.config import Config, load_config, redact, redacted_dict, save_config
+from app.config import Config, load_config, redact, redacted_dict, restore_secrets, save_config
 
 EXAMPLE = paths.config_example_path()
 
@@ -96,6 +96,46 @@ def test_redact_does_not_mutate_source():
     data = cfg.model_dump(mode="python")
     _ = redact(data)
     assert data["app"]["secret_key"] == "CHANGE_ME"  # untouched
+
+
+def test_restore_custom_urls_all_sentinels_keeps_stored():
+    cfg = Config()
+    cfg.notifications.custom_urls = ["gotify://h/a", "gotify://h/b"]
+    incoming = {"notifications": {"custom_urls": [cfgmod.REDACTED, cfgmod.REDACTED]}}
+    out = restore_secrets(incoming, cfg)
+    assert out["notifications"]["custom_urls"] == ["gotify://h/a", "gotify://h/b"]
+
+
+def test_restore_custom_urls_all_real_replaces():
+    cfg = Config()
+    cfg.notifications.custom_urls = ["gotify://h/a"]
+    incoming = {"notifications": {"custom_urls": ["ntfy://x/y", "ntfy://x/z"]}}
+    out = restore_secrets(incoming, cfg)
+    assert out["notifications"]["custom_urls"] == ["ntfy://x/y", "ntfy://x/z"]
+
+
+def test_restore_custom_urls_empty_clears():
+    cfg = Config()
+    cfg.notifications.custom_urls = ["gotify://h/a"]
+    incoming = {"notifications": {"custom_urls": []}}
+    out = restore_secrets(incoming, cfg)
+    assert out["notifications"]["custom_urls"] == []
+
+
+def test_restore_custom_urls_mixed_raises():
+    cfg = Config()
+    cfg.notifications.custom_urls = ["gotify://h/a", "gotify://h/b"]
+    incoming = {"notifications": {"custom_urls": [cfgmod.REDACTED, "ntfy://new"]}}
+    with pytest.raises(cfgmod.RedactionError):
+        restore_secrets(incoming, cfg)
+
+
+def test_restore_secret_empty_clears_scalar():
+    cfg = Config()
+    cfg.pve.api_token_secret = "tok"
+    incoming = {"pve": {"api_token_secret": ""}}
+    out = restore_secrets(incoming, cfg)
+    assert out["pve"]["api_token_secret"] == ""
 
 
 def test_empty_secret_not_masked():

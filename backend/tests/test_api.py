@@ -138,6 +138,25 @@ def test_config_put_ignores_client_managed_secrets(app_ctx, temp_config):
     assert client.get("/api/auth/status").json()["setup_needed"] is False
 
 
+def test_config_put_custom_urls_replace_keep_and_mixed(app_ctx, temp_config):
+    client, _app = app_ctx
+    cfg = client.get("/api/config").json()
+    cfg["notifications"]["custom_urls"] = ["gotify://h/t1", "gotify://h/t2"]
+    assert client.put("/api/config", json=cfg).status_code == 200
+    assert load_config(temp_config).notifications.custom_urls == ["gotify://h/t1", "gotify://h/t2"]
+
+    # GET masks them; echoing the all-sentinel list back keeps the stored URLs.
+    masked = client.get("/api/config").json()
+    assert masked["notifications"]["custom_urls"] == ["***REDACTED***", "***REDACTED***"]
+    assert client.put("/api/config", json=masked).status_code == 200
+    assert load_config(temp_config).notifications.custom_urls == ["gotify://h/t1", "gotify://h/t2"]
+
+    # A mixed sentinel/real list is rejected rather than silently dropping an entry.
+    mixed = client.get("/api/config").json()
+    mixed["notifications"]["custom_urls"] = ["***REDACTED***", "gotify://h/t3"]
+    assert client.put("/api/config", json=mixed).status_code == 422
+
+
 # --- scheduler toggle --------------------------------------------------------
 
 

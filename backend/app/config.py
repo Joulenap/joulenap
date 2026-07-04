@@ -337,6 +337,10 @@ def enforce_server_managed(merged: dict[str, Any], current: Config) -> dict[str,
     return merged
 
 
+class RedactionError(ValueError):
+    """A redacted secret could not be resolved back to a real value (ambiguous input)."""
+
+
 def restore_secrets(incoming: dict[str, Any], current: Config) -> dict[str, Any]:
     """Return a copy of ``incoming`` with redacted secrets filled in from ``current``.
 
@@ -366,11 +370,22 @@ def _restore_in_place(node: Any, current: Any) -> Any:
 
 def _unmask(value: Any, current: Any) -> Any:
     if isinstance(value, list):
-        cur = current if isinstance(current, list) else []
-        return [
-            (cur[i] if i < len(cur) else "") if v == REDACTED else v
-            for i, v in enumerate(value)
-        ]
+        # List secrets (custom_urls) are write-only and all-or-nothing to avoid the
+        # index-positional corruption of the old per-entry masking:
+        #   []                -> clear
+        #   all ***REDACTED** -> unchanged: keep the full stored list
+        #   all real values   -> replace the whole list
+        #   mixed             -> ambiguous (can't map a sentinel to a stored entry) -> reject
+        if not value:
+            return []
+        if all(v == REDACTED for v in value):
+            return list(current) if isinstance(current, list) else []
+        if any(v == REDACTED for v in value):
+            raise RedactionError(
+                "custom_urls must be sent in full (all real values) or left unchanged "
+                "(all redacted); a mixed list is ambiguous."
+            )
+        return value
     if value == REDACTED:
         return current if current is not None else ""
     return value

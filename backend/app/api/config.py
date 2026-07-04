@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from ..config import (
     Config,
+    RedactionError,
     deep_merge,
     enforce_server_managed,
     redacted_dict,
@@ -41,7 +42,10 @@ def put_config(
     # longer wipe secrets). Then resolve any ***REDACTED*** the client echoed back, and force
     # server-managed secrets (secret_key, password_hash) to the stored values.
     base = store.config.model_dump(mode="python")
-    merged = restore_secrets(deep_merge(base, incoming), store.config)
+    try:
+        merged = restore_secrets(deep_merge(base, incoming), store.config)
+    except RedactionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     merged = enforce_server_managed(merged, store.config)
     try:
         new_config = Config.model_validate(merged)
