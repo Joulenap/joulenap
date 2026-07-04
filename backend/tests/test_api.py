@@ -359,3 +359,19 @@ def test_account_update_changes_username_and_password(app_ctx, temp_config):
     client.post("/api/logout")
     login = client.post("/api/login", json={"username": "newadmin", "password": "freshpass"})
     assert login.status_code == 200
+
+
+def test_account_update_empty_password_keeps_current(app_ctx, temp_config):
+    client, _app = app_ctx
+    r = client.put("/api/account", json={"username": "admin2", "password": ""})
+    assert r.status_code == 200
+    client.post("/api/logout")
+    # Old password still valid under the new username => password unchanged.
+    login = client.post("/api/login", json={"username": "admin2", "password": "secret"})
+    assert login.status_code == 200
+
+
+def test_account_update_short_password_rejected(app_ctx, temp_config):
+    client, _app = app_ctx
+    r = client.put("/api/account", json={"username": "admin", "password": "ab"})
+    assert r.status_code == 422

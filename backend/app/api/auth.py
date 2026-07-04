@@ -7,7 +7,7 @@ Mirrors the design's auth screen: a fresh install (empty password_hash) shows
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..core import security
 from ..core.config_store import ConfigStore
@@ -115,8 +115,16 @@ def me(user: str = security.CurrentUser) -> UserInfo:
 
 class AccountUpdate(BaseModel):
     username: str = Field(min_length=3)
-    # Optional: empty/omitted keeps the current password (the design's "leave empty").
-    password: str | None = Field(default=None, min_length=4)
+    # Optional: empty string / null / omitted all mean "keep the current password"
+    # (the design's "leave empty"). Length is enforced only for a real new password.
+    password: str | None = None
+
+    @field_validator("password")
+    @classmethod
+    def _min_len_when_set(cls, v: str | None) -> str | None:
+        if v and len(v) < 4:
+            raise ValueError("password must be at least 4 characters")
+        return v
 
 
 @router.put("/account", response_model=UserInfo)
