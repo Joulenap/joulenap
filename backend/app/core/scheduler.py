@@ -19,6 +19,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from ..config import Config
 from ..db.models import RunTrigger
+from ..jobs import AlreadyRunningError
 
 log = logging.getLogger("joulenap.scheduler")
 
@@ -168,16 +169,20 @@ class Scheduler:
         log.info("Armed scheduled verify job: %s", v.schedule)
 
     def _fire_backup(self) -> None:
-        # Swallow AlreadyRunningError etc. so a scheduled fire never crashes the
-        # scheduler thread; the run itself is recorded to the DB by the service.
+        # A scheduled fire must never crash the scheduler thread; the run itself is recorded
+        # to the DB by the service. An "already running" skip is expected, not an error.
         try:
             self._run_backup(RunTrigger.SCHEDULED)
+        except AlreadyRunningError:
+            log.info("Scheduled backup skipped: a run is already in progress")
         except Exception:  # noqa: BLE001
             log.exception("Scheduled backup run failed to start")
 
     def _fire_verify(self) -> None:
         try:
             self._run_verify(RunTrigger.SCHEDULED)  # type: ignore[misc]  # guarded by _rearm_verify
+        except AlreadyRunningError:
+            log.info("Scheduled verify skipped: a run is already in progress")
         except Exception:  # noqa: BLE001
             log.exception("Scheduled verify run failed to start")
 

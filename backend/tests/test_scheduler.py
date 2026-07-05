@@ -190,6 +190,25 @@ def test_fire_verify_swallows_errors():
     sched._fire_verify()  # must not propagate
 
 
+def test_fire_backup_logs_already_running_as_info(caplog):
+    import logging
+
+    from app.jobs import AlreadyRunningError
+
+    def already_running(_trigger):
+        raise AlreadyRunningError("in progress")
+
+    sched = Scheduler(already_running)
+    with caplog.at_level(logging.INFO, logger="joulenap.scheduler"):
+        sched._fire_backup()  # must not raise
+
+    assert any(
+        r.levelno == logging.INFO and "already in progress" in r.getMessage()
+        for r in caplog.records
+    )
+    assert not any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
 # --- day-of-week mapping (the cron-vs-APScheduler numbering bug) --------------
 
 
