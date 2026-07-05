@@ -15,7 +15,7 @@ from ..connectors.pbs import DatastoreStatus
 from ..connectors.pve import PveClient, build_prune_string
 from ..db import session_scope
 from ..db.guest_backups import upsert_last_backups
-from ..db.models import LogLevel, RunStatus, StepName
+from ..db.models import LogLevel, RunStatus, StepName, StepStatus
 from .deps import CycleDeps
 from .recorder import RunRecorder
 
@@ -231,8 +231,15 @@ def _poweroff(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
             recorder.skip_step(StepName.POWEROFF, "PBS busy with another task; left on")
             return
 
-    with recorder.step(StepName.POWEROFF):
-        deps.build_power(config).poweroff()
+    with recorder.step(StepName.POWEROFF) as step:
+        try:
+            deps.build_power(config).poweroff()
+        except Exception as exc:
+            # Best-effort: the backup already succeeded and its data is safe, so a failed
+            # power-off must not fail the run. Record the step FAILURE (non-fatal) and warn;
+            # the PBS is simply left on (same end state as the "PBS busy" skip above).
+            step.status = StepStatus.FAILURE
+            recorder.log(LogLevel.WARN, f"power-off failed, PBS left on: {exc}")
 
 
 def run_backup_cycle(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:

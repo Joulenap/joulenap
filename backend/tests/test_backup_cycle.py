@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from fakes import FakePbs, FakePve, make_deps
+from fakes import FakePbs, FakePower, FakePve, make_deps
 from sqlalchemy import select
 
 from app.config import Config
 from app.connectors.pve import Guest
 from app.db import session_scope
-from app.db.models import Run, RunKind, RunStatus, RunTrigger, StepName, StepStatus
+from app.db.models import (
+    LogEvent,
+    LogLevel,
+    Run,
+    RunKind,
+    RunStatus,
+    RunTrigger,
+    StepName,
+    StepStatus,
+)
 from app.jobs.backup_cycle import run_backup_cycle
 from app.jobs.recorder import RunRecorder
 
@@ -380,3 +389,19 @@ def test_include_mode_with_no_guests_aborts(temp_db):
     assert status == RunStatus.ABORTED
     assert steps[StepName.BACKUP] == StepStatus.FAILURE
     assert power.powered_off is False
+
+
+def test_poweroff_failure_is_non_fatal(temp_db):
+    # A power-off that raises after a good backup must NOT fail the run: data is safe, the
+    # POWEROFF step is recorded FAILURE, a WARN is logged, and the PBS is left on.
+    deps, _pve, _pbs, power = make_deps(power=FakePower(fail=True))
+    run_id = _run(_config(), deps)
+
+    status, steps = _load(run_id)
+    assert status == RunStatus.SUCCESS
+    assert steps[StepName.POWEROFF] == StepStatus.FAILURE
+    assert power.powered_off is False
+
+    with session_scope() as session:
+        logs = session.scalars(select(LogEvent).where(LogEvent.run_id == run_id)).all()
+    assert any(lg.level == LogLevel.WARN and "power-off failed" in lg.message for lg in logs)

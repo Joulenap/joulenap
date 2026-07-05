@@ -127,10 +127,13 @@ class FakePbs:
 
 
 class FakePower:
-    def __init__(self):
+    def __init__(self, *, fail: bool = False):
         self.powered_off = False
+        self.fail = fail
 
     def poweroff(self) -> None:
+        if self.fail:
+            raise RuntimeError("poweroff failed")
         self.powered_off = True
 
 
