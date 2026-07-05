@@ -103,9 +103,7 @@ class Run(Base):
     finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
 
     # Result summary (populated as the job progresses; nullable while running).
-    bytes_total: Mapped[int | None] = mapped_column(default=None)
     guests_ok: Mapped[int | None] = mapped_column(default=None)
-    guests_failed: Mapped[int | None] = mapped_column(default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
 
     logs: Mapped[list[LogEvent]] = relationship(

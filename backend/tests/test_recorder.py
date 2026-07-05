@@ -55,3 +55,10 @@ def test_recorder_closes_session_if_opening_commit_fails():
     with pytest.raises(RuntimeError):
         RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL, session_factory=lambda: spy)
     assert spy.closed is True
+
+
+def test_run_has_no_dead_summary_columns():
+    # bytes_total / guests_failed were never populated (JN-008) — they must not exist.
+    assert not hasattr(Run, "bytes_total")
+    assert not hasattr(Run, "guests_failed")
+    assert hasattr(Run, "guests_ok")  # the one that IS used stays

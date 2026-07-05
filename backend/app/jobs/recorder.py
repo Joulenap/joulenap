@@ -130,13 +130,11 @@ class RunRecorder:
 
     # --- finalisation --------------------------------------------------------
 
-    def finish(self, status: RunStatus, *, error: str | None = None, **summary: int) -> None:
+    def finish(self, status: RunStatus, *, error: str | None = None) -> None:
         self.run.status = status
         self.run.finished_at = _utcnow()
         if error is not None:
             self.run.error = error
-        for key, value in summary.items():
-            setattr(self.run, key, value)
         self._session.commit()
         self._finished = True
 
