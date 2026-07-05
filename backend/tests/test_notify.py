@@ -8,7 +8,7 @@ from fakes import make_deps
 from fastapi.testclient import TestClient
 
 from app.config import Config
-from app.db.models import Run, RunKind, RunStatus, RunTrigger
+from app.db.models import Run, RunKind, RunStatus, RunStep, RunTrigger, StepName, StepStatus
 from app.jobs.backup_cycle import run_backup_cycle
 from app.jobs.recorder import RunRecorder
 from app.main import create_app
@@ -140,6 +140,35 @@ def test_run_message_failure_includes_error_and_locale():
     title, body = build_run_message(cfg, _run(RunStatus.FAILURE, error="vzdump failed"))
     assert "fallito" in title
     assert "vzdump failed" in body
+
+
+def test_run_message_flags_pbs_left_on_when_poweroff_failed():
+    run = _run(RunStatus.SUCCESS)
+    run.steps = [RunStep(name=StepName.POWEROFF, status=StepStatus.FAILURE)]
+    _title, body = build_run_message(Config(), run)
+    assert "left powered on" in body
+
+
+def test_run_message_flags_pbs_left_on_when_poweroff_skipped():
+    run = _run(RunStatus.SUCCESS)
+    run.steps = [RunStep(name=StepName.POWEROFF, status=StepStatus.SKIPPED)]
+    _title, body = build_run_message(Config(), run)
+    assert "left powered on" in body
+
+
+def test_run_message_no_pbs_line_when_poweroff_succeeded():
+    run = _run(RunStatus.SUCCESS)
+    run.steps = [RunStep(name=StepName.POWEROFF, status=StepStatus.SUCCESS)]
+    _title, body = build_run_message(Config(), run)
+    assert "left powered on" not in body
+
+
+def test_run_message_no_pbs_line_on_failure():
+    # A failure notification never gets the success-only "left on" line.
+    run = _run(RunStatus.FAILURE, error="boom")
+    run.steps = [RunStep(name=StepName.POWEROFF, status=StepStatus.FAILURE)]
+    _title, body = build_run_message(Config(), run)
+    assert "left powered on" not in body
 
 
 def test_test_message_falls_back_to_english_for_unknown_language():

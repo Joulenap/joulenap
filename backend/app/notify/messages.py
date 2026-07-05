@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..config import Config
-from ..db.models import Run, RunStatus
+from ..db.models import Run, RunStatus, StepName, StepStatus
 
 if TYPE_CHECKING:
     from ..connectors.pbs import DatastoreStatus
@@ -34,6 +34,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "free": "free",
             "error": "Error",
             "status": "Status",
+            "pbs_left_on": "⚠️ PBS left powered on — check it",
         },
     },
     "it": {
@@ -52,6 +53,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "free": "liberi",
             "error": "Errore",
             "status": "Stato",
+            "pbs_left_on": "⚠️ PBS lasciato acceso — controllalo",
         },
     },
 }
@@ -88,6 +90,14 @@ def human_bytes(n: int) -> str:
     return f"{size:.1f} PiB"
 
 
+def _pbs_left_on(run: Run) -> bool:
+    """True if the cycle finished without powering the PBS off — a POWEROFF step exists but
+    didn't succeed (poweroff failed, or was skipped because the PBS was busy)."""
+    return any(
+        s.name == StepName.POWEROFF and s.status != StepStatus.SUCCESS for s in run.steps
+    )
+
+
 def build_run_message(
     config: Config, run: Run, datastore: DatastoreStatus | None = None
 ) -> tuple[str, str]:
@@ -112,6 +122,9 @@ def build_run_message(
         )
     if run.error:
         lines.append(f"{labels['error']}: {run.error}")
+
+    if event == "success" and _pbs_left_on(run):
+        lines.append(labels["pbs_left_on"])
 
     return pack[event]["title"], "\n".join(lines)
 
