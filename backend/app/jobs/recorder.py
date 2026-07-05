@@ -44,9 +44,14 @@ class RunRecorder:
         session_factory: Callable[[], Session] = make_session,
     ):
         self._session = session_factory()
-        self.run = Run(kind=kind, trigger=trigger, status=RunStatus.RUNNING)
-        self._session.add(self.run)
-        self._session.commit()
+        try:
+            self.run = Run(kind=kind, trigger=trigger, status=RunStatus.RUNNING)
+            self._session.add(self.run)
+            self._session.commit()
+        except Exception:
+            # A DB error at run start (e.g. locked) must not leak the just-opened session.
+            self._session.close()
+            raise
         self._finished = False
 
     @property
@@ -97,9 +102,13 @@ class RunRecorder:
             self._session.commit()
             raise
         else:
-            step.status = StepStatus.SUCCESS
             step.finished_at = _utcnow()
-            self.log(LogLevel.OK, f"{name.value}: done")
+            # Only auto-complete to SUCCESS if the body didn't set a status itself — this lets
+            # a caller record a failed-but-non-fatal step (e.g. a best-effort power-off) by
+            # setting step.status = FAILURE and returning normally.
+            if step.status == StepStatus.RUNNING:
+                step.status = StepStatus.SUCCESS
+                self.log(LogLevel.OK, f"{name.value}: done")
             self._session.commit()
 
     def skip_step(self, name: StepName, detail: str | None = None) -> None:
