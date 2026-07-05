@@ -239,6 +239,7 @@ def _poweroff(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
             # power-off must not fail the run. Record the step FAILURE (non-fatal) and warn;
             # the PBS is simply left on (same end state as the "PBS busy" skip above).
             step.status = StepStatus.FAILURE
+            step.detail = str(exc)  # surface the reason in the step row, not just the log
             recorder.log(LogLevel.WARN, f"power-off failed, PBS left on: {exc}")
 
 

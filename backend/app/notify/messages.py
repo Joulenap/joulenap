@@ -92,7 +92,10 @@ def human_bytes(n: int) -> str:
 
 def _pbs_left_on(run: Run) -> bool:
     """True if the cycle finished without powering the PBS off — a POWEROFF step exists but
-    didn't succeed (poweroff failed, or was skipped because the PBS was busy)."""
+    didn't succeed (poweroff failed, or was skipped because the PBS was busy).
+
+    Only ever called on a success run (the caller guards with ``event == "success"``), so a
+    failed/aborted run — which may have no POWEROFF step at all — never reaches here."""
     return any(
         s.name == StepName.POWEROFF and s.status != StepStatus.SUCCESS for s in run.steps
     )

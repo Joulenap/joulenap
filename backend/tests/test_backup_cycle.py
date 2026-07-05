@@ -14,6 +14,7 @@ from app.db.models import (
     Run,
     RunKind,
     RunStatus,
+    RunStep,
     RunTrigger,
     StepName,
     StepStatus,
@@ -404,4 +405,11 @@ def test_poweroff_failure_is_non_fatal(temp_db):
 
     with session_scope() as session:
         logs = session.scalars(select(LogEvent).where(LogEvent.run_id == run_id)).all()
+        poweroff = session.scalars(
+            select(RunStep).where(
+                RunStep.run_id == run_id, RunStep.name == StepName.POWEROFF
+            )
+        ).one()
+        # The failure reason lands in the step row (for the run-history UI), not just the log.
+        assert poweroff.detail == "poweroff failed"
     assert any(lg.level == LogLevel.WARN and "power-off failed" in lg.message for lg in logs)
