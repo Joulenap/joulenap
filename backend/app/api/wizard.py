@@ -187,6 +187,31 @@ def ssh_install(body: SshInstallRequest) -> dict[str, Any]:
     )
 
 
+class SshHostkeyRequest(BaseModel):
+    host: str = Field(min_length=1)
+    port: int = Field(default=22, ge=1, le=65535)
+
+
+@router.post("/ssh/hostkey")
+def ssh_hostkey(body: SshHostkeyRequest) -> dict[str, Any]:
+    return _connector_call(wizard.ssh_hostkey, host=body.host, port=body.port)
+
+
+class SshTrustRequest(BaseModel):
+    host: str = Field(min_length=1)
+    key_type: str = Field(min_length=1)
+    key_base64: str = Field(min_length=1)
+    port: int = Field(default=22, ge=1, le=65535)
+
+
+@router.post("/ssh/trust")
+def ssh_trust(body: SshTrustRequest) -> dict[str, Any]:
+    return _connector_call(
+        wizard.ssh_trust, host=body.host, key_type=body.key_type,
+        key_base64=body.key_base64, port=body.port,
+    )
+
+
 # --- reset setup -------------------------------------------------------------
 
 # Connection-identity fields the wizard populates. Reset blanks exactly these so the wizard

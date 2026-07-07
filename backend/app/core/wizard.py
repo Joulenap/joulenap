@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from ..connectors import net, tls
+from ..connectors import net, ssh, tls
 from ..connectors.discovery import derive_pbs_from_storage, detect_mac
 from ..connectors.errors import ApiError
 from ..connectors.pbs import get_fingerprint
@@ -164,3 +164,16 @@ def ssh_install(
     """Install the public key into the PBS user's authorized_keys over SSH."""
     install_public_key(host, user, password, public_key, port)
     return {"installed": True}
+
+
+def ssh_hostkey(*, host: str, port: int = 22) -> dict[str, Any]:
+    """Scan the PBS SSH host key so the user can confirm its fingerprint before we send the
+    root password. Returns the key material + a SHA256 fingerprint."""
+    key_type, key_base64, fingerprint = ssh.scan_host_key(host, port)
+    return {"key_type": key_type, "key_base64": key_base64, "fingerprint": fingerprint}
+
+
+def ssh_trust(*, host: str, key_type: str, key_base64: str, port: int = 22) -> dict[str, Any]:
+    """Persist a user-confirmed PBS host key to known_hosts (so later connections verify it)."""
+    ssh.save_host_key(host, key_type, key_base64, port=port)
+    return {"trusted": True}
