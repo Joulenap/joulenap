@@ -94,3 +94,74 @@ def test_connect_uses_strict_client(monkeypatch, tmp_path):
     client = p._connect()
     assert used["connected"] and used["made"]
     client.close()
+
+
+def test_connect_tofu_adds_unknown_host_key(monkeypatch, tmp_path, caplog):
+    """When the host key isn't yet known, _connect should scan it, save it (TOFU-add),
+    warn, and then still proceed to connect."""
+    used = {}
+
+    class FakeClient:
+        def connect(self, **kw):
+            used["connected"] = True
+
+        def close(self):
+            pass
+
+    saved = {}
+
+    def fake_save_host_key(host, key_type, key_b64, port=22):
+        saved["args"] = (host, key_type, key_b64, port)
+
+    monkeypatch.setattr(power.ssh, "host_key_known", lambda *a, **k: False)
+    monkeypatch.setattr(
+        power.ssh,
+        "scan_host_key",
+        lambda host, port, timeout: ("ssh-ed25519", "AAAA", "SHA256:xx"),
+    )
+    monkeypatch.setattr(power.ssh, "save_host_key", fake_save_host_key)
+    monkeypatch.setattr(power.ssh, "strict_client", lambda: FakeClient())
+
+    p = power.PbsPower(host="pbs.local", key_path=str(tmp_path / "k"))
+    with caplog.at_level("WARNING"):
+        client = p._connect()
+
+    assert saved["args"] == ("pbs.local", "ssh-ed25519", "AAAA", 22)
+    assert used.get("connected") is True
+    assert any("Trusted PBS SSH host key on first use" in rec.message for rec in caplog.records)
+    client.close()
+
+
+def test_connect_tofu_scan_failure_is_non_fatal(monkeypatch, tmp_path, caplog):
+    """If scanning the host key fails, _connect must swallow the error (best-effort)
+    and still proceed to connect."""
+    used = {}
+
+    class FakeClient:
+        def connect(self, **kw):
+            used["connected"] = True
+
+        def close(self):
+            pass
+
+    def fake_scan_host_key(host, port, timeout):
+        raise RuntimeError("no route")
+
+    save_called = {"called": False}
+
+    def fake_save_host_key(host, key_type, key_b64, port=22):
+        save_called["called"] = True
+
+    monkeypatch.setattr(power.ssh, "host_key_known", lambda *a, **k: False)
+    monkeypatch.setattr(power.ssh, "scan_host_key", fake_scan_host_key)
+    monkeypatch.setattr(power.ssh, "save_host_key", fake_save_host_key)
+    monkeypatch.setattr(power.ssh, "strict_client", lambda: FakeClient())
+
+    p = power.PbsPower(host="pbs.local", key_path=str(tmp_path / "k"))
+    with caplog.at_level("WARNING"):
+        client = p._connect()
+
+    assert used.get("connected") is True
+    assert save_called["called"] is False
+    assert any("Could not pre-scan PBS host key" in rec.message for rec in caplog.records)
+    client.close()
