@@ -305,13 +305,20 @@
         "verify": "Mark as installed",
         "back": "Back",
         "copy": "Copy",
-        "copied": "✓ Copied"
+        "copied": "✓ Copied",
+        "scanHostKey": "Detect host key",
+        "scanning": "Detecting…",
+        "confirmHostKey": "Confirm & trust"
       },
       "fieldsAuthLine": "Line to add to authorized_keys",
+      "ssh": {
+        "hostKeyWhy": "Confirm this matches your PBS's SSH host key before the password is sent."
+      },
       "hints": {
         "wolIface": "Interface Joulenap sends the Wake-on-LAN packet from; once the PBS host is set the packet is scoped to its subnet, not the whole network.",
         "pbsRoot": "Used once to create the PBS API token and install the shutdown SSH key, then discarded.",
-        "sshManual": "Add the line below to /root/.ssh/authorized_keys on the PBS, then mark as installed."
+        "sshManual": "Add the line below to /root/.ssh/authorized_keys on the PBS, then mark as installed.",
+        "fingerprintPinned": "This fingerprint is pinned — connections are rejected if it changes."
       }
     }
   }

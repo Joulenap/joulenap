@@ -35,6 +35,10 @@ export interface Wiz {
   sshKey: string
   sshKeyLine: string
   sshKeyPath: string
+  sshHostKeyType: string
+  sshHostKeyB64: string
+  sshHostFp: string
+  sshHostConfirmed: boolean
   checks: { pve: boolean; pbs: boolean; token: boolean; wol: boolean; ssh: boolean }
 }
 
@@ -64,6 +68,10 @@ export function fresh(mode: Mode): Wiz {
     sshKey: '',
     sshKeyLine: '',
     sshKeyPath: '',
+    sshHostKeyType: '',
+    sshHostKeyB64: '',
+    sshHostFp: '',
+    sshHostConfirmed: false,
     checks: { pve: false, pbs: false, token: false, wol: false, ssh: false },
   }
 }

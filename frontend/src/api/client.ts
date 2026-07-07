@@ -104,5 +104,11 @@ export const api = {
     ),
   wizardSshInstall: (body: Record<string, unknown>) =>
     req<{ installed: boolean }>('POST', '/wizard/ssh/install', body),
+  wizardSshHostkey: (host: string, port = 22) =>
+    req<{ key_type: string; key_base64: string; fingerprint: string }>(
+      'POST', '/wizard/ssh/hostkey', { host, port },
+    ),
+  wizardSshTrust: (body: Record<string, unknown>) =>
+    req<{ trusted: boolean }>('POST', '/wizard/ssh/trust', body),
   wizardReset: () => req<{ ok: boolean }>('POST', '/wizard/reset'),
 }

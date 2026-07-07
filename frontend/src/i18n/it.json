@@ -305,13 +305,20 @@
         "verify": "Segna come installata",
         "back": "Indietro",
         "copy": "Copia",
-        "copied": "✓ Copiato"
+        "copied": "✓ Copiato",
+        "scanHostKey": "Rileva host key",
+        "scanning": "Rilevamento…",
+        "confirmHostKey": "Conferma e fidati"
       },
       "fieldsAuthLine": "Riga da aggiungere ad authorized_keys",
+      "ssh": {
+        "hostKeyWhy": "Verifica che corrisponda alla host key SSH del tuo PBS prima di inviare la password."
+      },
       "hints": {
         "wolIface": "Interfaccia da cui Joulenap invia il pacchetto Wake-on-LAN; una volta impostato l'host PBS il pacchetto è limitato alla sua sottorete, non all'intera rete.",
         "pbsRoot": "Usata una sola volta per creare il token API del PBS e installare la chiave SSH di spegnimento, poi scartata.",
-        "sshManual": "Aggiungi la riga qui sotto a /root/.ssh/authorized_keys sul PBS, poi segna come installata."
+        "sshManual": "Aggiungi la riga qui sotto a /root/.ssh/authorized_keys sul PBS, poi segna come installata.",
+        "fingerprintPinned": "Questa impronta è bloccata — le connessioni vengono rifiutate se cambia."
       }
     }
   }

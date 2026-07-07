@@ -351,6 +351,7 @@ export function SetupWizard() {
           username: w.pbsUser,
           password: w.pbsPass,
           datastore: w.pbsDatastore,
+          fingerprint: w.pbsFp,
         })
         pbsTokenId = tok.id
         pbsTokenSecret = tok.secret
@@ -374,7 +375,15 @@ export function SetupWizard() {
   const genKey = () =>
     run('key', async () => {
       const r = await api.wizardKeygen()
-      patch({ sshKey: r.public_key, sshKeyLine: r.authorized_keys_line, sshKeyPath: r.key_path })
+      patch({
+        sshKey: r.public_key,
+        sshKeyLine: r.authorized_keys_line,
+        sshKeyPath: r.key_path,
+        sshHostKeyType: '',
+        sshHostKeyB64: '',
+        sshHostFp: '',
+        sshHostConfirmed: false,
+      })
     })
 
   const installKey = () =>
@@ -528,6 +537,7 @@ export function SetupWizard() {
               {w.pbsFp || '—'}
             </div>
           </label>
+          {w.pbsFp && <span style={{ fontSize: 11, color: '#6f7884' }}>{t('settings.setup.hints.fingerprintPinned')}</span>}
           <div>
             <button
               style={orangeBtn(!!w.pbsHost && (!rapido || !!w.pbsPass) && busy !== 'pbs')}
@@ -596,16 +606,53 @@ export function SetupWizard() {
                 {w.sshKeyLine}
               </div>
             </div>
+            {!w.sshHostConfirmed && (
+              <div style={{ background: c.inputBg, border: `1px solid ${c.border}`, borderRadius: 8, padding: '12px 14px' }}>
+                <span style={{ display: 'block', fontSize: 12.5, color: c.textDim, marginBottom: 8 }}>
+                  {t('settings.setup.ssh.hostKeyWhy')}
+                </span>
+                {w.sshHostFp ? (
+                  <>
+                    <div style={{ fontFamily: mono, fontSize: 12, color: c.text, wordBreak: 'break-all', marginBottom: 10 }}>{w.sshHostFp}</div>
+                    <button
+                      style={orangeBtn(busy !== 'trust')}
+                      disabled={busy === 'trust'}
+                      onClick={() =>
+                        run('trust', async () => {
+                          await api.wizardSshTrust({ host: w.pbsHost, key_type: w.sshHostKeyType, key_base64: w.sshHostKeyB64, port: 22 })
+                          patch({ sshHostConfirmed: true })
+                        })
+                      }
+                    >
+                      {t('settings.setup.buttons.confirmHostKey')}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    style={ghost}
+                    disabled={busy === 'scan'}
+                    onClick={() =>
+                      run('scan', async () => {
+                        const r = await api.wizardSshHostkey(w.pbsHost)
+                        patch({ sshHostKeyType: r.key_type, sshHostKeyB64: r.key_base64, sshHostFp: r.fingerprint })
+                      })
+                    }
+                  >
+                    {busy === 'scan' ? t('settings.setup.buttons.scanning') : t('settings.setup.buttons.scanHostKey')}
+                  </button>
+                )}
+              </div>
+            )}
             {rapido ? (
               <div>
-                <button style={orangeBtn(busy !== 'ssh')} disabled={busy === 'ssh'} onClick={installKey}>
+                <button style={orangeBtn(w.sshHostConfirmed && busy !== 'ssh')} disabled={!w.sshHostConfirmed || busy === 'ssh'} onClick={installKey}>
                   {busy === 'ssh' ? t('settings.setup.buttons.installing') : t('settings.setup.buttons.install')}
                 </button>
               </div>
             ) : (
               <div>
                 <span style={{ display: 'block', fontSize: 11, color: c.textDim, marginBottom: 8 }}>{t('settings.setup.hints.sshManual')}</span>
-                <button style={orangeBtn(true)} onClick={markInstalled}>
+                <button style={orangeBtn(w.sshHostConfirmed)} disabled={!w.sshHostConfirmed} onClick={markInstalled}>
                   {t('settings.setup.buttons.verify')}
                 </button>
               </div>
