@@ -1,5 +1,3 @@
-import ssl
-
 from app.config import Config
 from app.jobs import deps
 
@@ -8,20 +6,27 @@ def test_build_pbs_pins_when_fingerprint_present(monkeypatch):
     cfg = Config()
     cfg.pbs.host = "pbs.local"
     cfg.pbs.fingerprint = "AB:CD"
+    sentinel = object()
     captured = {}
 
     def fake_ctx(host, port, fp, **kw):
         captured.update(host=host, port=port, fp=fp)
-        # Return a real SSLContext for httpx to use
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        return ctx
+        return sentinel
 
     monkeypatch.setattr(deps.tls, "pinned_ssl_context", fake_ctx)
-    client = deps._build_pbs(cfg)
+    recorded = {}
+
+    class FakePbs:
+        def __init__(self, **kwargs):
+            recorded.update(kwargs)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(deps, "PbsClient", FakePbs)
+    deps._build_pbs(cfg).close()
     assert captured["fp"] == "AB:CD"
-    client.close()
+    assert recorded["verify"] is sentinel  # the pinned context is actually wired to verify=
 
 
 def test_build_pbs_no_fingerprint_leaves_verify_false(monkeypatch):
