@@ -10,12 +10,13 @@ Connector classes are referenced at module scope so tests can patch them.
 
 from __future__ import annotations
 
+import ssl
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from ..connectors import net
+from ..connectors import net, tls
 from ..connectors.discovery import derive_pbs_from_storage, detect_mac
 from ..connectors.errors import ApiError
 from ..connectors.pbs import get_fingerprint
@@ -113,6 +114,7 @@ def pbs_provision(
     password: str,
     datastore: str,
     token_name: str = "joulenap",
+    fingerprint: str = "",
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
     """Quick-setup: create a scoped PBS API token from root creds and return it.
@@ -121,7 +123,10 @@ def pbs_provision(
     A realm-less username (e.g. ``root``, the SSH default) is assumed to be ``@pam``.
     """
     userid = username if "@" in username else f"{username}@pam"
-    with PbsProvisioner(host, port, verify_tls, transport=transport) as prov:
+    verify: bool | ssl.SSLContext = verify_tls
+    if fingerprint and transport is None:  # pin when known (skip in tests using a transport)
+        verify = tls.pinned_ssl_context(host, port, fingerprint)
+    with PbsProvisioner(host, port, verify, transport=transport) as prov:
         token = prov.provision_token(userid, password, datastore, token_name)
     return {"id": token.token_id, "secret": token.secret}
 

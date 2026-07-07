@@ -114,6 +114,7 @@ class PbsProvisionRequest(BaseModel):
     password: str = Field(min_length=1)
     datastore: str = Field(min_length=1)
     token_name: str = "joulenap"
+    fingerprint: str = ""
 
 
 @router.post("/pbs/provision")
@@ -127,6 +128,7 @@ def pbs_provision(body: PbsProvisionRequest) -> dict[str, Any]:
         password=body.password,
         datastore=body.datastore,
         token_name=body.token_name,
+        fingerprint=body.fingerprint,
     )
 
 
