@@ -54,3 +54,8 @@ def data_dir() -> Path:
 def db_path() -> Path:
     """Path to the SQLite database file under the data dir."""
     return data_dir() / "joulenap.db"
+
+
+def known_hosts_path() -> Path:
+    """Path to the SSH known_hosts file for the PBS power-off connection (under the data dir)."""
+    return data_dir() / "known_hosts"
