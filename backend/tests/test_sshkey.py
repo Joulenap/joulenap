@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest import mock
 
+from app.connectors import sshkey, ssh
 from app.connectors.sshkey import authorized_keys_line, install_public_key
 
 PUBKEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA joulenap"
@@ -38,3 +39,34 @@ def test_install_appends_restricted_line_not_bare_key():
     # authorized_keys can only power the PBS off.
     assert 'command="systemctl poweroff"' in remote_cmd
     assert "no-pty" in remote_cmd
+
+
+def test_install_uses_strict_client(monkeypatch):
+    used = {}
+
+    class FakeClient:
+        def set_missing_host_key_policy(self, p):
+            used["policy"] = type(p).__name__
+
+        def connect(self, **kw):
+            used["connected"] = True
+
+        def exec_command(self, cmd, timeout=None):
+            class Ch:
+                def recv_exit_status(self):
+                    return 0
+
+            class Out:
+                channel = Ch()
+
+                def read(self):
+                    return b""
+
+            return None, Out(), Out()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sshkey.ssh, "strict_client", lambda: FakeClient())
+    sshkey.install_public_key("h", "root", "pw", "ssh-ed25519 AAAA key")
+    assert used["connected"]

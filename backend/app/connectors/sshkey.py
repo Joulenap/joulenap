@@ -11,10 +11,10 @@ import os
 import stat
 from pathlib import Path
 
-import paramiko
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from . import ssh
 from .errors import PowerError
 from .power import POWEROFF_COMMAND
 
@@ -75,8 +75,7 @@ def install_public_key(
     """Append ``public_key`` (as the restricted, forced-poweroff line) to ``user``'s
     authorized_keys on ``host`` over a password-authenticated SSH session (idempotent).
     Raises :class:`PowerError`."""
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client = ssh.strict_client()
     try:
         client.connect(
             hostname=host,
