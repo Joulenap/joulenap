@@ -8,9 +8,6 @@ token header format (``PBSAPIToken=id:secret``) and its own endpoints. The stand
 
 from __future__ import annotations
 
-import hashlib
-import socket
-import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -235,16 +232,6 @@ def get_fingerprint(host: str, port: int = 8007, timeout: float = 5.0) -> str:
     presented certificate — the same value PBS shows as "Fingerprint" and that the
     wizard pins. Raises :class:`ApiError` if the cert can't be retrieved.
     """
-    context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    try:
-        with socket.create_connection((host, port), timeout=timeout) as sock:
-            with context.wrap_socket(sock, server_hostname=host) as tls:
-                der = tls.getpeercert(binary_form=True)
-    except OSError as exc:
-        raise ApiError(f"Could not read TLS certificate from {host}:{port}: {exc}") from exc
-    if not der:
-        raise ApiError(f"No TLS certificate presented by {host}:{port}")
-    digest = hashlib.sha256(der).hexdigest().upper()
-    return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
+    from .tls import fetch_peer_der, fingerprint_hex  # local import avoids a cycle at top
+
+    return fingerprint_hex(fetch_peer_der(host, port, timeout))
