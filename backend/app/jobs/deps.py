@@ -7,11 +7,12 @@ swap in stubs and exercise the full state machine without a real PVE/PBS.
 
 from __future__ import annotations
 
+import ssl
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..config import Config
-from ..connectors import net
+from ..connectors import net, tls
 from ..connectors.pbs import DatastoreStatus, PbsClient
 from ..connectors.power import PbsPower
 from ..connectors.pve import PveClient
@@ -34,12 +35,17 @@ def _build_pve(config: Config) -> PveClient:
 
 def _build_pbs(config: Config) -> PbsClient:
     p = config.pbs
+    verify: bool | ssl.SSLContext = False
+    if p.fingerprint:
+        # Pin the stored fingerprint (captured by the wizard from the PVE storage config).
+        verify = tls.pinned_ssl_context(p.host, p.port, p.fingerprint)
     return PbsClient(
         host=p.host,
         datastore=p.datastore,
         token_id=p.api_token_id,
         token_secret=p.api_token_secret,
         port=p.port,
+        verify=verify,
     )
 
 
