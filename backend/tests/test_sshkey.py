@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest import mock
 
-from app.connectors import sshkey, ssh
+from app.connectors import sshkey
 from app.connectors.sshkey import authorized_keys_line, install_public_key
 
 PUBKEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA joulenap"
