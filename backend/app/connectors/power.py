@@ -12,6 +12,7 @@ import logging
 
 import paramiko
 
+from . import ssh
 from .errors import PowerError
 
 log = logging.getLogger("joulenap.power")
@@ -40,10 +41,19 @@ class PbsPower:
         self.poweroff_command = poweroff_command
 
     def _connect(self) -> paramiko.SSHClient:
-        client = paramiko.SSHClient()
-        # Homelab PBS: accept the host key on first contact. (Host-key pinning could
-        # be added later via a known_hosts file in the data dir.)
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # Strict host-key check against data/known_hosts (populated by the wizard). For
+        # installs predating known_hosts, TOFU-add the key on first use and warn — the
+        # runtime path authenticates with the key, never a password, so this is low risk.
+        if not ssh.host_key_known(self.host, port=self.port):
+            try:
+                key_type, key_b64, _fp = ssh.scan_host_key(self.host, self.port, self.timeout)
+                ssh.save_host_key(self.host, key_type, key_b64, port=self.port)
+                log.warning(
+                    "Trusted PBS SSH host key on first use (%s) — no prior known_hosts", self.host
+                )
+            except Exception as exc:  # noqa: BLE001 — scanning is best-effort
+                log.warning("Could not pre-scan PBS host key for %s: %s", self.host, exc)
+        client = ssh.strict_client()
         try:
             client.connect(
                 hostname=self.host,

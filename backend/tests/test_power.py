@@ -6,8 +6,17 @@ from unittest import mock
 
 import pytest
 
+from app.connectors import power
 from app.connectors.errors import PowerError
 from app.connectors.power import PbsPower
+
+
+@pytest.fixture(autouse=True)
+def _known_host_key(monkeypatch):
+    """Default the host key to "already trusted" so these tests exercise the connect
+    path only, without falling into the TOFU-scan branch (which would otherwise hit
+    the real network since no known_hosts/data-dir fixture is set up here)."""
+    monkeypatch.setattr(power.ssh, "host_key_known", lambda host, port=22: True)
 
 
 def _mock_client(exit_status: int = 0):
@@ -58,3 +67,30 @@ def test_poweroff_runs_command():
     cmd = client.exec_command.call_args.args[0]
     assert cmd == "systemctl poweroff"
     client.close.assert_called_once()
+
+
+def test_connect_uses_strict_client(monkeypatch, tmp_path):
+    used = {}
+
+    class FakeClient:
+        def __init__(self):
+            used["made"] = True
+
+        def load_system_host_keys(self):
+            pass
+
+        def connect(self, **kw):
+            used["connected"] = True
+
+        def close(self):
+            pass
+
+        def get_transport(self):
+            return None
+
+    monkeypatch.setattr(power.ssh, "strict_client", lambda: FakeClient())
+    monkeypatch.setattr(power.ssh, "host_key_known", lambda host, port=22: True)
+    p = power.PbsPower(host="pbs.local", key_path=str(tmp_path / "k"))
+    client = p._connect()
+    assert used["connected"] and used["made"]
+    client.close()
