@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..core import security
 from ..core.config_store import ConfigStore
 from ..core.security import get_config_store
-from .deps import get_scheduler
+from .deps import Scheduler, get_scheduler
 
 router = APIRouter(tags=["auth"])
 
@@ -57,7 +57,7 @@ def setup(
     body: SetupRequest,
     request: Request,
     store: ConfigStore = Depends(get_config_store),
-    scheduler=Depends(get_scheduler),
+    scheduler: Scheduler = Depends(get_scheduler),
 ) -> UserInfo:
     if not security.setup_needed(store):
         raise HTTPException(
@@ -93,9 +93,11 @@ def login(
             detail="No account configured yet — complete setup first",
         )
     auth = store.config.app.auth
-    if body.username != auth.username or not security.verify_password(
-        body.password, auth.password_hash
-    ):
+    # Always run the (slow) hash check, even on a wrong username, so response time doesn't
+    # reveal whether the username exists (avoids a timing-based enumeration oracle).
+    user_ok = body.username == auth.username
+    pw_ok = security.verify_password(body.password, auth.password_hash)
+    if not (user_ok and pw_ok):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password"
         )

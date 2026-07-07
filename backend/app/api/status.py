@@ -14,7 +14,14 @@ from ..connectors.errors import ConnectorError
 from ..core.config_store import ConfigStore
 from ..db import get_session
 from ..db.models import Run, RunKind
-from .deps import get_config_store, get_job_service, get_scheduler, require_auth
+from .deps import (
+    JobService,
+    Scheduler,
+    get_config_store,
+    get_job_service,
+    get_scheduler,
+    require_auth,
+)
 from .schemas import RunSummary
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["status"])
@@ -49,8 +56,8 @@ class StatusResponse(BaseModel):
 @router.get("/status", response_model=StatusResponse)
 def get_status(
     store: ConfigStore = Depends(get_config_store),
-    scheduler=Depends(get_scheduler),
-    job_service=Depends(get_job_service),
+    scheduler: Scheduler = Depends(get_scheduler),
+    job_service: JobService = Depends(get_job_service),
     session: Session = Depends(get_session),
 ) -> StatusResponse:
     config = store.config

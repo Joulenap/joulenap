@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '../../api/client'
+import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { c, ghostBtn, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
 
@@ -13,21 +13,26 @@ export function Account() {
   const [pass, setPass] = useState('')
   const [busy, setBusy] = useState(false)
   const [savedNote, setSavedNote] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
 
   function startEdit() {
     setUser(username ?? '')
     setPass('')
     setSavedNote(false)
+    setErr(null)
     setEditing(true)
   }
 
   async function onSave() {
     setBusy(true)
+    setErr(null)
     try {
       const u = await api.updateAccount(user.trim() || (username ?? ''), pass || undefined)
       setUsername(u.username)
       setEditing(false)
       setSavedNote(true)
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {
       setBusy(false)
     }
@@ -100,6 +105,7 @@ export function Account() {
             <button onClick={() => setEditing(false)} style={{ ...ghostBtn, padding: '10px 20px' }}>
               {t('common.cancel')}
             </button>
+            {err && <span style={{ fontSize: 12, color: c.red }}>{err}</span>}
           </div>
         </>
       )}

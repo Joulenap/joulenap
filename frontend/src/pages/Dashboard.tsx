@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import type { Config, GuestInfo, LogLine, StatusResponse } from '../api/types'
@@ -88,13 +88,19 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     return () => clearInterval(id)
   }, [loadGuests, loadLogs])
 
-  // Refresh status + logs a few times after kicking off an async job.
+  // Refresh status + logs a few times after kicking off an async job. Track the timer ids so
+  // they can be cancelled on unmount (consistent with the cleaned-up intervals above).
+  const pollTimers = useRef<number[]>([])
   const pollAfterAction = useCallback(() => {
     loadLogs()
     refreshStatus()
     const times = [2000, 5000, 9000]
-    times.forEach((ms) => setTimeout(() => { loadLogs(); refreshStatus() }, ms))
+    times.forEach((ms) =>
+      pollTimers.current.push(window.setTimeout(() => { loadLogs(); refreshStatus() }, ms)),
+    )
   }, [loadLogs, refreshStatus])
+
+  useEffect(() => () => pollTimers.current.forEach(clearTimeout), [])
 
   const original = useMemo(() => (config ? draftFromConfig(config) : null), [config])
   const dirty = useMemo(() => {

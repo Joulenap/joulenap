@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from ..connectors.errors import ConnectorError
 from ..core.config_store import ConfigStore
-from .deps import get_config_store, get_job_service, require_auth
+from .deps import JobService, get_config_store, get_job_service, require_auth
 
 router = APIRouter(prefix="/power", dependencies=[Depends(require_auth)], tags=["power"])
 
@@ -24,7 +24,7 @@ class PowerResult(BaseModel):
 @router.post("/on", response_model=PowerResult)
 def power_on(
     store: ConfigStore = Depends(get_config_store),
-    job_service=Depends(get_job_service),
+    job_service: JobService = Depends(get_job_service),
 ) -> PowerResult:
     config = store.config
     if not config.pbs.mac:
@@ -41,7 +41,7 @@ def power_on(
 @router.post("/off", response_model=PowerResult)
 def power_off(
     store: ConfigStore = Depends(get_config_store),
-    job_service=Depends(get_job_service),
+    job_service: JobService = Depends(get_job_service),
 ) -> PowerResult:
     if job_service.is_running:
         raise HTTPException(

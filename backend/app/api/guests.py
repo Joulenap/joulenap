@@ -12,7 +12,7 @@ from ..connectors.errors import ConnectorError
 from ..core.config_store import ConfigStore
 from ..db import get_session
 from ..db.guest_backups import get_last_backups
-from .deps import get_config_store, get_job_service, require_auth
+from .deps import JobService, get_config_store, get_job_service, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["guests"])
 
@@ -30,7 +30,7 @@ class GuestInfo(BaseModel):
 @router.get("/guests", response_model=list[GuestInfo])
 def list_guests(
     store: ConfigStore = Depends(get_config_store),
-    job_service=Depends(get_job_service),
+    job_service: JobService = Depends(get_job_service),
     session: Session = Depends(get_session),
 ) -> list[GuestInfo]:
     try:

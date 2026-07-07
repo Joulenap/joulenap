@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from ..connectors.errors import WolError
 from ..core.config_store import ConfigStore
-from .deps import get_config_store, get_job_service, require_auth
+from .deps import JobService, get_config_store, get_job_service, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["wol"])
 
@@ -20,7 +20,7 @@ class WolResult(BaseModel):
 @router.post("/wol/test", response_model=WolResult)
 def wol_test(
     store: ConfigStore = Depends(get_config_store),
-    job_service=Depends(get_job_service),
+    job_service: JobService = Depends(get_job_service),
 ) -> WolResult:
     config = store.config
     if not config.pbs.mac:

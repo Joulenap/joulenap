@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from ..core.config_store import ConfigStore
-from .deps import get_config_store, get_scheduler, require_auth
+from .deps import Scheduler, get_config_store, get_scheduler, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["scheduler"])
 
@@ -30,7 +30,7 @@ class ToggleResponse(BaseModel):
 def toggle_scheduler(
     payload: TogglePayload,
     store: ConfigStore = Depends(get_config_store),
-    scheduler=Depends(get_scheduler),
+    scheduler: Scheduler = Depends(get_scheduler),
 ) -> ToggleResponse:
     def apply(cfg) -> None:
         cfg.backup.enabled = payload.enabled

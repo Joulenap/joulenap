@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ApiError } from '../../api/client'
 import { Dropdown, type Option } from '../../components/Dropdown'
 import { useConfig } from '../../config/ConfigContext'
 import { c, labelStyle, panelStyle, primaryBtn } from '../../theme'
@@ -18,6 +19,7 @@ export function Localization() {
   const [lang, setLang] = useState(savedLang)
   const [tz, setTz] = useState(savedTz)
   const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
   const dirty = lang !== savedLang || tz !== savedTz
 
   // Options: "automatic" first, then the curated list. If the saved value is a valid
@@ -31,8 +33,11 @@ export function Localization() {
   async function onSave() {
     if (!config) return
     setBusy(true)
+    setErr(null)
     try {
       await save({ ...config, app: { ...config.app, language: lang, timezone: tz } })
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {
       setBusy(false)
     }
@@ -75,7 +80,8 @@ export function Localization() {
         >
           {t('common.save')}
         </button>
-        {!dirty && <span style={{ fontSize: 12, color: c.green }}>{t('settings.localization.saved')}</span>}
+        {!dirty && !err && <span style={{ fontSize: 12, color: c.green }}>{t('settings.localization.saved')}</span>}
+        {err && <span style={{ fontSize: 12, color: c.red }}>{err}</span>}
       </div>
     </div>
   )

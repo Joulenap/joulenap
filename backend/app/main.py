@@ -101,7 +101,12 @@ def create_app() -> FastAPI:
 
 
 def _mount_frontend(app: FastAPI) -> None:
-    """Serve the SPA. Unknown non-/api paths fall back to index.html (client routing)."""
+    """Serve the built SPA's static files, with ``/`` returning index.html.
+
+    The SPA navigates via in-app state (no URL router), so every browser load hits ``/``
+    and there are no deep links to catch — unknown non-``/api`` paths simply 404, which is
+    fine. If URL-based routing is ever introduced, add a non-``/api`` catch-all to index.html.
+    """
     frontend_dir = _frontend_dir()
     if not frontend_dir.exists():
         return

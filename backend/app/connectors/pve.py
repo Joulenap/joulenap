@@ -160,7 +160,7 @@ class PveClient:
         upid: str,
         poll_interval: float = 3.0,
         timeout: float = 6 * 3600,
-        sleep=time.sleep,
+        sleep: Callable[[float], None] = time.sleep,
         *,
         on_log: Callable[[list[LogLine]], None] | None = None,
     ) -> dict[str, Any]:

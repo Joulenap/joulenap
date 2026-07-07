@@ -75,6 +75,10 @@ class PbsClient:
 
     def datastore_status(self) -> DatastoreStatus:
         data = self._api.request("GET", f"/admin/datastore/{self.datastore}/status")
+        if not data:
+            # PBS answered ``{"data": null}`` (e.g. datastore not yet online) — degrade to a
+            # ConnectorError so /api/status shows "—" rather than 500ing on ``data["total"]``.
+            raise ApiError(f"No status returned for datastore {self.datastore!r}")
         return DatastoreStatus(
             total=int(data["total"]),
             used=int(data["used"]),
@@ -89,6 +93,8 @@ class PbsClient:
         long it has been awake this cycle.
         """
         data = self._api.request("GET", f"/nodes/{self.node}/status")
+        if not data:
+            raise ApiError(f"No node status returned for {self.node!r}")
         mem = data.get("memory") or {}
         mem_total = int(mem.get("total", 0))
         mem_used = int(mem.get("used", 0))
@@ -139,7 +145,7 @@ class PbsClient:
         self,
         timeout: float,
         interval: float = 5.0,
-        sleep=time.sleep,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> bool:
         """Poll until no task is running, or ``timeout`` elapses. True => safe to power off."""
         deadline = time.monotonic() + timeout
@@ -197,10 +203,15 @@ class PbsClient:
         upid: str,
         poll_interval: float = 5.0,
         timeout: float = 6 * 3600,
-        sleep=time.sleep,
+        sleep: Callable[[float], None] = time.sleep,
         *,
         on_log: Callable[[list[LogLine]], None] | None = None,
     ) -> dict[str, Any]:
+        """Poll a task until it stops. Returns the final status; raises on non-OK exit.
+
+        Pass ``on_log`` to also tail the task log — each new batch of ``(line_no, text)``
+        pairs is handed to it as the task runs.
+        """
         log_fn = (lambda start: self.task_log(upid, start)) if on_log else None
         return poll_task(
             self.task_status, upid, poll_interval, timeout, sleep,

@@ -21,6 +21,7 @@ export function Notifications() {
   const [draft, setDraft] = useState<NotificationsConfig | null>(null)
   const [busy, setBusy] = useState(false)
   const [savedNote, setSavedNote] = useState(false)
+  const [saveErr, setSaveErr] = useState<string | null>(null)
   const [testState, setTestState] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   const [replacing, setReplacing] = useState(false)
 
@@ -42,21 +43,26 @@ export function Notifications() {
   function patch(next: Partial<NotificationsConfig>) {
     setDraft((d) => (d ? { ...d, ...next } : d))
     setSavedNote(false)
+    setSaveErr(null)
     setTestState(null)
   }
 
   function patchChannel<K extends ChannelKey>(key: K, next: Partial<NotificationsConfig[K]>) {
     setDraft((d) => (d ? { ...d, [key]: { ...d[key], ...next } } : d))
     setSavedNote(false)
+    setSaveErr(null)
     setTestState(null)
   }
 
   async function onSave() {
     if (!config) return
     setBusy(true)
+    setSaveErr(null)
     try {
       await save({ ...config, notifications: draft! })
       setSavedNote(true)
+    } catch (e) {
+      setSaveErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {
       setBusy(false)
     }
@@ -255,6 +261,7 @@ export function Notifications() {
           {t(`${ns}.sendTest`)}
         </button>
         {savedNote && !dirty && <span style={{ fontSize: 12, color: c.green }}>{t(`${ns}.saved`)}</span>}
+        {saveErr && <span style={{ fontSize: 12, color: c.red }}>{saveErr}</span>}
         {testState && (
           <span style={{ fontSize: 12, color: testState.kind === 'ok' ? c.green : c.red }}>{testState.msg}</span>
         )}

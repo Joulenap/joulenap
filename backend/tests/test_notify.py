@@ -76,6 +76,17 @@ def test_build_urls_for_all_channels():
     assert "mode=starttls" in email
 
 
+def test_special_chars_in_telegram_and_ntfy_are_percent_encoded():
+    # Path-breaking characters in a token/topic must be escaped so the Apprise URL stays
+    # well-formed (JN-014) — but a Telegram bot token's structural ``:`` is preserved.
+    cfg = _notifications_config()
+    cfg.notifications.telegram.bot_token = "123:AB/C"
+    cfg.notifications.ntfy.topic = "home lab/#1"
+    urls = build_urls(cfg.notifications)
+    assert "tgram://123:AB%2FC/456" in urls
+    assert "ntfys://ntfy.sh/home%20lab%2F%231" in urls
+
+
 def test_disabled_channel_is_skipped():
     cfg = _notifications_config()
     cfg.notifications.telegram.enabled = False

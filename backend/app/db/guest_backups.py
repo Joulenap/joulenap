@@ -42,5 +42,8 @@ def get_last_backups(
     """Return ``{vmid: last_backup}`` from the cache, optionally limited to ``vmids``."""
     stmt = select(GuestBackup)
     if vmids is not None:
-        stmt = stmt.where(GuestBackup.vmid.in_(list(vmids)))
+        ids = list(vmids)
+        if not ids:  # empty filter = no rows; avoids SQLAlchemy's empty-IN warning
+            return {}
+        stmt = stmt.where(GuestBackup.vmid.in_(ids))
     return {row.vmid: row.last_backup for row in session.scalars(stmt)}

@@ -16,6 +16,9 @@ from ..notify import NotificationService
 
 __all__ = [
     "CurrentUser",
+    "JobService",
+    "NotificationService",
+    "Scheduler",
     "get_config_store",
     "get_job_service",
     "get_notifier",

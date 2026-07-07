@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .errors import PowerError
+from .power import POWEROFF_COMMAND
 
 _KEY_COMMENT = "joulenap"
 
@@ -24,7 +25,7 @@ _KEY_COMMENT = "joulenap"
 # and the extra restrictions strip port/agent/x11 forwarding and PTY allocation. So even if
 # the private key leaked, it could do nothing on the PBS but power it off. Surfaced in the
 # wizard as the trust story; also used for the manual-paste authorized_keys line.
-_FORCED_COMMAND = "systemctl poweroff"
+_FORCED_COMMAND = POWEROFF_COMMAND
 _KEY_OPTIONS = (
     f'command="{_FORCED_COMMAND}",no-port-forwarding,'
     "no-x11-forwarding,no-agent-forwarding,no-pty"

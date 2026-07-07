@@ -5,7 +5,8 @@
     "edit": "Edit",
     "confirm": "Confirm",
     "loading": "Loading…",
-    "never": "never"
+    "never": "never",
+    "saveFailed": "Couldn't save changes"
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
@@ -78,6 +79,7 @@
     "backupDays": "Backup days",
     "apply": "Apply changes",
     "guests": "Guests",
+    "refresh": "Refresh",
     "general": "General backup",
     "selective": "Selective backup",
     "selectedCount": "{{n}} sel.",

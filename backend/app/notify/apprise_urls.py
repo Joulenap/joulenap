@@ -39,7 +39,9 @@ def build_urls(n: NotificationsConfig) -> list[str]:
 def _telegram_url(t: TelegramConfig) -> str | None:
     if not (t.bot_token and t.chat_id):
         return None
-    return f"tgram://{t.bot_token}/{t.chat_id}"
+    # A Telegram bot token is structurally ``<id>:<secret>`` — the colon is required by
+    # Apprise's parser, so keep it unescaped; only guard the path-breaking characters.
+    return f"tgram://{quote(t.bot_token, safe=':')}/{quote(t.chat_id, safe='')}"
 
 
 def _ntfy_url(n: NtfyConfig) -> str | None:
@@ -49,7 +51,7 @@ def _ntfy_url(n: NtfyConfig) -> str | None:
     if not parsed.netloc:
         return None
     scheme = "ntfys" if parsed.scheme == "https" else "ntfy"
-    return f"{scheme}://{parsed.netloc}/{n.topic}"
+    return f"{scheme}://{parsed.netloc}/{quote(n.topic, safe='')}"
 
 
 def _email_url(e: EmailConfig) -> str | None:

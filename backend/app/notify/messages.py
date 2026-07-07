@@ -33,7 +33,6 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "used": "used",
             "free": "free",
             "error": "Error",
-            "status": "Status",
             "pbs_left_on": "⚠️ PBS left powered on — check it",
         },
     },
@@ -52,7 +51,6 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "used": "usato",
             "free": "liberi",
             "error": "Errore",
-            "status": "Stato",
             "pbs_left_on": "⚠️ PBS lasciato acceso — controllalo",
         },
     },
@@ -112,7 +110,9 @@ def build_run_message(
     labels = pack["_labels"]
     event = _STATUS_EVENT.get(run.status, "failure")  # RUNNING shouldn't reach here
 
-    lines = [f"{labels['status']}: {run.status}"]
+    # The title already conveys success/failure/aborted, so we don't repeat the (untranslated)
+    # status enum in the body.
+    lines: list[str] = []
     if run.started_at and run.finished_at:
         duration = (run.finished_at - run.started_at).total_seconds()
         lines.append(f"{labels['duration']}: {_format_duration(duration)}")

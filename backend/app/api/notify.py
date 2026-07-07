@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from ..core.config_store import ConfigStore
-from .deps import get_config_store, get_notifier, require_auth
+from .deps import NotificationService, get_config_store, get_notifier, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["notify"])
 
@@ -23,7 +23,7 @@ class NotifyTestResult(BaseModel):
 @router.post("/notify/test", response_model=NotifyTestResult)
 def notify_test(
     store: ConfigStore = Depends(get_config_store),
-    notifier=Depends(get_notifier),
+    notifier: NotificationService = Depends(get_notifier),
 ) -> NotifyTestResult:
     report = notifier.send_test(store.config)
     if report.reason == "no_channels":

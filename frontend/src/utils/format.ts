@@ -1,15 +1,18 @@
 // Small date/number formatters shared across the header and dashboard, matching the
 // prototype's output. Relative strings are word-free so callers add "in"/"ago" via i18n.
 
+import i18n from '../i18n'
+
 export const pad = (n: number) => String(n).padStart(2, '0')
 
 export const fmtClock = (d: Date, sec = true) =>
   pad(d.getHours()) + ':' + pad(d.getMinutes()) + (sec ? ':' + pad(d.getSeconds()) : '')
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// Localized short weekday for the active UI language (was a hardcoded English table).
+const weekday = (d: Date) => new Intl.DateTimeFormat(i18n.language, { weekday: 'short' }).format(d)
 
 export const fmtDT = (d: Date) =>
-  `${DAYS[d.getDay()]} ${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(
+  `${weekday(d)} ${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(
     d.getMinutes(),
   )}`
 
@@ -21,8 +24,14 @@ export function rel(ms: number): string {
   if (m < 1) return '<1m'
   if (m < 60) return `${m}m`
   const h = Math.floor(m / 60)
-  const mm = m % 60
-  return `${h}h${mm ? ' ' + mm + 'm' : ''}`
+  if (h < 24) {
+    const mm = m % 60
+    return `${h}h${mm ? ' ' + mm + 'm' : ''}`
+  }
+  // Roll multi-day deltas over to days, matching fmtUptime (was rendering e.g. "120h").
+  const d = Math.floor(h / 24)
+  const hh = h % 24
+  return `${d}d${hh ? ' ' + hh + 'h' : ''}`
 }
 
 export function fmtBytesTB(n: number): string {

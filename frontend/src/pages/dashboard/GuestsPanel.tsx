@@ -44,7 +44,7 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
         </div>
         <button
           onClick={onRefresh}
-          title="Refresh"
+          title={t('dashboard.refresh')}
           style={{
             display: 'flex',
             alignItems: 'center',

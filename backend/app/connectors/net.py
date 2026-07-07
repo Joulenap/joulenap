@@ -4,12 +4,15 @@ enumeration + Wake-on-LAN target resolution."""
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import psutil
+
+log = logging.getLogger("joulenap.net")
 
 _GLOBAL_BROADCAST = "255.255.255.255"
 
@@ -109,6 +112,12 @@ def wol_target(host: str, iface_name: str = "") -> tuple[str, str | None]:
     """
     ip = _resolve_ip(host)
     iface = find_interface(iface_name) if iface_name else None
+    if iface_name and iface is None:
+        # A NIC was explicitly configured but doesn't resolve (down/renamed). WoL failures
+        # are hard to diagnose, so make the silent auto-detect fallback visible in the log.
+        log.warning(
+            "Configured WoL interface %r not found — falling back to auto-detection", iface_name
+        )
     if iface is None and ip is not None:
         iface = next((i for i in list_interfaces() if i.contains(ip)), None)
     if iface is not None and ip is not None and iface.contains(ip):

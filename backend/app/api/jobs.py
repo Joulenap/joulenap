@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from ..db.models import RunTrigger
 from ..jobs import AlreadyRunningError
-from .deps import get_job_service, require_auth
+from .deps import JobService, get_job_service, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["jobs"])
 
@@ -29,10 +29,10 @@ def _start(submit) -> RunStarted:
 
 
 @router.post("/backup/run", response_model=RunStarted, status_code=status.HTTP_202_ACCEPTED)
-def run_backup(job_service=Depends(get_job_service)) -> RunStarted:
+def run_backup(job_service: JobService = Depends(get_job_service)) -> RunStarted:
     return _start(job_service.submit_backup)
 
 
 @router.post("/gc/run", response_model=RunStarted, status_code=status.HTTP_202_ACCEPTED)
-def run_gc(job_service=Depends(get_job_service)) -> RunStarted:
+def run_gc(job_service: JobService = Depends(get_job_service)) -> RunStarted:
     return _start(job_service.submit_gc)

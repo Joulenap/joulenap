@@ -21,6 +21,9 @@ _MAC_RE = re.compile(r"([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})")
 # MAC in `arp -a` output: colon- (Unix) or dash-separated (Windows).
 _MAC_TOKEN_RE = re.compile(r"([0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5})")
 _IP_TOKEN_RE = re.compile(r"(\d{1,3}(?:\.\d{1,3}){3})")
+# Incomplete ARP entries carry an all-zero HW address that still matches the MAC regex;
+# saving it would break WoL silently, so treat it as "no MAC found".
+_ZERO_MAC = "00:00:00:00:00:00"
 
 
 def derive_pbs_from_storage(storage: dict) -> dict:
@@ -56,9 +59,13 @@ def _read_proc_arp() -> dict[str, str]:
         with open(_ARP_PATH, encoding="ascii") as fh:
             next(fh, None)  # header row
             for line in fh:
+                # Columns: IP, HW type, Flags, HW address, Mask, Device. Flags 0x0 marks an
+                # incomplete entry (no real HW address yet) — skip it.
                 fields = line.split()
-                if len(fields) >= 4 and _MAC_RE.fullmatch(fields[3]):
-                    table[fields[0]] = fields[3].lower()
+                if len(fields) >= 4 and fields[2] != "0x0" and _MAC_RE.fullmatch(fields[3]):
+                    mac = fields[3].lower()
+                    if mac != _ZERO_MAC:
+                        table[fields[0]] = mac
     except OSError:
         pass
     return table
@@ -79,7 +86,9 @@ def _read_arp_command() -> dict[str, str]:
         ip_match = _IP_TOKEN_RE.search(line)
         mac_match = _MAC_TOKEN_RE.search(line)
         if ip_match and mac_match:
-            table[ip_match.group(1)] = mac_match.group(1).replace("-", ":").lower()
+            mac = mac_match.group(1).replace("-", ":").lower()
+            if mac != _ZERO_MAC:
+                table[ip_match.group(1)] = mac
     return table
 
 

@@ -17,6 +17,11 @@ function Tile({ children }: { children: React.ReactNode }) {
   return <div style={{ ...panelStyle, padding: '15px 16px' }}>{children}</div>
 }
 
+const sameDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate()
+
 export function StatTiles({ status }: { status: StatusResponse | null }) {
   const { t } = useTranslation()
   const now = new Date()
@@ -26,8 +31,13 @@ export function StatTiles({ status }: { status: StatusResponse | null }) {
   let nextStr = '—'
   let nextRel = ''
   if (nr) {
-    const sameDay = nr.getDate() === now.getDate() && nr.getMonth() === now.getMonth()
-    nextStr = `${sameDay ? t('dashboard.today') : t('dashboard.tomorrow')} ${pad(nr.getHours())}:${pad(nr.getMinutes())}`
+    const clock = `${pad(nr.getHours())}:${pad(nr.getMinutes())}`
+    const tomorrow = new Date(now)
+    tomorrow.setDate(now.getDate() + 1)
+    if (sameDay(nr, now)) nextStr = `${t('dashboard.today')} ${clock}`
+    else if (sameDay(nr, tomorrow)) nextStr = `${t('dashboard.tomorrow')} ${clock}`
+    // Further out (e.g. a weekly schedule): show the weekday + date instead of "Tomorrow".
+    else nextStr = fmtDT(nr)
     nextRel = status?.scheduler_enabled
       ? t('dashboard.inTime', { rel: rel(nr.getTime() - now.getTime()) })
       : t('status.timerDisabled')

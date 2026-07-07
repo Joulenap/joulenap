@@ -16,7 +16,10 @@ from .errors import PowerError
 
 log = logging.getLogger("joulenap.power")
 
-_DEFAULT_POWEROFF_CMD = "systemctl poweroff"
+# The single command Joulenap runs on the PBS. It's both the default command this client
+# sends and the forced command the SSH key is locked to (see sshkey._FORCED_COMMAND), so it
+# lives here once and both paths stay in sync.
+POWEROFF_COMMAND = "systemctl poweroff"
 
 
 class PbsPower:
@@ -27,7 +30,7 @@ class PbsPower:
         key_path: str | None = None,
         port: int = 22,
         timeout: float = 10.0,
-        poweroff_command: str = _DEFAULT_POWEROFF_CMD,
+        poweroff_command: str = POWEROFF_COMMAND,
     ):
         self.host = host
         self.user = user

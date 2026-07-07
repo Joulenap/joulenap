@@ -21,7 +21,7 @@ from ..config import (
     restore_secrets,
 )
 from ..core.config_store import ConfigStore
-from .deps import get_config_store, get_scheduler, require_auth
+from .deps import Scheduler, get_config_store, get_scheduler, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["config"])
 
@@ -35,7 +35,7 @@ def get_config(store: ConfigStore = Depends(get_config_store)) -> dict[str, Any]
 def put_config(
     incoming: dict[str, Any],
     store: ConfigStore = Depends(get_config_store),
-    scheduler=Depends(get_scheduler),
+    scheduler: Scheduler = Depends(get_scheduler),
 ) -> dict[str, Any]:
     # Deep-merge over the stored config so PUT means "apply these changes", not "replace
     # everything": an omitted section/field keeps its current value (a partial body can no

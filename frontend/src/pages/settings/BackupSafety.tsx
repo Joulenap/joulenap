@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ApiError } from '../../api/client'
 import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
 import { c, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
@@ -36,6 +37,7 @@ export function BackupSafety() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
   const [savedNote, setSavedNote] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
     if (config)
@@ -67,11 +69,13 @@ export function BackupSafety() {
   function patch(next: Partial<Draft>) {
     setDraft((d) => (d ? { ...d, ...next } : d))
     setSavedNote(false)
+    setErr(null)
   }
 
   async function onSave() {
     if (!config || !draft) return
     setBusy(true)
+    setErr(null)
     try {
       await save({
         ...config,
@@ -89,6 +93,8 @@ export function BackupSafety() {
         },
       })
       setSavedNote(true)
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {
       setBusy(false)
     }
@@ -276,6 +282,7 @@ export function BackupSafety() {
           {t(`${ns}.apply`)}
         </button>
         {savedNote && !dirty && <span style={{ fontSize: 12, color: c.green }}>{t(`${ns}.saved`)}</span>}
+        {err && <span style={{ fontSize: 12, color: c.red }}>{err}</span>}
       </div>
     </div>
   )
