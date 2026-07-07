@@ -27,6 +27,14 @@ For each field: **auto** = discovered/derived by the app; **manual** = must be e
 > proxmox-backup-manager acl update /datastore/<datastore> Joulenap --auth-id 'root@pam!joulenap'
 > ```
 
+## Security
+
+Transport security uses pinning and verification to protect credentials in transit:
+
+- **PBS API (TLS pinning):** PBS API calls are pinned to the PBS certificate's fingerprint, captured during setup from the PVE storage config. If the PBS certificate is renewed, run PBS detection again in the wizard to store the new fingerprint; calls will fail with a clear "fingerprint changed" error until updated.
+- **PBS SSH (host-key verification):** The PBS SSH host key is confirmed once during wizard setup and saved to `data/known_hosts`. All later SSH connections (power-off, GC over SSH) verify against the stored key.
+- **PVE setup (residual):** The PVE root password used in quick-setup provisioning is protected by `pve.verify_tls` only — no fingerprint is stored. Enable `pve.verify_tls` if your PVE instance has a valid certificate, or keep the setup network segment trusted (isolated LAN/VPN).
+
 ## If the user declines both root credentials
 
 Everything above stays auto-discovered with a read token; only these become manual:
