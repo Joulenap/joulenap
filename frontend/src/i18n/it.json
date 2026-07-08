@@ -129,7 +129,9 @@
       "setup": "Configurazione",
       "setupHint": "Connessione PVE / PBS",
       "safety": "Sicurezza backup",
-      "safetyHint": "Controlli pre-volo e spegnimento"
+      "safetyHint": "Controlli pre-volo e spegnimento",
+      "integrations": "Integrazioni",
+      "integrationsHint": "Widget dashboard (Homepage, ...)"
     },
     "localization": {
       "title": "Localizzazione",
@@ -321,6 +323,26 @@
         "sshManual": "Aggiungi la riga qui sotto a /root/.ssh/authorized_keys sul PBS, poi segna come installata.",
         "fingerprintPinned": "Questa impronta è bloccata — le connessioni vengono rifiutate se cambia."
       }
+    },
+    "integrations": {
+      "title": "Integrazione dashboard",
+      "subtitle": "Esponi lo stato dei backup a una dashboard (Homepage, Homarr, Dashy, Glance) tramite un endpoint API in sola lettura.",
+      "statusEnabled": "Attiva",
+      "statusDisabled": "Disattivata",
+      "generate": "Genera chiave API",
+      "regenerate": "Rigenera chiave",
+      "disable": "Disattiva",
+      "keyShownOnce": "Copia subito questa chiave — non verrà più mostrata.",
+      "copy": "Copia",
+      "copied": "Copiata",
+      "keyHiddenNote": "Una chiave è configurata. Rigenerala per vederne una nuova; quella attuale resta valida.",
+      "dashboardLabel": "Dashboard",
+      "snippetLabel": "Snippet di configurazione",
+      "regenerateConfirmTitle": "Rigenerare la chiave API?",
+      "regenerateConfirmBody": "La chiave attuale smetterà subito di funzionare. Ogni dashboard che la usa dovrà essere aggiornata con la nuova chiave.",
+      "disableConfirmTitle": "Disattivare l'integrazione?",
+      "disableConfirmBody": "L'endpoint restituirà 403 e ogni widget che lo usa smetterà di funzionare.",
+      "keyPlaceholder": "<la-tua-chiave-api>"
     }
   }
 }

@@ -129,7 +129,9 @@
       "setup": "Setup",
       "setupHint": "PVE / PBS connection",
       "safety": "Backup safety",
-      "safetyHint": "Pre-flight & power-off guards"
+      "safetyHint": "Pre-flight & power-off guards",
+      "integrations": "Integrations",
+      "integrationsHint": "Dashboard widgets (Homepage, ...)"
     },
     "localization": {
       "title": "Localization",
@@ -321,6 +323,26 @@
         "sshManual": "Add the line below to /root/.ssh/authorized_keys on the PBS, then mark as installed.",
         "fingerprintPinned": "This fingerprint is pinned — connections are rejected if it changes."
       }
+    },
+    "integrations": {
+      "title": "Dashboard integration",
+      "subtitle": "Expose backup status to a homelab dashboard (Homepage, Homarr, Dashy, Glance) via a read-only API endpoint.",
+      "statusEnabled": "Enabled",
+      "statusDisabled": "Disabled",
+      "generate": "Generate API key",
+      "regenerate": "Regenerate key",
+      "disable": "Disable",
+      "keyShownOnce": "Copy this key now — it won't be shown again.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "keyHiddenNote": "A key is configured. Regenerate to see a new one; the current key stays valid.",
+      "dashboardLabel": "Dashboard",
+      "snippetLabel": "Configuration snippet",
+      "regenerateConfirmTitle": "Regenerate API key?",
+      "regenerateConfirmBody": "The current key will stop working immediately. Any dashboard using it must be updated with the new key.",
+      "disableConfirmTitle": "Disable integration?",
+      "disableConfirmBody": "The endpoint will return 403 and any dashboard widget using it will stop working.",
+      "keyPlaceholder": "<your-api-key>"
     }
   }
 }

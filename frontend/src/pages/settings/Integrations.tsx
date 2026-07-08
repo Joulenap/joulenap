@@ -1,0 +1,244 @@
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { api, ApiError } from '../../api/client'
+import { ConfirmModal, type ConfirmState } from '../../components/ConfirmModal'
+import { c, ghostBtn, labelStyle, panelStyle, primaryBtn } from '../../theme'
+
+type Dashboard = 'homepage' | 'glance' | 'homarr' | 'dashy'
+const DASHBOARDS: Dashboard[] = ['homepage', 'glance', 'homarr', 'dashy']
+
+// The endpoint URL uses the current origin so the snippet is copy-paste-ready.
+function endpointUrl(): string {
+  return `${window.location.origin}/api/dashboard`
+}
+
+function snippet(dash: Dashboard, url: string, key: string): string {
+  const iconUrl = `${window.location.origin}/favicon.svg`
+  const href = window.location.origin
+  switch (dash) {
+    case 'homepage':
+      return `- Joulenap:
+    icon: ${iconUrl}
+    href: ${href}
+    widget:
+      type: customapi
+      url: ${url}
+      headers:
+        X-API-Key: ${key}
+      mappings:
+        - field: pbs_state
+          label: PBS
+        - field: next_run
+          label: Next backup
+          format: relativeDate
+        - field: last_run_status
+          label: Last run
+        - field: datastore_used_pct
+          label: Datastore
+          format: percent`
+    case 'glance':
+      return `- type: custom-api
+  title: Joulenap
+  url: ${url}
+  headers:
+    X-API-Key: ${key}
+  template: |
+    <div>PBS: {{ .JSON.String "pbs_state" }}</div>
+    <div>Next: {{ .JSON.String "next_run" }}</div>
+    <div>Last run: {{ .JSON.String "last_run_status" }}</div>
+    <div>Datastore: {{ .JSON.Int "datastore_used_pct" }}%</div>`
+    case 'homarr':
+      return `# Homarr: add an "API / iframe" style widget pointing at the URL below.
+# Where the widget can't set a request header, use the ?key= form:
+${url}?key=${key}
+# Fields: pbs_state, next_run, last_run_status, last_run_time,
+#         datastore_used_pct, datastore_used_bytes, datastore_total_bytes`
+    case 'dashy':
+      return `# Dashy: use a custom widget that fetches JSON on an interval.
+# If the widget can't send a header, put the key in the URL:
+url: ${url}?key=${key}
+# Fields: pbs_state, next_run, last_run_status, last_run_time,
+#         datastore_used_pct, datastore_used_bytes, datastore_total_bytes`
+  }
+}
+
+export function Integrations() {
+  const { t } = useTranslation()
+  const [enabled, setEnabled] = useState(false)
+  const [freshKey, setFreshKey] = useState<string | null>(null)
+  const [dash, setDash] = useState<Dashboard>('homepage')
+  const [busy, setBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+
+  useEffect(() => {
+    api
+      .getConfig()
+      .then((cfg) => setEnabled(Boolean(cfg.app.api_key)))
+      .catch(() => setEnabled(false))
+  }, [])
+
+  async function doGenerate() {
+    setBusy(true)
+    setErr(null)
+    try {
+      const { api_key } = await api.generateApiKey()
+      setFreshKey(api_key)
+      setEnabled(true)
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doDisable() {
+    setBusy(true)
+    setErr(null)
+    try {
+      await api.deleteApiKey()
+      setFreshKey(null)
+      setEnabled(false)
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const keyForSnippet = freshKey ?? t('settings.integrations.keyPlaceholder')
+  const code = snippet(dash, endpointUrl(), keyForSnippet)
+
+  function copyKey() {
+    if (!freshKey) return
+    void navigator.clipboard.writeText(freshKey)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div style={{ ...panelStyle, padding: '24px 26px', maxWidth: 640 }}>
+      <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
+        {t('settings.integrations.title')}
+      </span>
+      <span style={{ display: 'block', fontSize: 13, color: c.textDim, lineHeight: 1.5, marginBottom: 20 }}>
+        {t('settings.integrations.subtitle')}
+      </span>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: enabled ? c.green : c.textDim }}>
+          {enabled ? t('settings.integrations.statusEnabled') : t('settings.integrations.statusDisabled')}
+        </span>
+        <button
+          onClick={() =>
+            enabled
+              ? setConfirm({
+                  title: t('settings.integrations.regenerateConfirmTitle'),
+                  message: t('settings.integrations.regenerateConfirmBody'),
+                  confirmLabel: t('settings.integrations.regenerate'),
+                  danger: true,
+                  icon: '⟳',
+                  onConfirm: doGenerate,
+                })
+              : doGenerate()
+          }
+          disabled={busy}
+          style={{ ...primaryBtn, padding: '9px 18px' }}
+        >
+          {enabled ? t('settings.integrations.regenerate') : t('settings.integrations.generate')}
+        </button>
+        {enabled && (
+          <button
+            onClick={() =>
+              setConfirm({
+                title: t('settings.integrations.disableConfirmTitle'),
+                message: t('settings.integrations.disableConfirmBody'),
+                confirmLabel: t('settings.integrations.disable'),
+                danger: true,
+                icon: '⨯',
+                onConfirm: doDisable,
+              })
+            }
+            disabled={busy}
+            style={{ ...ghostBtn, padding: '9px 18px' }}
+          >
+            {t('settings.integrations.disable')}
+          </button>
+        )}
+      </div>
+
+      {freshKey && (
+        <div
+          style={{
+            background: c.inputBg,
+            border: `1px solid ${c.border}`,
+            borderRadius: 8,
+            padding: '12px 14px',
+            marginBottom: 18,
+          }}
+        >
+          <div style={{ fontSize: 12, color: c.accent, marginBottom: 8 }}>
+            {t('settings.integrations.keyShownOnce')}
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <code style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, wordBreak: 'break-all' }}>
+              {freshKey}
+            </code>
+            <button onClick={copyKey} style={{ ...ghostBtn, padding: '6px 12px', flex: '0 0 auto' }}>
+              {copied ? t('settings.integrations.copied') : t('settings.integrations.copy')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {enabled && !freshKey && (
+        <div style={{ fontSize: 12, color: c.textDim, marginBottom: 18 }}>
+          {t('settings.integrations.keyHiddenNote')}
+        </div>
+      )}
+
+      <div style={{ marginBottom: 10 }}>
+        <span style={labelStyle}>{t('settings.integrations.dashboardLabel')}</span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {DASHBOARDS.map((d) => (
+            <button
+              key={d}
+              onClick={() => setDash(d)}
+              style={{
+                ...ghostBtn,
+                padding: '6px 14px',
+                textTransform: 'capitalize',
+                background: dash === d ? 'rgba(232,131,15,.12)' : 'transparent',
+                borderColor: dash === d ? c.accent : c.border,
+              }}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <span style={labelStyle}>{t('settings.integrations.snippetLabel')}</span>
+      <pre
+        style={{
+          background: c.inputBg,
+          border: `1px solid ${c.border}`,
+          borderRadius: 8,
+          padding: '12px 14px',
+          overflowX: 'auto',
+          fontSize: 12.5,
+          fontFamily: "'IBM Plex Mono', monospace",
+          color: c.textMid,
+          margin: 0,
+        }}
+      >
+        {code}
+      </pre>
+
+      {err && <div style={{ fontSize: 12, color: c.red, marginTop: 12 }}>{err}</div>}
+
+      <ConfirmModal state={confirm} onCancel={() => setConfirm(null)} />
+    </div>
+  )
+}

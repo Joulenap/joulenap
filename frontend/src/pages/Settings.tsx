@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { c } from '../theme'
 import { Account } from './settings/Account'
 import { BackupSafety } from './settings/BackupSafety'
+import { Integrations } from './settings/Integrations'
 import { Localization } from './settings/Localization'
 import { Notifications } from './settings/Notifications'
 import { SetupWizard } from './settings/SetupWizard'
 
-type Tab = 'localization' | 'account' | 'notifications' | 'setup' | 'safety'
+type Tab = 'localization' | 'account' | 'notifications' | 'setup' | 'safety' | 'integrations'
 
 const NAV: { key: Tab }[] = [
   { key: 'localization' },
@@ -15,6 +16,7 @@ const NAV: { key: Tab }[] = [
   { key: 'notifications' },
   { key: 'setup' },
   { key: 'safety' },
+  { key: 'integrations' },
 ]
 
 export function Settings(_props: { onClose: () => void }) {
@@ -92,6 +94,7 @@ export function Settings(_props: { onClose: () => void }) {
         {tab === 'notifications' && <Notifications />}
         {tab === 'setup' && <SetupWizard />}
         {tab === 'safety' && <BackupSafety />}
+        {tab === 'integrations' && <Integrations />}
       </div>
     </div>
   )
