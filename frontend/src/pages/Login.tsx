@@ -37,7 +37,8 @@ export function Login() {
       if (register) await setup(user.trim(), pass, tz)
       else await login(user.trim(), pass)
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setError(t('auth.errors.invalid'))
+      if (e instanceof ApiError && e.status === 429) setError(e.message)
+      else if (e instanceof ApiError && e.status === 401) setError(t('auth.errors.invalid'))
       else setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
