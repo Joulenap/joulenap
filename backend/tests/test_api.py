@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fakes import FakePve, UnreachablePve, make_deps
@@ -10,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from app.config import load_config
 from app.connectors.pve import Guest
+from app.db import session_scope
+from app.db.models import Run, RunKind, RunStatus, RunTrigger
 from app.jobs import AlreadyRunningError, JobService
 from app.main import create_app
 
@@ -520,3 +523,39 @@ def test_dashboard_401_with_non_ascii_key(app_ctx):
     _enable_api_key(app)
     r = client.get("/api/dashboard?key=%C3%A9")
     assert r.status_code == 401
+
+
+def _add_cycle_run(session, status: RunStatus, *, started_at: datetime) -> Run:
+    run = Run(kind=RunKind.CYCLE, trigger=RunTrigger.SCHEDULED, status=status,
+               started_at=started_at)
+    session.add(run)
+    session.flush()
+    return run
+
+
+def test_dashboard_last_run_reflects_last_finished_cycle_not_in_progress_one(app_ctx):
+    client, app = app_ctx
+    key = _enable_api_key(app)
+    now = datetime.now(UTC)
+    with session_scope() as s:
+        _add_cycle_run(s, RunStatus.SUCCESS, started_at=now - timedelta(hours=1))
+        _add_cycle_run(s, RunStatus.RUNNING, started_at=now)
+
+    r = client.get("/api/dashboard", headers={"X-API-Key": key})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["last_run_status"] == "success"
+    assert datetime.fromisoformat(body["last_run_time"]) == now - timedelta(hours=1)
+
+
+def test_dashboard_last_run_never_when_only_running_cycle(app_ctx):
+    client, app = app_ctx
+    key = _enable_api_key(app)
+    with session_scope() as s:
+        _add_cycle_run(s, RunStatus.RUNNING, started_at=datetime.now(UTC))
+
+    r = client.get("/api/dashboard", headers={"X-API-Key": key})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["last_run_status"] == "never"
+    assert body["last_run_time"] is None

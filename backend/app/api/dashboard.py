@@ -60,7 +60,7 @@ def get_dashboard(
     _authorize(request, store)
 
     config = store.config
-    last = _probe.latest_cycle_run(session)
+    last = _probe.latest_finished_cycle_run(session)
     pbs_online, ds, _load = _probe.probe_pbs(config, job_service.deps.build_pbs)
 
     if job_service.is_running:

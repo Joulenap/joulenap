@@ -13,7 +13,7 @@ from ..config import Config
 from ..connectors import net
 from ..connectors.errors import ConnectorError
 from ..connectors.pbs import DatastoreStatus, NodeLoad, PbsClient
-from ..db.models import Run, RunKind
+from ..db.models import Run, RunKind, RunStatus
 
 # Keep the reachability probe snappy — dashboards poll and the PBS is usually off.
 _PBS_PROBE_TIMEOUT = 1.0
@@ -25,6 +25,17 @@ def latest_cycle_run(session: Session) -> Run | None:
     return session.scalars(
         select(Run)
         .where(Run.kind == RunKind.CYCLE)
+        .order_by(Run.started_at.desc())
+        .limit(1)
+    ).first()
+
+
+def latest_finished_cycle_run(session: Session) -> Run | None:
+    """Most recent backup cycle that has finished (any terminal status), ignoring an
+    in-progress RUNNING cycle — so a mid-backup dashboard shows the previous result."""
+    return session.scalars(
+        select(Run)
+        .where(Run.kind == RunKind.CYCLE, Run.status != RunStatus.RUNNING)
         .order_by(Run.started_at.desc())
         .limit(1)
     ).first()
