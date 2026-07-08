@@ -3,11 +3,25 @@ the M5 setup-wizard router."""
 
 from fastapi import APIRouter
 
-from . import auth, config, guests, jobs, logs, notify, power, scheduler, status, wizard, wol
+from . import (
+    auth,
+    config,
+    dashboard,
+    guests,
+    jobs,
+    logs,
+    notify,
+    power,
+    scheduler,
+    status,
+    wizard,
+    wol,
+)
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router)
 api_router.include_router(status.router)
+api_router.include_router(dashboard.router)
 api_router.include_router(config.router)
 api_router.include_router(guests.router)
 api_router.include_router(scheduler.router)

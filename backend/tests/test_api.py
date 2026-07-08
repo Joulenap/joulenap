@@ -425,3 +425,57 @@ def test_password_change_keeps_acting_session_but_revokes_others(app_ctx):
         assert client.get("/api/auth/me").status_code == 200
         # The other pre-existing session is revoked (its pwv no longer matches the new hash).
         assert other.get("/api/auth/me").status_code == 401
+
+
+# --- dashboard integration ---------------------------------------------------
+
+
+def _enable_api_key(app, key="dash-key-123"):
+    app.state.config_store.update(lambda c: setattr(c.app, "api_key", key))
+    return key
+
+
+def test_dashboard_403_when_no_key_configured(app_ctx):
+    client, app = app_ctx
+    app.state.config_store.update(lambda c: setattr(c.app, "api_key", ""))
+    assert client.get("/api/dashboard").status_code == 403
+
+
+def test_dashboard_401_without_header(app_ctx):
+    client, app = app_ctx
+    _enable_api_key(app)
+    assert client.get("/api/dashboard").status_code == 401
+
+
+def test_dashboard_401_with_wrong_key(app_ctx):
+    client, app = app_ctx
+    _enable_api_key(app, "right-key")
+    r = client.get("/api/dashboard", headers={"X-API-Key": "wrong-key"})
+    assert r.status_code == 401
+
+
+def test_dashboard_200_with_header_key(app_ctx):
+    client, app = app_ctx
+    key = _enable_api_key(app)
+    r = client.get("/api/dashboard", headers={"X-API-Key": key})
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {
+        "pbs_state", "next_run", "last_run_status", "last_run_time",
+        "datastore_used_pct", "datastore_used_bytes", "datastore_total_bytes",
+    }
+    # PBS stubbed offline, no runs yet:
+    assert body["pbs_state"] == "sleeping"
+    assert body["last_run_status"] == "never"
+    assert body["last_run_time"] is None
+    assert body["datastore_used_pct"] is None
+    assert body["datastore_used_bytes"] is None
+    assert body["datastore_total_bytes"] is None
+
+
+def test_dashboard_200_with_query_param_key(app_ctx):
+    client, app = app_ctx
+    key = _enable_api_key(app)
+    r = client.get(f"/api/dashboard?key={key}")
+    assert r.status_code == 200
+    assert r.json()["pbs_state"] == "sleeping"
