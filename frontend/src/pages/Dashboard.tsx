@@ -24,10 +24,12 @@ interface Draft extends SchedulerDraft {
 }
 
 function draftFromConfig(cfg: Config): Draft {
-  const { time, days } = parseCron(cfg.backup.schedule)
+  const { time, days, dom, month } = parseCron(cfg.backup.schedule)
   return {
     time,
     days,
+    dom: dom ?? '*',
+    month: month ?? '*',
     gcEnabled: cfg.maintenance.gc.enabled,
     keepDaily: cfg.backup.retention.keep_daily,
     keepWeekly: cfg.backup.retention.keep_weekly,
@@ -127,7 +129,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const apply = async () => {
     const next: Config = structuredClone(config)
     next.backup.enabled = enabled
-    next.backup.schedule = buildCron({ time: draft.time, days: draft.days })
+    next.backup.schedule = buildCron({ time: draft.time, days: draft.days, dom: draft.dom, month: draft.month })
     next.backup.retention = {
       ...next.backup.retention,
       keep_daily: draft.keepDaily,

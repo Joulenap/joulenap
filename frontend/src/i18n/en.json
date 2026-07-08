@@ -77,6 +77,7 @@
     "wakeRetriesHelp": "If the PBS doesn't come up within the wait timeout, re-send the Wake-on-LAN packet this many more times before giving up. 0 = try once.",
     "seconds": "seconds",
     "backupDays": "Backup days",
+    "scheduleCustom": "Custom schedule set in config.yaml ({{cron}}) — edit it there to change.",
     "apply": "Apply changes",
     "guests": "Guests",
     "refresh": "Refresh",

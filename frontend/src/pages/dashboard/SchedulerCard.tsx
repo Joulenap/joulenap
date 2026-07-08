@@ -1,10 +1,13 @@
 import { useTranslation } from 'react-i18next'
 import { Toggle } from '../../components/Toggle'
 import { c, mono, panelStyle } from '../../theme'
+import { buildCron, isAdvancedSchedule } from '../../utils/cron'
 
 export interface SchedulerDraft {
   time: string
   days: boolean[]
+  dom: string
+  month: string
   gcEnabled: boolean
   keepDaily: number
   keepWeekly: number
@@ -49,6 +52,7 @@ const toInt = (v: string) => (v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0))
 
 export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, onApply }: Props) {
   const { t } = useTranslation()
+  const advanced = isAdvancedSchedule({ time: draft.time, days: draft.days, dom: draft.dom, month: draft.month })
 
   return (
     <div style={{ ...panelStyle, padding: 16 }}>
@@ -68,8 +72,16 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
           <input
             type="time"
             value={draft.time}
+            disabled={advanced}
             onChange={(e) => patch({ time: e.target.value || '00:00' })}
-            style={{ ...numInput, fontSize: 15, fontWeight: 500, padding: '9px 10px' }}
+            style={{
+              ...numInput,
+              fontSize: 15,
+              fontWeight: 500,
+              padding: '9px 10px',
+              opacity: advanced ? 0.45 : 1,
+              cursor: advanced ? 'not-allowed' : 'text',
+            }}
           />
         </label>
 
@@ -171,7 +183,9 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
           return (
             <button
               key={key}
+              disabled={advanced}
               onClick={() => {
+                if (advanced) return
                 const days = draft.days.slice()
                 days[i] = !days[i]
                 patch({ days })
@@ -189,7 +203,8 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
                 fontSize: 12,
                 fontWeight: 600,
                 letterSpacing: '.04em',
-                cursor: 'pointer',
+                cursor: advanced ? 'not-allowed' : 'pointer',
+                opacity: advanced ? 0.45 : 1,
               }}
             >
               {t(`dashboard.days.${key}`)}
@@ -197,6 +212,19 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
           )
         })}
       </div>
+      {advanced && (
+        <span
+          style={{
+            display: 'block',
+            marginTop: 8,
+            fontSize: 11,
+            color: c.textFaint,
+            lineHeight: 1.5,
+          }}
+        >
+          {t('dashboard.scheduleCustom', { cron: buildCron({ time: draft.time, days: draft.days, dom: draft.dom, month: draft.month }) })}
+        </span>
+      )}
 
       <div style={{ height: 1, background: c.border, margin: '18px 0 14px' }} />
       <div style={{ display: 'flex', justifyContent: 'center' }}>

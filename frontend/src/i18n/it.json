@@ -77,6 +77,7 @@
     "wakeRetriesHelp": "Se il PBS non si accende entro il timeout di attesa, reinvia il pacchetto Wake-on-LAN questo numero di volte in più prima di rinunciare. 0 = un solo tentativo.",
     "seconds": "secondi",
     "backupDays": "Giorni di backup",
+    "scheduleCustom": "Pianificazione personalizzata impostata in config.yaml ({{cron}}) — modificala lì per cambiarla.",
     "apply": "Applica modifiche",
     "guests": "Guest",
     "refresh": "Aggiorna",
