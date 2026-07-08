@@ -105,13 +105,17 @@ def test_verify_cycle_wakes_verifies_and_powers_off(temp_db):
 
 
 def test_cycle_captures_task_log_lines_per_step(temp_db):
-    """Backup (PVE) + GC (PBS) task output is persisted as task_log_lines, tagged by step."""
+    """Backup (PVE), GC (PBS), and VERIFY (PBS) task output is persisted as task_log_lines,
+    tagged by the correct step — each source has DISTINCT lines so mis-tagging is detectable."""
     from app.db.models import TaskLogLine
 
     cfg = _config()
     cfg.maintenance.verify.after_backup = True
     pve = FakePve(log_lines=["INFO: creating vzdump", "VM 100: done"])
-    pbs = FakePbs(log_lines=["GC starting", "removed 3 chunks"])
+    pbs = FakePbs(
+        gc_log_lines=["GC starting", "removed 3 chunks"],
+        verify_log_lines=["verify group vm/100", "verified OK"],
+    )
     deps, _pve, _pbs, _power = make_deps(pve=pve, pbs=pbs)
 
     run_id = _run(cfg, deps)
@@ -128,8 +132,7 @@ def test_cycle_captures_task_log_lines_per_step(temp_db):
 
     assert by_step[StepName.BACKUP] == [("pve", "INFO: creating vzdump"), ("pve", "VM 100: done")]
     assert by_step[StepName.GC] == [("pbs", "GC starting"), ("pbs", "removed 3 chunks")]
-    # verify (PBS) ran too, so its lines are captured under the verify step
-    assert by_step[StepName.VERIFY] == [("pbs", "GC starting"), ("pbs", "removed 3 chunks")]
+    assert by_step[StepName.VERIFY] == [("pbs", "verify group vm/100"), ("pbs", "verified OK")]
 
 
 def test_verify_cycle_full_when_reverify_days_zero(temp_db):
@@ -413,3 +416,49 @@ def test_poweroff_failure_is_non_fatal(temp_db):
         # The failure reason lands in the step row (for the run-history UI), not just the log.
         assert poweroff.detail == "poweroff failed"
     assert any(lg.level == LogLevel.WARN and "power-off failed" in lg.message for lg in logs)
+
+
+def test_datastore_read_failure_is_best_effort(temp_db):
+    """A datastore-usage read failure after a good backup must not fail the cycle; the
+    notification simply omits the usage line (datastore=None)."""
+    cfg = _config()
+    captured = {}
+
+    def capture(config, run, ds=None):
+        captured["status"] = run.status
+        captured["ds"] = ds
+
+    pbs = FakePbs(fail_datastore=True)
+    deps, _pve, _pbs, _power = make_deps(pbs=pbs, notify=capture)
+
+    run_id = _run(cfg, deps)
+
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.status == RunStatus.SUCCESS
+    assert captured["status"] == RunStatus.SUCCESS
+    assert captured["ds"] is None
+
+
+def test_failed_cycle_notifies_with_failure_content(temp_db):
+    """A failing backup produces a FAILURE run whose notification renders the failure title
+    and surfaces the recorded error (only success was asserted before)."""
+    from app.notify.messages import _pack, build_run_message
+
+    cfg = _config()
+    captured = {}
+
+    def capture(config, run, ds=None):
+        captured["run"] = run
+        captured["title"], captured["body"] = build_run_message(config, run, ds)
+
+    pve = FakePve(fail_task=True)
+    deps, _pve, _pbs, _power = make_deps(pve=pve, notify=capture)
+
+    _run(cfg, deps)
+
+    assert captured["run"].status == RunStatus.FAILURE
+    assert captured["run"].error  # the backup failure was recorded
+    # Failure title (not the success one); body surfaces the recorded error.
+    assert captured["title"] == _pack(cfg.app.language)["failure"]["title"]
+    assert captured["run"].error in captured["body"]

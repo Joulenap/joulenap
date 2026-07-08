@@ -81,12 +81,18 @@ class FakePbs:
         avail: int = 6_000_000_000,
         snapshots: dict[int, int] | None = None,
         log_lines: list[str] | None = None,
+        fail_datastore: bool = False,
+        gc_log_lines: list[str] | None = None,
+        verify_log_lines: list[str] | None = None,
     ):
         self.fail_task = fail_task
         self.gc_started = False
         self.verify_started = False
         self.verify_args: dict | None = None
         self.log_lines = log_lines or []
+        self.fail_datastore = fail_datastore
+        self.gc_log_lines = gc_log_lines
+        self.verify_log_lines = verify_log_lines
         self._total = total
         self._used = used
         self._avail = avail
@@ -110,13 +116,20 @@ class FakePbs:
         return "UPID:pbs:verify"
 
     def wait_task(self, upid: str, poll_interval=None, on_log=None, **_) -> dict:
-        if on_log and self.log_lines:
-            on_log(list(enumerate(self.log_lines, start=1)))
+        lines = self.log_lines
+        if upid.endswith(":gc") and self.gc_log_lines is not None:
+            lines = self.gc_log_lines
+        elif upid.endswith(":verify") and self.verify_log_lines is not None:
+            lines = self.verify_log_lines
+        if on_log and lines:
+            on_log(list(enumerate(lines, start=1)))
         if self.fail_task:
             raise TaskError("gc failed", exit_status="error")
         return {"status": "stopped", "exitstatus": "OK"}
 
     def datastore_status(self) -> DatastoreStatus:
+        if self.fail_datastore:
+            raise ConnectorError("datastore read failed")
         return DatastoreStatus(total=self._total, used=self._used, avail=self._avail)
 
     def node_status(self) -> NodeLoad:
