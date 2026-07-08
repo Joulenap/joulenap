@@ -152,6 +152,7 @@ class AccountUpdate(BaseModel):
 @router.put("/account", response_model=UserInfo)
 def update_account(
     body: AccountUpdate,
+    request: Request,
     _user: str = security.CurrentUser,
     store: ConfigStore = Depends(get_config_store),
 ) -> UserInfo:
@@ -164,4 +165,8 @@ def update_account(
             cfg.app.auth.password_hash = password_hash
 
     store.update(apply)
+    # Re-issue the acting session's cookie with the new hash so this admin stays logged
+    # in; other pre-existing sessions still carry the old pwv and are now revoked.
+    if password_hash is not None:
+        security.login_session(request, body.username, password_hash)
     return UserInfo(username=body.username)

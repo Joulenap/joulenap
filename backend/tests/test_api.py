@@ -399,10 +399,17 @@ def test_account_update_short_password_rejected(app_ctx, temp_config):
     assert r.status_code == 422
 
 
-def test_password_change_revokes_existing_session(app_ctx):
-    client, _app = app_ctx
-    # `client` is logged in via the fixture. Change the password, then a protected call fails.
-    r = client.put("/api/account", json={"username": "admin", "password": "newpass-8+"})
-    assert r.status_code == 200
-    me = client.get("/api/auth/me")
-    assert me.status_code == 401  # old session's pwv no longer matches
+def test_password_change_keeps_acting_session_but_revokes_others(app_ctx):
+    client, app = app_ctx
+    # A second, independent session established before the change.
+    with TestClient(app) as other:
+        login = other.post("/api/login", json={"username": "admin", "password": "secret12"})
+        assert login.status_code == 200
+        assert other.get("/api/auth/me").status_code == 200
+        # Acting client changes the password.
+        r = client.put("/api/account", json={"username": "admin", "password": "newpass-88"})
+        assert r.status_code == 200
+        # Acting session is kept alive (cookie re-issued with the new hash).
+        assert client.get("/api/auth/me").status_code == 200
+        # The other pre-existing session is revoked (its pwv no longer matches the new hash).
+        assert other.get("/api/auth/me").status_code == 401
