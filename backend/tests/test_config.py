@@ -143,3 +143,8 @@ def test_empty_secret_not_masked():
     cfg.pve.api_token_secret = ""
     red = redacted_dict(cfg)
     assert red["pve"]["api_token_secret"] == ""
+
+
+def test_session_defaults():
+    s = Config().app.session
+    assert s.https_only is False and s.max_age_days == 14

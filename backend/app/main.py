@@ -85,12 +85,14 @@ def create_app() -> FastAPI:
 
     # Signed session cookie. https_only stays off for LAN/HTTP; same_site=lax is
     # fine for a same-origin SPA.
+    session_cfg = store.config.app.session
     app.add_middleware(
         SessionMiddleware,
         secret_key=store.config.app.secret_key,
         session_cookie="joulenap_session",
         same_site="lax",
-        https_only=False,
+        https_only=session_cfg.https_only,
+        max_age=session_cfg.max_age_days * 86400,
     )
 
     @app.get("/api/health", tags=["meta"])

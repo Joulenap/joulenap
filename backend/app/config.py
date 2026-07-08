@@ -49,6 +49,12 @@ class AuthConfig(_Base):
     password_hash: str = ""
 
 
+class SessionConfig(_Base):
+    # Enable when Joulenap is served over HTTPS (or behind a TLS-terminating proxy).
+    https_only: bool = False
+    max_age_days: int = Field(default=14, ge=1)
+
+
 class AppConfig(_Base):
     language: str = "en"
     theme: Literal["dark", "light"] = "dark"
@@ -59,6 +65,7 @@ class AppConfig(_Base):
     timezone: str = ""
     secret_key: str = "CHANGE_ME"
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    session: SessionConfig = Field(default_factory=SessionConfig)
 
 
 # --- pve ---------------------------------------------------------------------
