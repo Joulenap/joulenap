@@ -94,6 +94,10 @@ Joulenap can trigger backups and power machines on/off, so treat it as privilege
 - The SSH key to PBS should be dedicated and, ideally, restricted to the power-off command.
 - Keep the UI on your LAN/VPN and behind its login. Don't expose it to the internet.
 - `config.yaml` holds secrets — keep its file permissions tight and out of version control.
+- **Login lockout**: after 5 failed login attempts from an IP address, that IP is locked out for 5 minutes (protects against online brute-force attacks).
+- **Password floor**: admin passwords must be at least 8 characters.
+- **Session cookie** (`app.session` in config): set `https_only: true` when serving Joulenap over HTTPS or behind a TLS-terminating proxy; `max_age_days` controls session lifetime (default 14 days). Changing the admin password immediately invalidates all existing sessions.
+- **First-run setup**: complete the initial account setup promptly — the setup endpoint remains open until an account is created (and is rate-limited for security).
 
 ## Roadmap
 
