@@ -5,7 +5,7 @@ import type { Config, GuestInfo, LogLine, StatusResponse } from '../api/types'
 import { ConfirmModal, type ConfirmState } from '../components/ConfirmModal'
 import { useConfig } from '../config/ConfigContext'
 import { useTaskLog } from '../hooks/useTaskLog'
-import { buildCron, parseCron } from '../utils/cron'
+import { buildCron, isAdvancedSchedule, parseCron } from '../utils/cron'
 import { ActivityLog } from './dashboard/ActivityLog'
 import { GuestsPanel } from './dashboard/GuestsPanel'
 import { ManualPanel } from './dashboard/ManualPanel'
@@ -30,6 +30,7 @@ function draftFromConfig(cfg: Config): Draft {
     days,
     dom: dom ?? '*',
     month: month ?? '*',
+    rawSchedule: cfg.backup.schedule,
     gcEnabled: cfg.maintenance.gc.enabled,
     keepDaily: cfg.backup.retention.keep_daily,
     keepWeekly: cfg.backup.retention.keep_weekly,
@@ -129,7 +130,14 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const apply = async () => {
     const next: Config = structuredClone(config)
     next.backup.enabled = enabled
-    next.backup.schedule = buildCron({ time: draft.time, days: draft.days, dom: draft.dom, month: draft.month })
+    next.backup.schedule = isAdvancedSchedule({
+      time: draft.time,
+      days: draft.days,
+      dom: draft.dom,
+      month: draft.month,
+    })
+      ? draft.rawSchedule
+      : buildCron({ time: draft.time, days: draft.days, dom: draft.dom, month: draft.month })
     next.backup.retention = {
       ...next.backup.retention,
       keep_daily: draft.keepDaily,

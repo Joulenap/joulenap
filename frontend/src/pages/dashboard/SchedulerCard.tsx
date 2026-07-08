@@ -1,13 +1,14 @@
 import { useTranslation } from 'react-i18next'
 import { Toggle } from '../../components/Toggle'
 import { c, mono, panelStyle } from '../../theme'
-import { buildCron, isAdvancedSchedule } from '../../utils/cron'
+import { isAdvancedSchedule } from '../../utils/cron'
 
 export interface SchedulerDraft {
   time: string
   days: boolean[]
   dom: string
   month: string
+  rawSchedule: string
   gcEnabled: boolean
   keepDaily: number
   keepWeekly: number
@@ -222,7 +223,7 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
             lineHeight: 1.5,
           }}
         >
-          {t('dashboard.scheduleCustom', { cron: buildCron({ time: draft.time, days: draft.days, dom: draft.dom, month: draft.month }) })}
+          {t('dashboard.scheduleCustom', { cron: draft.rawSchedule })}
         </span>
       )}
 
