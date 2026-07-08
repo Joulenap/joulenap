@@ -300,7 +300,13 @@ export function SetupWizard() {
       const checks = { ...s.checks }
       for (let i = target; i < status.length; i++)
         for (const key of STEP_CHECKS[i]) checks[key] = false
-      return { ...s, status, checks }
+      // Re-editing a PBS-identity card (<=2) may change which PBS we target — drop the
+      // host-key confirmation and pinned fingerprint so they're re-established for the new host.
+      const trust =
+        target <= 2
+          ? { sshHostConfirmed: false, sshHostFp: '', sshHostKeyType: '', sshHostKeyB64: '', pbsFp: '' }
+          : {}
+      return { ...s, status, checks, ...trust }
     })
 
   const connectPve = () =>
@@ -512,7 +518,9 @@ export function SetupWizard() {
         <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Why why={t('settings.setup.why.pbs')} note={rapido ? t('settings.setup.note.pbsRoot') : t('settings.setup.note.pbsToken')} />
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
-            <Field label={t('settings.setup.fields.pbsHost')} value={w.pbsHost} onChange={(v) => patch({ pbsHost: v })} width={170} />
+            <Field label={t('settings.setup.fields.pbsHost')} value={w.pbsHost}
+              onChange={(v) => patch({ pbsHost: v, pbsFp: '', sshHostConfirmed: false, sshHostFp: '', sshHostKeyType: '', sshHostKeyB64: '' })}
+              width={170} />
             <Field label={t('settings.setup.fields.port')} value={w.pbsPort} onChange={(v) => patch({ pbsPort: v })} width={92} />
             <Field label={t('settings.setup.fields.datastore')} value={w.pbsDatastore} onChange={(v) => patch({ pbsDatastore: v })} width={150} />
           </div>
