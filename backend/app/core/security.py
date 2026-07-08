@@ -7,6 +7,8 @@ bcrypt ``password_hash``. Login puts the username in a signed session cookie
 
 from __future__ import annotations
 
+import hashlib
+
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
 
@@ -16,6 +18,7 @@ from .config_store import ConfigStore
 _BCRYPT_MAX_BYTES = 72
 
 _SESSION_USER_KEY = "user"
+_SESSION_PWV_KEY = "pwv"
 
 
 def hash_password(password: str) -> str:
@@ -37,8 +40,15 @@ def verify_password(password: str, password_hash: str) -> bool:
 # --- session helpers ---------------------------------------------------------
 
 
-def login_session(request: Request, username: str) -> None:
+def password_token(password_hash: str) -> str:
+    """Short digest of the stored password hash; embedded in the session so changing the
+    password (new hash) invalidates every existing session."""
+    return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:16]
+
+
+def login_session(request: Request, username: str, password_hash: str) -> None:
     request.session[_SESSION_USER_KEY] = username
+    request.session[_SESSION_PWV_KEY] = password_token(password_hash)
 
 
 def logout_session(request: Request) -> None:
@@ -67,6 +77,12 @@ def require_auth(request: Request) -> str:
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+        )
+    store = get_config_store(request)
+    expected = password_token(store.config.app.auth.password_hash)
+    if request.session.get(_SESSION_PWV_KEY) != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired — sign in again"
         )
     return user
 

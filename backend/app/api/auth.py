@@ -87,7 +87,7 @@ def setup(
     if timezone:
         scheduler.rearm(store.config)
     limiter.reset(ip)
-    security.login_session(request, body.username)
+    security.login_session(request, body.username, password_hash)
     return UserInfo(username=body.username)
 
 
@@ -121,7 +121,7 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password"
         )
     limiter.reset(ip)
-    security.login_session(request, auth.username)
+    security.login_session(request, auth.username, auth.password_hash)
     return UserInfo(username=auth.username)
 
 

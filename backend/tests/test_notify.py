@@ -291,6 +291,8 @@ def test_notify_test_endpoint_no_channels(temp_config, temp_db, monkeypatch):
         client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
         app.state.notifier = NotificationService(apprise_factory=FakeApprise)
         # example config ships telegram enabled; disable everything for this check
-        cfg = Config()
+        # (keep the current app/auth section so the logged-in session stays valid).
+        cfg = app.state.config_store.config.model_copy(deep=True)
+        cfg.notifications = Config().notifications
         app.state.config_store.replace(cfg)
         assert client.post("/api/notify/test").status_code == 400

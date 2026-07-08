@@ -397,3 +397,12 @@ def test_account_update_short_password_rejected(app_ctx, temp_config):
     client, _app = app_ctx
     r = client.put("/api/account", json={"username": "admin", "password": "ab"})
     assert r.status_code == 422
+
+
+def test_password_change_revokes_existing_session(app_ctx):
+    client, _app = app_ctx
+    # `client` is logged in via the fixture. Change the password, then a protected call fails.
+    r = client.put("/api/account", json={"username": "admin", "password": "newpass-8+"})
+    assert r.status_code == 200
+    me = client.get("/api/auth/me")
+    assert me.status_code == 401  # old session's pwv no longer matches
