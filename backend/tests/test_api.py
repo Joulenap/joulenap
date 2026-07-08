@@ -360,6 +360,18 @@ def test_status_omits_datastore_when_offline(app_ctx):
     assert body["datastore"] is None and body["load"] is None
 
 
+def test_probe_pbs_offline_returns_no_datastore():
+    from app.api._probe import probe_pbs
+    from app.config import Config
+
+    cfg = Config()
+    cfg.pbs.host = ""  # no host => never probes
+    online, datastore, load = probe_pbs(cfg, build_pbs=lambda c: None)
+    assert online is False
+    assert datastore is None
+    assert load is None
+
+
 def test_account_update_changes_username_and_password(app_ctx, temp_config):
     client, _app = app_ctx
     r = client.put("/api/account", json={"username": "newadmin", "password": "freshpass"})
