@@ -68,6 +68,8 @@ export const api = {
   status: () => req<StatusResponse>('GET', '/status'),
   getConfig: () => req<Config>('GET', '/config'),
   putConfig: (config: Config) => req<Config>('PUT', '/config', config),
+  generateApiKey: () => req<{ api_key: string }>('POST', '/config/api-key'),
+  deleteApiKey: () => req<void>('DELETE', '/config/api-key'),
   guests: () => req<GuestInfo[]>('GET', '/guests'),
   toggleScheduler: (enabled: boolean) =>
     req<{ enabled: boolean; next_run: string | null }>('POST', '/scheduler/toggle', { enabled }),

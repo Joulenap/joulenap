@@ -149,6 +149,7 @@ export interface AppConfig {
   port: number
   timezone: string
   secret_key: string
+  api_key: string
   auth: { username: string; password_hash: string }
 }
 
