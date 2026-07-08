@@ -48,17 +48,36 @@ function snippet(dash: Dashboard, url: string, key: string): string {
     <div>Last run: {{ .JSON.String "last_run_status" }}</div>
     <div>Datastore: {{ .JSON.Int "datastore_used_pct" }}%</div>`
     case 'homarr':
-      return `# Homarr: add an "API / iframe" style widget pointing at the URL below.
-# Where the widget can't set a request header, use the ?key= form:
-${url}?key=${key}
-# Fields: pbs_state, next_run, last_run_status, last_run_time,
-#         datastore_used_pct, datastore_used_bytes, datastore_total_bytes`
+      return `# Homarr v1.65+: Management -> Custom Widgets -> Add -> Custom API
+URL: ${url}
+HTTP Method: GET
+Authentication: API Key (Header)
+  Header Name: X-API-Key
+  Value: ${key}
+  (or API Key (Query), param "key", if your version lacks header auth:
+   ${url}?key=${key})
+Display Type: Key Value
+
+Fields available: pbs_state, next_run, last_run_status, last_run_time,
+                  datastore_used_pct, datastore_used_bytes, datastore_total_bytes`
     case 'dashy':
-      return `# Dashy: use a custom widget that fetches JSON on an interval.
-# If the widget can't send a header, put the key in the URL:
-url: ${url}?key=${key}
-# Fields: pbs_state, next_run, last_run_status, last_run_time,
-#         datastore_used_pct, datastore_used_bytes, datastore_total_bytes`
+      return `- type: customapi
+  options:
+    url: ${url}
+    headers:
+      X-API-Key: ${key}
+    mappings:
+      - field: pbs_state
+        label: PBS
+      - field: next_run
+        label: Next backup
+        format: relativeDate
+      - field: last_run_status
+        label: Last run
+      - field: datastore_used_pct
+        label: Datastore
+        format: percent
+# No CORS? set useProxy: true, or fall back to ${url}?key=${key}`
   }
 }
 
