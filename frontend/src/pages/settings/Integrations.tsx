@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { ConfirmModal, type ConfirmState } from '../../components/ConfirmModal'
 import { c, ghostBtn, labelStyle, panelStyle, primaryBtn } from '../../theme'
+import { copyToClipboard } from '../../utils/clipboard'
 
 type Dashboard = 'homepage' | 'glance' | 'homarr' | 'dashy'
 const DASHBOARDS: Dashboard[] = ['homepage', 'glance', 'homarr', 'dashy']
@@ -87,7 +88,8 @@ export function Integrations() {
   const [freshKey, setFreshKey] = useState<string | null>(null)
   const [dash, setDash] = useState<Dashboard>('homepage')
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [keyCopyState, setKeyCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [snippetCopyState, setSnippetCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
 
@@ -129,11 +131,17 @@ export function Integrations() {
   const keyForSnippet = freshKey ?? t('settings.integrations.keyPlaceholder')
   const code = snippet(dash, endpointUrl(), keyForSnippet)
 
-  function copyKey() {
+  async function copyKey() {
     if (!freshKey) return
-    void navigator.clipboard.writeText(freshKey)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    const ok = await copyToClipboard(freshKey)
+    setKeyCopyState(ok ? 'copied' : 'failed')
+    setTimeout(() => setKeyCopyState('idle'), ok ? 1500 : 3000)
+  }
+
+  async function copySnippet() {
+    const ok = await copyToClipboard(code)
+    setSnippetCopyState(ok ? 'copied' : 'failed')
+    setTimeout(() => setSnippetCopyState('idle'), ok ? 1500 : 3000)
   }
 
   return (
@@ -204,10 +212,15 @@ export function Integrations() {
             <code style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, wordBreak: 'break-all' }}>
               {freshKey}
             </code>
-            <button onClick={copyKey} style={{ ...ghostBtn, padding: '6px 12px', flex: '0 0 auto' }}>
-              {copied ? t('settings.integrations.copied') : t('settings.integrations.copy')}
+            <button onClick={() => void copyKey()} style={{ ...ghostBtn, padding: '6px 12px', flex: '0 0 auto' }}>
+              {keyCopyState === 'copied' ? t('settings.integrations.copied') : t('settings.integrations.copy')}
             </button>
           </div>
+          {keyCopyState === 'failed' && (
+            <div style={{ fontSize: 12, color: c.red, marginTop: 8 }}>
+              {t('settings.integrations.copyFailed')}
+            </div>
+          )}
         </div>
       )}
 
@@ -238,7 +251,15 @@ export function Integrations() {
         </div>
       </div>
 
-      <span style={labelStyle}>{t('settings.integrations.snippetLabel')}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ ...labelStyle, marginBottom: 0 }}>{t('settings.integrations.snippetLabel')}</span>
+        <button
+          onClick={() => void copySnippet()}
+          style={{ ...ghostBtn, padding: '4px 10px', fontSize: 12, flex: '0 0 auto' }}
+        >
+          {snippetCopyState === 'copied' ? t('settings.integrations.copied') : t('settings.integrations.copySnippet')}
+        </button>
+      </div>
       <pre
         style={{
           background: c.inputBg,
@@ -254,6 +275,14 @@ export function Integrations() {
       >
         {code}
       </pre>
+      <div style={{ fontSize: 12, color: c.textDim, marginTop: 8 }}>
+        {t('settings.integrations.snippetHint')}
+      </div>
+      {snippetCopyState === 'failed' && (
+        <div style={{ fontSize: 12, color: c.red, marginTop: 4 }}>
+          {t('settings.integrations.copyFailed')}
+        </div>
+      )}
 
       {err && <div style={{ fontSize: 12, color: c.red, marginTop: 12 }}>{err}</div>}
 
