@@ -115,6 +115,30 @@ def test_create_token_recreates_when_already_exists():
     assert ("DELETE", "/access/users/root@pam/token/joulenap") in methods
 
 
+def test_create_token_reraises_original_when_delete_fails():
+    """If the token exists (create 400) and the cleanup DELETE also fails, create_token must
+    re-raise the ORIGINAL create error, not the delete's."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/access/ticket"):
+            return _json({"ticket": "PVE:tkt", "CSRFPreventionToken": "csrf123"})
+        if path.endswith("/access/roles") and request.method == "POST":
+            return _json(None)
+        if "/token/" in path and request.method == "POST":
+            return httpx.Response(400, text="token already exists")
+        if "/token/" in path and request.method == "DELETE":
+            return httpx.Response(500, text="delete forbidden")
+        if path.endswith("/access/acl") and request.method == "PUT":
+            return _json(None)
+        return httpx.Response(404)
+
+    with pytest.raises(ApiError) as exc_info:
+        _provisioner(handler).provision_token("root@pam", "pw")
+    # The propagated error is the original create failure (400), not the delete's (500).
+    assert exc_info.value.status == 400
+
+
 def test_login_failure_raises():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text="invalid credentials")
