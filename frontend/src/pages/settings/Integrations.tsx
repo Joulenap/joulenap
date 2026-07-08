@@ -13,7 +13,7 @@ function endpointUrl(): string {
 }
 
 function snippet(dash: Dashboard, url: string, key: string): string {
-  const iconUrl = `${window.location.origin}/favicon.svg`
+  const iconUrl = `${window.location.origin}/assets/joulenap-icon.svg`
   const href = window.location.origin
   switch (dash) {
     case 'homepage':

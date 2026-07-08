@@ -43,7 +43,7 @@ def _authorize(request: Request, store: ConfigStore) -> None:
             detail="Dashboard integration is disabled (no API key configured)",
         )
     provided = request.headers.get("X-API-Key") or request.query_params.get("key") or ""
-    if not secrets.compare_digest(provided, key):
+    if not secrets.compare_digest(provided.encode("utf-8"), key.encode("utf-8")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key"
         )

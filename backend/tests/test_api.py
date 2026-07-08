@@ -513,3 +513,10 @@ def test_dashboard_200_with_query_param_key(app_ctx):
     r = client.get(f"/api/dashboard?key={key}")
     assert r.status_code == 200
     assert r.json()["pbs_state"] == "sleeping"
+
+
+def test_dashboard_401_with_non_ascii_key(app_ctx):
+    client, app = app_ctx
+    _enable_api_key(app)
+    r = client.get("/api/dashboard?key=%C3%A9")
+    assert r.status_code == 401

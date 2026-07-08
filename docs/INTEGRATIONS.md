@@ -65,7 +65,7 @@ onto labelled rows:
 
 ```yaml
 - Joulenap:
-    icon: http://192.168.1.50:8080/favicon.svg
+    icon: http://192.168.1.50:8080/assets/joulenap-icon.svg
     href: http://192.168.1.50:8080
     widget:
       type: customapi
