@@ -301,11 +301,14 @@ export function SetupWizard() {
       for (let i = target; i < status.length; i++)
         for (const key of STEP_CHECKS[i]) checks[key] = false
       // Re-editing a PBS-identity card (<=2) may change which PBS we target — drop the
-      // host-key confirmation and pinned fingerprint so they're re-established for the new host.
-      const trust =
+      // SSH host-key confirmation so it's re-established for the new host. The pinned
+      // PBS fingerprint is only dropped when stepping back before the PBS card itself
+      // (<2); the pbsHost field's own onChange already clears it on a real edit.
+      const trust: Partial<Wiz> =
         target <= 2
-          ? { sshHostConfirmed: false, sshHostFp: '', sshHostKeyType: '', sshHostKeyB64: '', pbsFp: '' }
+          ? { sshHostConfirmed: false, sshHostFp: '', sshHostKeyType: '', sshHostKeyB64: '' }
           : {}
+      if (target < 2) trust.pbsFp = ''
       return { ...s, status, checks, ...trust }
     })
 
