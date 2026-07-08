@@ -44,6 +44,7 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 - ♻️ Retention (daily/weekly/monthly) and scheduled Garbage Collection
 - 🔔 Notifications: Apprise, Telegram, ntfy, Discord, email — on success and/or failure
 - 📜 Live log viewer and manual "Run backup now" / "Run GC now"
+- 📊 Dashboard integration: expose backup status to Homepage, Homarr, Dashy or Glance — see [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)
 - 🌍 Multi-language UI
 - 🔒 Login-protected; secrets kept out of the repo
 
