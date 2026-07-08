@@ -169,6 +169,40 @@ def test_config_put_custom_urls_replace_keep_and_mixed(app_ctx, temp_config):
     assert client.put("/api/config", json=mixed).status_code == 422
 
 
+# --- api-key management -------------------------------------------------------
+
+
+def test_generate_api_key_returns_and_persists(app_ctx):
+    client, app = app_ctx
+    r = client.post("/api/config/api-key")
+    assert r.status_code == 200
+    key = r.json()["api_key"]
+    assert key and len(key) >= 20
+    assert app.state.config_store.config.app.api_key == key
+
+
+def test_regenerate_api_key_replaces_old(app_ctx):
+    client, app = app_ctx
+    first = client.post("/api/config/api-key").json()["api_key"]
+    second = client.post("/api/config/api-key").json()["api_key"]
+    assert first != second
+    assert app.state.config_store.config.app.api_key == second
+
+
+def test_delete_api_key_clears_it(app_ctx):
+    client, app = app_ctx
+    client.post("/api/config/api-key")
+    r = client.delete("/api/config/api-key")
+    assert r.status_code == 204
+    assert app.state.config_store.config.app.api_key == ""
+
+
+def test_api_key_management_requires_auth(temp_config, temp_db):
+    with TestClient(create_app()) as client:
+        assert client.post("/api/config/api-key").status_code == 401
+        assert client.delete("/api/config/api-key").status_code == 401
+
+
 # --- scheduler toggle --------------------------------------------------------
 
 

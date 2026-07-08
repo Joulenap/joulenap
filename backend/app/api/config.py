@@ -6,6 +6,7 @@ re-arm the scheduler so a new schedule/enabled flag takes effect immediately.
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -40,7 +41,7 @@ def put_config(
     # Deep-merge over the stored config so PUT means "apply these changes", not "replace
     # everything": an omitted section/field keeps its current value (a partial body can no
     # longer wipe secrets). Then resolve any ***REDACTED*** the client echoed back, and force
-    # server-managed secrets (secret_key, password_hash) to the stored values.
+    # server-managed secrets (secret_key, password_hash, api_key) to the stored values.
     base = store.config.model_dump(mode="python")
     try:
         merged = restore_secrets(deep_merge(base, incoming), store.config)
@@ -63,3 +64,27 @@ def put_config(
 
     scheduler.rearm(new_config)
     return redacted_dict(new_config)
+
+
+@router.post("/config/api-key", status_code=status.HTTP_200_OK)
+def generate_api_key(store: ConfigStore = Depends(get_config_store)) -> dict[str, str]:
+    """Generate (or rotate) the dashboard integration key; returns it once."""
+    key = secrets.token_urlsafe(32)
+    try:
+        store.update(lambda c: setattr(c.app, "api_key", key))
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+    return {"api_key": key}
+
+
+@router.delete("/config/api-key", status_code=status.HTTP_204_NO_CONTENT)
+def delete_api_key(store: ConfigStore = Depends(get_config_store)) -> None:
+    """Clear the dashboard integration key (disables GET /api/dashboard)."""
+    try:
+        store.update(lambda c: setattr(c.app, "api_key", ""))
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
