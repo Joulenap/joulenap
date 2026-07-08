@@ -23,6 +23,7 @@ from . import paths
 SECRET_KEYS: frozenset[str] = frozenset(
     {
         "secret_key",
+        "api_key",
         "password_hash",
         "api_token_secret",
         "bot_token",
@@ -64,6 +65,9 @@ class AppConfig(_Base):
     # with a warning (see core/scheduler.resolve_timezone).
     timezone: str = ""
     secret_key: str = "CHANGE_ME"
+    # Read-only integration key for GET /api/dashboard (empty => integration disabled).
+    # Managed only via POST/DELETE /api/config/api-key; PUT /api/config never touches it.
+    api_key: str = ""
     auth: AuthConfig = Field(default_factory=AuthConfig)
     session: SessionConfig = Field(default_factory=SessionConfig)
 
@@ -331,13 +335,14 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 def enforce_server_managed(merged: dict[str, Any], current: Config) -> dict[str, Any]:
     """Force server-owned secrets to their stored values, ignoring whatever the client sent.
 
-    ``app.secret_key`` (session-signing key) and ``app.auth.password_hash`` (owned solely by
-    PUT /api/account) must never be set or cleared through PUT /api/config. Mutates and
-    returns ``merged``.
+    ``app.secret_key`` (session-signing key), ``app.api_key`` (dashboard integration), and
+    ``app.auth.password_hash`` (owned solely by PUT /api/account) must never be set or
+    cleared through PUT /api/config. Mutates and returns ``merged``.
     """
     app = merged.get("app")
     if isinstance(app, dict):
         app["secret_key"] = current.app.secret_key
+        app["api_key"] = current.app.api_key
         auth = app.get("auth")
         if isinstance(auth, dict):
             auth["password_hash"] = current.app.auth.password_hash

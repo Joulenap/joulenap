@@ -148,3 +148,22 @@ def test_empty_secret_not_masked():
 def test_session_defaults():
     s = Config().app.session
     assert s.https_only is False and s.max_age_days == 14
+
+
+def test_api_key_is_redacted():
+    from app.config import Config, redacted_dict
+    cfg = Config()
+    cfg.app.api_key = "super-secret-key"
+    out = redacted_dict(cfg)
+    assert out["app"]["api_key"] == "***REDACTED***"
+
+
+def test_api_key_is_server_managed_on_put():
+    # enforce_server_managed must pin the stored api_key, ignoring client input.
+    from app.config import Config, enforce_server_managed
+    current = Config()
+    current.app.api_key = "stored-key"
+    merged = {"app": {"api_key": "attacker-supplied", "language": "it"}}
+    result = enforce_server_managed(merged, current)
+    assert result["app"]["api_key"] == "stored-key"
+    assert result["app"]["language"] == "it"  # non-secret fields still pass through

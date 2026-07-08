@@ -12,6 +12,9 @@ app:
                             # Empty -> the TZ env var, then UTC. Set this (or TZ) or
                             # "backup at 02:00" runs at 02:00 UTC in a container.
   secret_key: "CHANGE_ME"   # random string for session signing
+  # Read-only key for the dashboard integration endpoint (GET /api/dashboard).
+  # Leave empty to disable. Generate/rotate it from Settings -> Integrations in the UI.
+  api_key: ""
   session:
     https_only: false
     max_age_days: 14
