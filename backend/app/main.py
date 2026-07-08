@@ -20,6 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import __version__
 from .api import api_router
 from .core.config_store import ConfigStore
+from .core.ratelimit import LoginRateLimiter
 from .core.scheduler import Scheduler
 from .db import init_db, session_scope
 from .db.startup import sweep_orphaned_runs
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="Joulenap", version=__version__, lifespan=lifespan)
     app.state.config_store = store
+    app.state.login_limiter = LoginRateLimiter()
 
     # Signed session cookie. https_only stays off for LAN/HTTP; same_site=lax is
     # fine for a same-origin SPA.

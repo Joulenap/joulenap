@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..core import security
 from ..core.config_store import ConfigStore
 from ..core.security import get_config_store
-from .deps import Scheduler, get_scheduler
+from .deps import LoginRateLimiter, Scheduler, get_login_limiter, get_scheduler
 
 router = APIRouter(tags=["auth"])
 
@@ -58,8 +58,17 @@ def setup(
     request: Request,
     store: ConfigStore = Depends(get_config_store),
     scheduler: Scheduler = Depends(get_scheduler),
+    limiter: LoginRateLimiter = Depends(get_login_limiter),
 ) -> UserInfo:
+    ip = request.client.host if request.client else "unknown"
+    remaining = limiter.locked_for(ip)
+    if remaining > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many attempts — try again in {int(remaining) + 1}s",
+        )
     if not security.setup_needed(store):
+        limiter.record_failure(ip)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="An account already exists"
         )
@@ -77,6 +86,7 @@ def setup(
     # rather than only after the user next saves config.
     if timezone:
         scheduler.rearm(store.config)
+    limiter.reset(ip)
     security.login_session(request, body.username)
     return UserInfo(username=body.username)
 
@@ -86,7 +96,15 @@ def login(
     body: Credentials,
     request: Request,
     store: ConfigStore = Depends(get_config_store),
+    limiter: LoginRateLimiter = Depends(get_login_limiter),
 ) -> UserInfo:
+    ip = request.client.host if request.client else "unknown"
+    remaining = limiter.locked_for(ip)
+    if remaining > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many attempts — try again in {int(remaining) + 1}s",
+        )
     if security.setup_needed(store):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -98,9 +116,11 @@ def login(
     user_ok = body.username == auth.username
     pw_ok = security.verify_password(body.password, auth.password_hash)
     if not (user_ok and pw_ok):
+        limiter.record_failure(ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password"
         )
+    limiter.reset(ip)
     security.login_session(request, auth.username)
     return UserInfo(username=auth.username)
 

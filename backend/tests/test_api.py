@@ -56,6 +56,15 @@ def test_protected_endpoints_require_auth(temp_config, temp_db):
             assert client.post(path).status_code == 401, path
 
 
+def test_login_locks_out_after_repeated_failures(app_ctx):
+    client, _app = app_ctx
+    for _ in range(5):
+        r = client.post("/api/login", json={"username": "admin", "password": "wrong-xxxx"})
+        assert r.status_code == 401
+    r = client.post("/api/login", json={"username": "admin", "password": "wrong-xxxx"})
+    assert r.status_code == 429
+
+
 # --- status ------------------------------------------------------------------
 
 
