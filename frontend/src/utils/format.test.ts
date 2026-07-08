@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { fmtBytesTB, fmtUptime, rel } from './format.ts'
 
-test('rel: sub-minute renders <1m', () => {
+test('rel: sub-minute vs rounds-to-a-minute', () => {
   assert.equal(rel(0), '<1m')
-  assert.equal(rel(30_000), '<1m')
+  assert.equal(rel(20_000), '<1m') // round(0.33) = 0
+  assert.equal(rel(30_000), '1m')  // round(0.5) = 1
 })
 
 test('rel: minutes and hours', () => {
