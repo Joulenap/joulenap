@@ -49,9 +49,10 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 ## Status
 
-**v0.1.0 — beta.** Feature-complete for the first release: scheduler + Wake-on-LAN + vzdump +
-retention + GC + verify + notifications + setup wizard, packaged as a Docker image. See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and API.
+**v0.1.1.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
+notifications + setup wizard, packaged as a Docker image — with transport hardening (PBS TLS
+pinning + SSH host-key verification) and auth hardening (login rate-limit, session hardening).
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and API.
 
 ## Quick start (Docker)
 
@@ -92,6 +93,8 @@ Joulenap can trigger backups and power machines on/off, so treat it as privilege
 
 - Use **scoped API tokens** for PVE (Audit + Backup) and PBS, not root passwords.
 - The SSH key to PBS should be dedicated and, ideally, restricted to the power-off command.
+- **PBS API is TLS-pinned**: calls to PBS are pinned to its certificate fingerprint (captured at setup), so a swapped/MITM cert is rejected; a legitimately renewed cert is accepted after you re-run PBS detection in the wizard.
+- **PBS SSH host key is verified**: confirmed once during setup and stored in `data/known_hosts`; later power-off/GC connections verify against it. Details in [`docs/CONFIG-WIZARD.md`](docs/CONFIG-WIZARD.md#security).
 - Keep the UI on your LAN/VPN and behind its login. Don't expose it to the internet.
 - `config.yaml` holds secrets — keep its file permissions tight and out of version control.
 - **Login lockout**: after 5 failed login attempts from an IP address, that IP is locked out for 5 minutes (protects against online brute-force attacks).

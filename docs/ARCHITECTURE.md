@@ -15,9 +15,9 @@
 - **Scheduler**: in-process (APScheduler). Cron-style triggers for the backup job and the scheduled verify; GC has no trigger of its own — it runs as a step of the backup cycle. Re-armed whenever config changes.
 - **Connectors**:
   - `pve` — PVE API client (list guests, trigger `vzdump`, read task status).
-  - `pbs` — PBS API client (datastore status, start/poll Garbage Collection, verify).
+  - `pbs` — PBS API client (datastore status, start/poll Garbage Collection, verify). TLS-pinned to the fingerprint stored at setup (rejects a changed cert).
   - `wol` — sends the Wake-on-LAN magic packet on the LAN.
-  - `power` — SSH to PBS for `poweroff`.
+  - `power` — SSH to PBS for `poweroff`, verified against `data/known_hosts` (host key confirmed in the wizard).
   - `notify` — Apprise / Telegram / ntfy / Discord / email senders.
 - **Store**: `config.yaml` for settings; a small SQLite DB (`data/`) for run history and logs.
 
@@ -91,6 +91,8 @@ Everything is served under `/api`. Auth is a signed **session cookie** started b
 | GET | `/api/wizard/interfaces` | local NICs, to pick the WoL broadcast interface |
 | POST | `/api/wizard/wol/detect-mac` | detect the PBS MAC via ping + ARP |
 | POST | `/api/wizard/ssh/keygen` | generate the poweroff SSH keypair |
+| POST | `/api/wizard/ssh/hostkey` | scan the PBS SSH host key + fingerprint (to confirm before the root password is sent) |
+| POST | `/api/wizard/ssh/trust` | persist the user-confirmed PBS host key to `data/known_hosts` |
 | POST | `/api/wizard/ssh/install` | quick mode: install the public key on PBS over root SSH |
 | POST | `/api/wizard/reset` | clear the connection config, keep the tuning |
 

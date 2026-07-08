@@ -229,10 +229,10 @@ systemctl enable --now joulenap
 
 Once the UI is up at `http://<host>:8080` (same for every install path):
 
-1. **Create the admin account** (username + password) and **confirm your timezone**. This is a
-   one-time registration. The timezone dropdown is pre-filled from your browser, so usually you just
-   leave it — it sets `app.timezone` so your backup schedule runs in your local time (you can change
-   it later under **Settings → Localization**).
+1. **Create the admin account** (username + a password of **at least 8 characters**) and **confirm
+   your timezone**. This is a one-time registration. The timezone dropdown is pre-filled from your
+   browser, so usually you just leave it — it sets `app.timezone` so your backup schedule runs in
+   your local time (you can change it later under **Settings → Localization**).
    - *Prefer to pre-seed the account?* Generate a bcrypt hash and put it in `app.auth.password_hash` in
      `config.yaml`:
      ```bash
