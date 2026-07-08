@@ -21,7 +21,7 @@ def app_ctx(temp_config, temp_db, monkeypatch):
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: False)
     app = create_app()
     with TestClient(app) as client:
-        client.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
+        client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
         yield client, app
 
 
@@ -379,7 +379,7 @@ def test_account_update_empty_password_keeps_current(app_ctx, temp_config):
     assert r.status_code == 200
     client.post("/api/logout")
     # Old password still valid under the new username => password unchanged.
-    login = client.post("/api/login", json={"username": "admin2", "password": "secret"})
+    login = client.post("/api/login", json={"username": "admin2", "password": "secret12"})
     assert login.status_code == 200
 
 
@@ -389,7 +389,7 @@ def test_account_update_omitted_password_keeps_current(app_ctx, temp_config):
     r = client.put("/api/account", json={"username": "admin4"})
     assert r.status_code == 200
     client.post("/api/logout")
-    login = client.post("/api/login", json={"username": "admin4", "password": "secret"})
+    login = client.post("/api/login", json={"username": "admin4", "password": "secret12"})
     assert login.status_code == 200
 
 

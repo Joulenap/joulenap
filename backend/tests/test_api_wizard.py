@@ -14,7 +14,7 @@ from app.main import create_app
 def client(temp_config, temp_db):
     app = create_app()
     with TestClient(app) as c:
-        c.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
+        c.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
         yield c
 
 

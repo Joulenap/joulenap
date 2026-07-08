@@ -23,7 +23,7 @@
     "timezoneHint": "Detected from your browser. The backup schedule runs in this timezone — you can change it later under Settings.",
     "errors": {
       "userShort": "The username must be at least 3 characters.",
-      "passShort": "The password must be at least 4 characters.",
+      "passShort": "The password must be at least 8 characters.",
       "mismatch": "The passwords do not match.",
       "invalid": "Incorrect username or password."
     }

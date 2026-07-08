@@ -38,7 +38,7 @@ def test_me_requires_auth(client):
 
 
 def test_setup_then_authenticated(client):
-    r = client.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
+    r = client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
     assert r.status_code == 201
     assert r.json() == {"username": "admin"}
     # Session established by setup.
@@ -50,8 +50,8 @@ def test_setup_then_authenticated(client):
 
 
 def test_setup_rejected_when_account_exists(client):
-    client.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
-    r = client.post("/api/auth/setup", json={"username": "other", "password": "yyyy"})
+    client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
+    r = client.post("/api/auth/setup", json={"username": "other", "password": "yyyyyyyy"})
     assert r.status_code == 409
 
 
@@ -59,7 +59,7 @@ def test_setup_persists_timezone(client):
     # The first-run screen sends the browser-detected timezone; it must land in app.timezone.
     r = client.post(
         "/api/auth/setup",
-        json={"username": "admin", "password": "secret", "timezone": "America/New_York"},
+        json={"username": "admin", "password": "secret12", "timezone": "America/New_York"},
     )
     assert r.status_code == 201
     cfg = client.get("/api/config").json()
@@ -67,34 +67,39 @@ def test_setup_persists_timezone(client):
 
 
 def test_setup_without_timezone_keeps_default(client):
-    r = client.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
+    r = client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
     assert r.status_code == 201
     cfg = client.get("/api/config").json()
     assert cfg["app"]["timezone"] == ""
 
 
 def test_setup_validation(client):
-    short_user = client.post("/api/auth/setup", json={"username": "ab", "password": "secret"})
+    short_user = client.post("/api/auth/setup", json={"username": "ab", "password": "secret12"})
     assert short_user.status_code == 422
     short_pass = client.post("/api/auth/setup", json={"username": "abc", "password": "no"})
     assert short_pass.status_code == 422
 
 
 def test_login_logout_cycle(client):
-    client.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
+    client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
     client.post("/api/logout")
     assert client.get("/api/auth/me").status_code == 401
 
     bad = client.post("/api/login", json={"username": "admin", "password": "wrong"})
     assert bad.status_code == 401
 
-    ok = client.post("/api/login", json={"username": "admin", "password": "secret"})
+    ok = client.post("/api/login", json={"username": "admin", "password": "secret12"})
     assert ok.status_code == 200
     assert client.get("/api/auth/me").json()["username"] == "admin"
 
 
 def test_password_is_hashed_not_plaintext(client, temp_config):
-    client.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
+    client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
     cfg = load_config(temp_config)
     assert cfg.app.auth.password_hash.startswith("$2")
-    assert "secret" not in cfg.app.auth.password_hash
+    assert "secret12" not in cfg.app.auth.password_hash
+
+
+def test_setup_rejects_short_password(client):
+    r = client.post("/api/auth/setup", json={"username": "admin", "password": "1234"})
+    assert r.status_code == 422

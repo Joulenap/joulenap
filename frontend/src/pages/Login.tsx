@@ -29,7 +29,7 @@ export function Login() {
     setError('')
     if (register) {
       if (user.trim().length < 3) return setError(t('auth.errors.userShort'))
-      if (pass.length < 4) return setError(t('auth.errors.passShort'))
+      if (pass.length < 8) return setError(t('auth.errors.passShort'))
       if (pass !== pass2) return setError(t('auth.errors.mismatch'))
     }
     setBusy(true)

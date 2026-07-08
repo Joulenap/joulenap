@@ -23,7 +23,7 @@
     "timezoneHint": "Rilevato dal tuo browser. La pianificazione dei backup usa questo fuso orario — puoi cambiarlo in seguito nelle Impostazioni.",
     "errors": {
       "userShort": "Il nome utente deve avere almeno 3 caratteri.",
-      "passShort": "La password deve avere almeno 4 caratteri.",
+      "passShort": "La password deve avere almeno 8 caratteri.",
       "mismatch": "Le password non coincidono.",
       "invalid": "Nome utente o password errati."
     }

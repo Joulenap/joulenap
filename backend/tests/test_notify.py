@@ -267,7 +267,7 @@ def test_notify_test_endpoint(temp_config, temp_db, monkeypatch):
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: False)
     app = create_app()
     with TestClient(app) as client:
-        client.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
+        client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
         fake = FakeApprise()
         app.state.notifier = NotificationService(apprise_factory=lambda: fake)
         # configure at least one channel
@@ -288,7 +288,7 @@ def test_notify_test_endpoint_no_channels(temp_config, temp_db, monkeypatch):
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: False)
     app = create_app()
     with TestClient(app) as client:
-        client.post("/api/auth/setup", json={"username": "admin", "password": "secret"})
+        client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
         app.state.notifier = NotificationService(apprise_factory=FakeApprise)
         # example config ships telegram enabled; disable everything for this check
         cfg = Config()

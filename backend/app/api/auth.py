@@ -25,7 +25,7 @@ class Credentials(BaseModel):
 class SetupRequest(BaseModel):
     # First-run minimums mirror the prototype's client-side validation.
     username: str = Field(min_length=3)
-    password: str = Field(min_length=4)
+    password: str = Field(min_length=8)
     # IANA timezone the first-run screen detects from the browser (empty => keep the
     # config default: TZ env, then UTC). An invalid name is tolerated — the scheduler
     # falls back to UTC (see core/scheduler.resolve_timezone).
@@ -144,8 +144,8 @@ class AccountUpdate(BaseModel):
     @field_validator("password")
     @classmethod
     def _min_len_when_set(cls, v: str | None) -> str | None:
-        if v and len(v) < 4:
-            raise ValueError("password must be at least 4 characters")
+        if v and len(v) < 8:
+            raise ValueError("password must be at least 8 characters")
         return v
 
 
