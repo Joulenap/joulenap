@@ -1,7 +1,7 @@
 // Small date/number formatters shared across the header and dashboard, matching the
 // prototype's output. Relative strings are word-free so callers add "in"/"ago" via i18n.
 
-import i18n from '../i18n'
+import i18n from '../i18n/index.ts'
 
 export const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -20,7 +20,7 @@ export const fmtShort = (d: Date) =>
   `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 
 export function rel(ms: number): string {
-  const m = Math.round(Math.abs(ms) / 60000)
+  const m = Math.floor(Math.abs(ms) / 60000)
   if (m < 1) return '<1m'
   if (m < 60) return `${m}m`
   const h = Math.floor(m / 60)
