@@ -205,3 +205,27 @@ class GuestBackup(Base):
     vmid: Mapped[int] = mapped_column(primary_key=True)
     # The snapshot's own backup time (not when we cached it).
     last_backup: Mapped[datetime] = mapped_column(UtcDateTime())
+
+
+class DatastoreStat(Base):
+    """Cached PBS datastore usage, keyed by datastore name.
+
+    The PBS is powered off most of the time, so its datastore usage can't be read on
+    demand. The backup cycle (and any live status probe that finds the PBS online) upserts
+    this row while the PBS is awake; /api/status and /api/dashboard serve the cached values
+    so disk usage shows while the PBS sleeps. Mirrors GuestBackup.
+    """
+
+    __tablename__ = "datastore_stats"
+
+    datastore: Mapped[str] = mapped_column(String(128), primary_key=True)
+    total: Mapped[int] = mapped_column()  # bytes
+    used: Mapped[int] = mapped_column()  # bytes
+    # When the cached values last changed (advance-on-change). Not surfaced in any API.
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=_utcnow, onupdate=_utcnow
+    )
+
+    @property
+    def used_pct(self) -> float:
+        return round(self.used / self.total * 100, 1) if self.total else 0.0
