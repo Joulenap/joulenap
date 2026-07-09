@@ -67,6 +67,12 @@ class _LogCapture(logging.Handler):
     one send's failure reason from being attributed to the other's channel — do not remove
     this check as an unneeded "simplification", it is the only thing making capture
     thread-safe.
+
+    This relies on the plugin logging from the calling thread, which holds only because we
+    give each engine exactly one URL: Apprise dispatches a single server sequentially and
+    only reaches for its thread pool with two or more. Batch several URLs into one engine
+    and the reason would be logged off-thread, get dropped here, and every failure would
+    report no reason at all.
     """
 
     def __init__(self) -> None:
