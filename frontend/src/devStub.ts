@@ -218,7 +218,7 @@ const WIZARD_SSH_TRUST: { trusted: boolean } = { trusted: true }
 const WIZARD_RESET: { ok: boolean } = { ok: true }
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '0.3.0-stub' },
+  'GET /health': { status: 'ok', version: '0.3.1-stub' },
   'GET /auth/status': AUTH_STATUS,
   'GET /auth/me': ME,
   'GET /status': STATUS,
