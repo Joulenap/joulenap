@@ -48,6 +48,24 @@ cd backend && python -m app.main    # serves the API (and the built SPA if you r
 The example config ships **unconfigured**, so the app drops you into the first-run registration and
 setup wizard — no real Proxmox needed to click around the UI.
 
+### Frontend without a backend
+
+To work on the UI alone — layout, styling, i18n — you can run the SPA against a built-in
+stub instead of a real backend and a real Proxmox:
+
+```bash
+cd frontend
+npm run dev -- --mode stub
+```
+
+`frontend/src/devStub.ts` answers every `/api/*` request from fixtures (a configured install,
+three guests, a few log lines) and pins the clock, so the UI renders exactly the same on every
+run — handy for screenshots and layout comparisons. It is loaded only when `VITE_STUB_API=1`,
+which `frontend/.env.stub` sets for the `stub` mode, and Vite eliminates it from production
+builds.
+
+Add `--host 0.0.0.0` to reach the dev server from a phone on the same network.
+
 ## Before you open a PR
 
 Run what CI runs (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)); all of it must pass:
