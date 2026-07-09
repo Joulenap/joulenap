@@ -456,28 +456,34 @@ def test_notify_failure_does_not_break_cycle(temp_db):
 # --- endpoint ----------------------------------------------------------------
 
 
-def test_notify_test_endpoint(temp_config, temp_db, monkeypatch):
+def test_notify_test_endpoint_reports_each_channel(temp_config, temp_db, monkeypatch):
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: False)
     app = create_app()
     with TestClient(app) as client:
         client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
-        fake = FakeApprise()
+        fake = FakeApprise(fail_urls={"ntfys://ntfy.sh/t": "Failed to resolve 'ntfy.sh'"})
         app.state.notifier = NotificationService(apprise_factory=lambda: fake)
-        # configure at least one channel
         raw = app.state.config_store.config.model_dump(mode="python")
         raw["notifications"]["telegram"] = {
             "enabled": True,
             "bot_token": "123:ABC",
             "chat_id": "456",
         }
+        raw["notifications"]["ntfy"] = {"enabled": True, "url": "https://ntfy.sh", "topic": "t"}
         app.state.config_store.replace(Config.model_validate(raw))
 
         res = client.post("/api/notify/test")
         assert res.status_code == 200
-        assert res.json() == {"sent": True, "channels": 1}
+        assert res.json() == {
+            "channels": [
+                {"channel": "telegram", "ok": True, "error": None},
+                {"channel": "ntfy", "ok": False, "error": "Failed to resolve 'ntfy.sh'"},
+            ]
+        }
 
 
-def test_notify_test_endpoint_no_channels(temp_config, temp_db, monkeypatch):
+def test_notify_test_endpoint_no_channels_is_an_empty_report(temp_config, temp_db, monkeypatch):
+    # Nothing configured is not an error: the request succeeded, there was just nothing to do.
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: False)
     app = create_app()
     with TestClient(app) as client:
@@ -488,4 +494,7 @@ def test_notify_test_endpoint_no_channels(temp_config, temp_db, monkeypatch):
         cfg = app.state.config_store.config.model_copy(deep=True)
         cfg.notifications = Config().notifications
         app.state.config_store.replace(cfg)
-        assert client.post("/api/notify/test").status_code == 400
+
+        res = client.post("/api/notify/test")
+        assert res.status_code == 200
+        assert res.json() == {"channels": []}
