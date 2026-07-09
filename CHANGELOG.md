@@ -102,7 +102,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Joulenap/joulenap/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Joulenap/joulenap/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Joulenap/joulenap/compare/v0.1.1...v0.2.0
 [0.1.0]: https://github.com/Joulenap/joulenap/releases/tag/v0.1.0

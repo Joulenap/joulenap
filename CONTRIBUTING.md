@@ -59,10 +59,10 @@ npm run dev -- --mode stub
 ```
 
 `frontend/src/devStub.ts` answers every `/api/*` request from fixtures (a configured install,
-three guests, a few log lines) and pins the clock, so the UI renders exactly the same on every
-run — handy for screenshots and layout comparisons. It is loaded only when `VITE_STUB_API=1`,
-which `frontend/.env.stub` sets for the `stub` mode, and Vite eliminates it from production
-builds.
+three guests, a few log lines, and enough wizard responses to click through the whole setup
+flow) and pins the clock, so the UI renders exactly the same on every run — handy for
+screenshots and layout comparisons. It is loaded only when `VITE_STUB_API=1`, which
+`frontend/.env.stub` sets for the `stub` mode, and Vite eliminates it from production builds.
 
 Add `--host 0.0.0.0` to reach the dev server from a phone on the same network.
 
