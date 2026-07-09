@@ -11,6 +11,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The Node major selects the bundled npm (22 -> npm 10, 24 -> npm 11), and those npm
+  # majors disagree on whether a violated *optional* peer dependency is fatal. If the
+  # image builds the SPA on a different major than CI validates it on, `npm ci` can pass
+  # every job here and still fail `docker build` on the same lockfile. Fail on drift
+  # rather than trusting the "keep in sync" comment in the Dockerfile.
+  toolchain:
+    name: Toolchain (node parity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Dockerfile node major matches ci.yml node-version
+        run: |
+          set -euo pipefail
+          # `|| true`: a no-match grep exits 1, which under `set -e` would abort the
+          # step before the explicit error below could explain what went wrong.
+          docker_major="$(grep -oP '^FROM node:\K[0-9]+' Dockerfile | sort -u || true)"
+          ci_major="$(grep -oP 'node-version:\s*"\K[0-9]+' .github/workflows/ci.yml | sort -u || true)"
+
+          echo "Dockerfile: ${docker_major:-<none found>}"
+          echo "ci.yml:     ${ci_major:-<none found>}"
+
+          if [ -z "$docker_major" ] || [ -z "$ci_major" ]; then
+            echo "::error::could not parse a node major — did the FROM or node-version syntax change?"
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$docker_major" | wc -l)" -ne 1 ] \
+            || [ "$(printf '%s\n' "$ci_major" | wc -l)" -ne 1 ]; then
+            echo "::error::more than one distinct node major declared; unify them first"
+            exit 1
+          fi
+          if [ "$docker_major" != "$ci_major" ]; then
+            echo "::error::node major drift — Dockerfile is on $docker_major, ci.yml on $ci_major"
+            exit 1
+          fi
+          echo "OK — both build the SPA on node $docker_major"
+
   backend:
     name: Backend (ruff + pytest)
     runs-on: ubuntu-latest
