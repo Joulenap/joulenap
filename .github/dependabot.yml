@@ -2,12 +2,19 @@
 # Pairs with the CI `security` job (pip-audit + npm audit): Dependabot proposes the
 # bumps, CI proves they still pass.
 #
-# Grouping strategy: each group bundles only minor + patch updates (the low-risk,
-# usually-safe bumps, incl. most security fixes) into a single weekly PR. Major
-# updates are deliberately left OUT of the groups, so each breaking major arrives
-# as its own individual PR that can be reviewed and tested on its own — this keeps
-# a security patch (e.g. vite 6.x) from riding in with an untested framework major
-# (e.g. React 19).
+# Grouping strategy: each catch-all group bundles only minor + patch updates (the
+# low-risk, usually-safe bumps, incl. most security fixes) into a single weekly PR.
+# Major updates are deliberately left OUT of those groups, so each breaking major
+# arrives as its own individual PR that can be reviewed and tested on its own — this
+# keeps a security patch (e.g. vite 6.x) from riding in with an untested framework
+# major (e.g. React 19).
+#
+# The exception is packages coupled by peer dependencies: react/react-dom,
+# vite/@vitejs/*, i18next/react-i18next. Bumping one across a major without the
+# other fails `npm ci` with ERESOLVE, so a solo PR for either half can never go
+# green. Those families are grouped ahead of the catch-all with no `update-types`
+# filter, which makes them move as one unit at every version level. Groups are
+# matched top-down, so a coupled family always claims its packages first.
 version: 2
 updates:
   - package-ecosystem: pip
@@ -24,8 +31,18 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    # Raised from 5: the coupled-major PRs below need headroom, and hitting the cap
+    # silently stops Dependabot opening the companion half of a pair.
+    open-pull-requests-limit: 10
     groups:
+      # i18n first: `react-i18next` belongs here, not with the react runtime.
+      i18n:
+        patterns: ["i18next", "react-i18next"]
+      react:
+        patterns:
+          ["react", "react-dom", "@types/react", "@types/react-dom"]
+      vite:
+        patterns: ["vite", "@vitejs/*"]
       frontend:
         patterns: ["*"]
         update-types: ["minor", "patch"]
