@@ -24,18 +24,14 @@ export function Settings(_props: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('localization')
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 22, alignItems: 'start', paddingBottom: 28 }}>
+    <div className="jn-settings">
       <nav
+        className="jn-settings-nav"
         style={{
           background: c.panel,
           border: `1px solid ${c.border}`,
           borderRadius: 12,
           padding: 7,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 3,
-          position: 'sticky',
-          top: 22,
         }}
       >
         {NAV.map(({ key }) => {
@@ -43,13 +39,9 @@ export function Settings(_props: { onClose: () => void }) {
           return (
             <button
               key={key}
+              className="jn-settings-navbtn"
               onClick={() => setTab(key)}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 11,
-                width: '100%',
-                textAlign: 'left',
                 background: active ? 'rgba(232,131,15,.1)' : 'transparent',
                 border: `1px solid ${active ? 'rgba(232,131,15,.32)' : 'transparent'}`,
                 borderRadius: 8,
@@ -59,18 +51,16 @@ export function Settings(_props: { onClose: () => void }) {
               }}
             >
               <span
+                className="jn-settings-rail"
                 style={{
-                  width: 3,
-                  alignSelf: 'stretch',
-                  minHeight: 30,
                   borderRadius: 2,
                   background: active ? c.accent : 'transparent',
-                  flex: '0 0 auto',
                 }}
               />
               <span style={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-start', minWidth: 0 }}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{t(`settings.nav.${key}`)}</span>
                 <span
+                  className="jn-settings-hint"
                   style={{
                     fontSize: 11,
                     fontWeight: 500,
