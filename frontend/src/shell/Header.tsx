@@ -31,30 +31,24 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
   const p = pill(status, t)
 
   return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 18,
-        borderBottom: `1px solid #20262e`,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+    <header className="jn-header">
+      <div className="jn-header-brand">
         <img
           src="/assets/joulenap-icon.svg"
           alt="Joulenap"
-          style={{ height: 58, width: 58, position: 'relative', left: 5 }}
+          className="jn-header-icon"
+          style={{ position: 'relative', left: 5 }}
         />
         <div style={{ width: 1, height: 28, background: c.inputBorder }} />
         <img
           src="/assets/joulenap-wordmark.svg"
           alt="Joulenap"
-          style={{ height: 38, width: 163, filter: 'brightness(0) invert(1)', position: 'relative', top: 4 }}
+          className="jn-header-wordmark"
+          style={{ filter: 'brightness(0) invert(1)', position: 'relative', top: 4 }}
         />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div className="jn-header-status">
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: mono, fontSize: 16, color: '#6f7884' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.color }} />
           {host || '—'}
@@ -95,7 +89,9 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
         <div style={{ fontFamily: mono, fontSize: 15, fontWeight: 500, color: c.textMid, minWidth: 78, textAlign: 'right' }}>
           {fmtClock(now)}
         </div>
+      </div>
 
+      <div className="jn-header-actions">
         <button
           onClick={onToggleView}
           title={t('header.settings')}
