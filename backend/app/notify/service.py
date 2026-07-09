@@ -182,9 +182,11 @@ class NotificationService:
         # channel's own URL first closes that gap for every channel, not just ntfy.
         channel_secrets = [channel.url, *secrets]
         engine = self._apprise_factory()
-        if not engine.add(channel.url):
-            return ChannelResult(channel=channel.name, ok=False, error="invalid URL")
         try:
+            # ``add`` is inside the try as well: it is handed the URL, so an exception raised
+            # from it is the one most likely to carry a secret in its message.
+            if not engine.add(channel.url):
+                return ChannelResult(channel=channel.name, ok=False, error="invalid URL")
             with _captured_apprise_logs() as captured:
                 ok = bool(engine.notify(title=title, body=body))
         except Exception as exc:  # a broken channel must not stop the others

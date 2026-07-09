@@ -298,6 +298,27 @@ def test_rejected_url_is_reported_without_sending():
     assert all(r.ok is False and r.error == "invalid URL" for r in report.results)
 
 
+def test_a_raising_add_does_not_leak_the_url():
+    # ``add`` is the call handed the secret-bearing URL, so an exception from it is the one
+    # most likely to quote that URL back at us.
+    class RaisingAdd:
+        def add(self, url: str) -> bool:
+            raise RuntimeError(f"cannot parse {url}")
+
+        def notify(self, title: str = "", body: str = "") -> bool:
+            raise AssertionError("notify must not run when add raised")
+
+    svc = NotificationService(apprise_factory=RaisingAdd)
+    report = svc.send_test(_notifications_config())
+
+    assert report.sent is False
+    assert all(r.ok is False for r in report.results)
+    blob = " ".join(r.error or "" for r in report.results)
+    assert "ABC" not in blob  # the telegram bot token
+    assert "p@ss/word" not in blob  # the smtp password
+    assert "***" in blob
+
+
 def test_a_raising_channel_is_isolated_from_the_others():
     # The spec's guarantee: one broken channel never prevents the others from being tried.
     fake = FakeApprise(raise_urls={"ntfys://ntfy.sh/homelab": "plugin exploded"})
