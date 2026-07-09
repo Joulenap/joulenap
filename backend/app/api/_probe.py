@@ -78,6 +78,10 @@ def resolve_datastore(datastore: str, live: DatastoreStatus | None) -> Datastore
         if live is not None:
             upsert_datastore_stat(session, datastore, live.total, live.used)
             return DatastoreView(live.total, live.used, live.used_pct)
+        # Reached both when the PBS is off and when it's reachable but the live
+        # datastore read failed (probe_pbs swallowed a ConnectorError) — in the
+        # latter case pbs_state still reports "online" since that field is
+        # reachability-only, while the numbers here fall back to the cache.
         row = get_datastore_stat(session, datastore)
         if row is None:
             return None

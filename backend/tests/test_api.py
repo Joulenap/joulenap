@@ -567,6 +567,25 @@ def test_dashboard_datastore_from_cache_when_offline(app_ctx):
     assert body["datastore_total_bytes"] == 8_000_000_000
 
 
+def test_dashboard_upserts_and_returns_live_when_pbs_online(app_ctx, monkeypatch):
+    client, app = app_ctx
+    key = _enable_api_key(app)
+    monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: True)
+    _inject(app)  # deps.build_pbs -> FakePbs (datastore 8e9/2e9)
+
+    body = client.get("/api/dashboard", headers={"X-API-Key": key}).json()
+    assert body["pbs_state"] == "online"
+    assert body["datastore_used_pct"] == 25.0
+    assert body["datastore_used_bytes"] == 2_000_000_000
+    assert body["datastore_total_bytes"] == 8_000_000_000
+
+    # the live reading was persisted to the cache (write-on-GET)
+    from app.db.datastore_stats import get_datastore_stat
+    with session_scope() as s:
+        row = get_datastore_stat(s, "backup")
+    assert row is not None and row.used == 2_000_000_000
+
+
 def test_dashboard_200_with_query_param_key(app_ctx):
     client, app = app_ctx
     key = _enable_api_key(app)
