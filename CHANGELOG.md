@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1]
+
+### Changed
+
+- **Responsive layout** — the dashboard, header, and settings screen now adapt to narrow
+  screens under a single `900px` breakpoint. The settings sidebar collapses into a 2-column
+  grid of buttons on a phone. Desktop rendering is unchanged.
+
+### Added
+
+- A dev-only API stub (`frontend/src/devStub.ts`, `npm run dev -- --mode stub`) so
+  contributors can work on the UI — including the full setup wizard — against fixture data,
+  without a backend or a real Proxmox. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## [0.3.0]
 
 ### Added
