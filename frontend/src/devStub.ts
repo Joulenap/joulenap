@@ -9,6 +9,9 @@ import type {
   Config,
   GuestInfo,
   LogLine,
+  NetInterface,
+  PbsDerive,
+  PveConnectResult,
   StatusResponse,
   TaskLogResponse,
   UserInfo,
@@ -147,6 +150,73 @@ const LOGS: LogLine[] = [
 
 const TASKLOG: TaskLogResponse = { lines: [], run_id: null }
 
+// --- setup wizard fixtures ---------------------------------------------------
+// Lets the wizard advance card-by-card with no backend: connecting PVE returns a node
+// and a PBS-backed storage, confirming that storage seeds the PBS card, checking the
+// PBS host succeeds, and the SSH card's keygen/host-key-scan/trust steps each return
+// enough to unlock the next button. Same PBS host/fingerprint as the dashboard CONFIG
+// fixture above, for consistency.
+const WIZARD_PBS_FINGERPRINT = 'aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99'
+
+const WIZARD_PVE_CONNECT: PveConnectResult = {
+  connected: true,
+  version: '8.2.4',
+  nodes: [{ node: 'pve', status: 'online' }],
+  storages: [
+    {
+      storage: 'pbs-backup',
+      host: '192.168.1.50',
+      port: 8007,
+      datastore: 'backup-main',
+      fingerprint: WIZARD_PBS_FINGERPRINT,
+    },
+  ],
+  token: { id: 'root@pam!joulenap', secret: 'stub-pve-token-secret' },
+}
+
+const WIZARD_STORAGE_DERIVE: PbsDerive = {
+  host: '192.168.1.50',
+  port: 8007,
+  datastore: 'backup-main',
+  fingerprint: WIZARD_PBS_FINGERPRINT,
+}
+
+const WIZARD_PBS_CHECK: { reachable: boolean; fingerprint: string | null } = {
+  reachable: true,
+  fingerprint: WIZARD_PBS_FINGERPRINT,
+}
+
+const WIZARD_PBS_PROVISION: { id: string; secret: string } = {
+  id: 'joulenap@pbs!token',
+  secret: 'stub-pbs-token-secret',
+}
+
+const WIZARD_INTERFACES: NetInterface[] = [
+  { name: 'eth0', address: '192.168.1.20', netmask: '255.255.255.0', broadcast: '192.168.1.255' },
+  { name: 'eth1', address: '10.0.0.5', netmask: '255.255.255.0', broadcast: '10.0.0.255' },
+]
+
+const WIZARD_DETECT_MAC: { mac: string | null } = { mac: 'AA:BB:CC:DD:EE:FF' }
+
+const WIZARD_KEYGEN: { public_key: string; authorized_keys_line: string; key_path: string } = {
+  public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly stub',
+  authorized_keys_line:
+    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly joulenap@stub',
+  key_path: '/data/ssh/id_ed25519',
+}
+
+const WIZARD_SSH_INSTALL: { installed: boolean } = { installed: true }
+
+const WIZARD_SSH_HOSTKEY: { key_type: string; key_base64: string; fingerprint: string } = {
+  key_type: 'ssh-ed25519',
+  key_base64: 'AAAAC3NzaC1lZDI1NTE5AAAAIStubHostKeyMaterialForDevPreviewOnly',
+  fingerprint: 'SHA256:StubHostKeyFingerprintForDevPreviewOnlyXXXXXXXXXXX',
+}
+
+const WIZARD_SSH_TRUST: { trusted: boolean } = { trusted: true }
+
+const WIZARD_RESET: { ok: boolean } = { ok: true }
+
 const ROUTES: Record<string, unknown> = {
   'GET /health': { status: 'ok', version: '0.3.0-stub' },
   'GET /auth/status': AUTH_STATUS,
@@ -156,6 +226,17 @@ const ROUTES: Record<string, unknown> = {
   'PUT /config': CONFIG,
   'GET /guests': GUESTS,
   'GET /tasklog': TASKLOG,
+  'POST /wizard/pve/connect': WIZARD_PVE_CONNECT,
+  'POST /wizard/storage/derive': WIZARD_STORAGE_DERIVE,
+  'POST /wizard/pbs/check': WIZARD_PBS_CHECK,
+  'POST /wizard/pbs/provision': WIZARD_PBS_PROVISION,
+  'GET /wizard/interfaces': WIZARD_INTERFACES,
+  'POST /wizard/wol/detect-mac': WIZARD_DETECT_MAC,
+  'POST /wizard/ssh/keygen': WIZARD_KEYGEN,
+  'POST /wizard/ssh/install': WIZARD_SSH_INSTALL,
+  'POST /wizard/ssh/hostkey': WIZARD_SSH_HOSTKEY,
+  'POST /wizard/ssh/trust': WIZARD_SSH_TRUST,
+  'POST /wizard/reset': WIZARD_RESET,
 }
 
 const realFetch = globalThis.fetch.bind(globalThis)
