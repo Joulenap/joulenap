@@ -6,7 +6,13 @@
 # --- Stage 1: build the SPA (Vite -> dist) -----------------------------------
 # Debian (not alpine/musl) to avoid esbuild native-binary edge cases; this stage is
 # discarded, so it doesn't affect the final image size.
-FROM node:22-slim AS frontend
+#
+# Keep this major in sync with `node-version` in .github/workflows/ci.yml. The Node
+# major picks the bundled npm (22 -> npm 10, 24 -> npm 11), and the two npm majors
+# disagree on whether a violated *optional* peer dependency is fatal. With CI on 24
+# and this stage on 22, `npm ci` could pass every CI job and still fail the image
+# build on the very same lockfile.
+FROM node:24-slim AS frontend
 WORKDIR /build
 # Install deps first (cached until the lockfile changes), then build.
 COPY frontend/package.json frontend/package-lock.json ./
