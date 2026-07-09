@@ -14,6 +14,7 @@ from ..config import Config
 from ..connectors.pbs import DatastoreStatus
 from ..connectors.pve import PveClient, build_prune_string
 from ..db import session_scope
+from ..db.datastore_stats import upsert_datastore_stat
 from ..db.guest_backups import upsert_last_backups
 from ..db.models import LogLevel, RunStatus, StepName, StepStatus
 from .deps import CycleDeps
@@ -102,6 +103,7 @@ def _preflight_step(config: Config, recorder: RunRecorder, deps: CycleDeps) -> N
     with recorder.step(StepName.PRECHECK) as step:
         with deps.build_pbs(config) as pbs:
             ds = pbs.datastore_status()
+        _cache_datastore_stat(config, recorder, ds)
         free = ds.avail_pct
         step.detail = f"{free:.1f}% free ({ds.avail / 1_000_000_000:.0f} GB)"
         if free < threshold:
@@ -186,7 +188,18 @@ def _read_datastore(
         recorder.log(LogLevel.WARN, f"could not read datastore usage: {exc}")
         return None
     recorder.log(LogLevel.INFO, f"PBS datastore {ds.used_pct}% used")
+    _cache_datastore_stat(config, recorder, ds)
     return ds
+
+
+def _cache_datastore_stat(config: Config, recorder: RunRecorder, ds: DatastoreStatus) -> None:
+    """Persist the latest datastore usage so the dashboard/UI can show it while the PBS
+    sleeps. Best-effort: a cache-write failure must never fail the cycle."""
+    try:
+        with session_scope() as session:
+            upsert_datastore_stat(session, config.pbs.datastore, ds.total, ds.used)
+    except Exception as exc:
+        recorder.log(LogLevel.WARN, f"could not cache datastore usage: {exc}")
 
 
 def _refresh_backup_cache(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:

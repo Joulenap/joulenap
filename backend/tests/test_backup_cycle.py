@@ -182,6 +182,23 @@ def test_success_caches_last_backup_times(temp_db):
     assert cached[101] == datetime.fromtimestamp(1_700_000_500, tz=UTC)
 
 
+def test_success_cycle_caches_datastore_stat(temp_db):
+    from app.db.datastore_stats import get_datastore_stat
+
+    cfg = _config()
+    cfg.pbs.datastore = "backup"
+    deps, *_ = make_deps()  # FakePbs defaults: total 8e9, used 2e9
+
+    status, _steps = _load(_run(cfg, deps))
+    assert status == RunStatus.SUCCESS
+
+    with session_scope() as s:
+        row = get_datastore_stat(s, "backup")
+    assert row is not None
+    assert row.total == 8_000_000_000
+    assert row.used == 2_000_000_000
+
+
 def test_cache_refresh_failure_does_not_fail_cycle(temp_db):
     # A snapshot-read error during the (best-effort) cache refresh must not fail the run.
     pbs = FakePbs()
