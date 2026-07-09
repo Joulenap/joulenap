@@ -27,12 +27,8 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
         <span style={{ fontFamily: mono, fontSize: 11, color: '#6f7884' }}>{t('dashboard.events', { n: logs.length })}</span>
       </div>
       <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '84px 96px 1fr',
-          padding: '0 18px 7px',
-          borderBottom: `1px solid ${c.border}`,
-        }}
+        className="jn-log-head"
+        style={{ padding: '0 18px 7px', borderBottom: `1px solid ${c.border}` }}
       >
         <span style={colHead}>{t('dashboard.colTime')}</span>
         <span style={colHead}>{t('dashboard.colLevel')}</span>
@@ -47,9 +43,8 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
           return (
             <div
               key={l.id}
+              className="jn-log-row"
               style={{
-                display: 'grid',
-                gridTemplateColumns: '84px 96px 1fr',
                 alignItems: 'center',
                 padding: '7px 18px',
                 borderBottom: '1px solid #1b212880',
@@ -72,7 +67,9 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
                   {l.level}
                 </span>
               </span>
-              <span style={{ fontSize: 13, color: '#c8cdd4' }}>{l.message}</span>
+              <span style={{ fontSize: 13, color: '#c8cdd4', minWidth: 0, overflowWrap: 'anywhere' }}>
+                {l.message}
+              </span>
             </div>
           )
         })}
