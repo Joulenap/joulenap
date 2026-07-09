@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -56,13 +57,26 @@ class NotifyReport:
 
 
 class _LogCapture(logging.Handler):
-    """Collects the WARNING/ERROR records Apprise emits while one send is in flight."""
+    """Collects the WARNING/ERROR records Apprise emits while one send is in flight.
+
+    The scheduler runs backup-cycle jobs on a worker thread, so a scheduled
+    ``send_run_result()`` can overlap a manual ``send_test()`` from the web UI. The
+    underlying "apprise" logger is process-global, so while both sends are in flight both
+    handlers are attached at once and would each see the other's records. Recording the
+    creating thread's ident and dropping any record emitted from a different thread keeps
+    one send's failure reason from being attributed to the other's channel — do not remove
+    this check as an unneeded "simplification", it is the only thing making capture
+    thread-safe.
+    """
 
     def __init__(self) -> None:
         super().__init__(level=logging.WARNING)
         self.messages: list[str] = []
+        self._owner_thread = threading.get_ident()
 
     def emit(self, record: logging.LogRecord) -> None:
+        if record.thread != self._owner_thread:
+            return
         self.messages.append(record.getMessage())
 
 
@@ -94,7 +108,10 @@ def _scrub(message: str, secrets: list[str]) -> str:
     from urllib.parse import quote
 
     for secret in secrets:
-        for form in (secret, quote(secret, safe="")):
+        # ``_telegram_url`` builds tokens with ``quote(token, safe=':')`` (the colon is
+        # structural), so a token containing ``/`` shows up percent-encoded but with the
+        # colon intact — a form neither the raw secret nor a fully-escaped quote() matches.
+        for form in (secret, quote(secret, safe=""), quote(secret, safe=":")):
             if form:
                 message = message.replace(form, "***")
     # Catch anything left in ``//user:pass@host`` form (e.g. a secret we do not know about).
@@ -154,6 +171,10 @@ class NotificationService:
     def _send_one(
         self, channel: Channel, title: str, body: str, secrets: list[str]
     ) -> ChannelResult:
+        # ntfy (and any free-form custom URL) has no credential field, so the known-secret
+        # list alone would not catch it if Apprise logged the full target URL. Scrubbing the
+        # channel's own URL first closes that gap for every channel, not just ntfy.
+        channel_secrets = [channel.url, *secrets]
         engine = self._apprise_factory()
         if not engine.add(channel.url):
             return ChannelResult(channel=channel.name, ok=False, error="invalid URL")
@@ -161,12 +182,14 @@ class NotificationService:
             with _captured_apprise_logs() as captured:
                 ok = bool(engine.notify(title=title, body=body))
         except Exception as exc:  # a broken channel must not stop the others
-            return ChannelResult(channel=channel.name, ok=False, error=_scrub(str(exc), secrets))
+            return ChannelResult(
+                channel=channel.name, ok=False, error=_scrub(str(exc), channel_secrets)
+            )
         if ok:
             return ChannelResult(channel=channel.name, ok=True)
         reason = captured.messages[-1] if captured.messages else None
         return ChannelResult(
             channel=channel.name,
             ok=False,
-            error=_scrub(reason, secrets) if reason else None,
+            error=_scrub(reason, channel_secrets) if reason else None,
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import UTC, datetime
 
 from fakes import make_deps
@@ -333,6 +334,72 @@ def test_secrets_never_appear_in_a_channel_error():
     assert "p@ss/word" not in blob
     assert "p%40ss%2Fword" not in blob
     assert "***" in blob
+
+
+def test_secret_encoded_with_colon_safe_is_scrubbed():
+    # _telegram_url quotes the bot token with quote(token, safe=':') — the colon stays
+    # unescaped because it is structural. A token containing '/' therefore appears in the
+    # URL as e.g. "123:AB%2FC", a form the raw secret and quote(secret, safe="") both miss.
+    cfg = _notifications_config()
+    cfg.notifications.telegram.bot_token = "123:AB/C"
+    fake = FakeApprise(
+        fail_urls={"tgram://123:AB%2FC/456": "Failed sending to tgram://123:AB%2FC/456"}
+    )
+    svc = NotificationService(apprise_factory=lambda: fake)
+    report = svc.send_test(cfg)
+
+    blob = " ".join(r.error or "" for r in report.results)
+    assert "AB%2FC" not in blob
+    assert "AB/C" not in blob
+    assert "***" in blob
+
+
+def test_ntfy_url_is_scrubbed_from_its_own_error():
+    # ntfy has no credential field, so the known-secret list alone would not catch its URL
+    # (and topic) if Apprise logged the full target back at us.
+    cfg = _notifications_config()
+    ntfy_url = "ntfys://ntfy.sh/homelab"
+    fake = FakeApprise(fail_urls={ntfy_url: f"A Connection error occurred sending {ntfy_url}"})
+    svc = NotificationService(apprise_factory=lambda: fake)
+    report = svc.send_test(cfg)
+
+    by_name = {r.channel: r for r in report.results}
+    assert by_name["ntfy"].ok is False
+    assert "ntfy.sh" not in (by_name["ntfy"].error or "")
+    assert "homelab" not in (by_name["ntfy"].error or "")
+    assert "***" in (by_name["ntfy"].error or "")
+
+
+def test_log_capture_is_isolated_per_thread():
+    # The scheduler runs on a worker thread, so a scheduled send_run_result() can overlap a
+    # manual send_test() from the UI. Both attach a handler to the same process-global
+    # "apprise" logger; without thread filtering, one send's capture would swallow the
+    # other's record and attribute the wrong failure reason to the wrong channel.
+    class ForeignNoiseApprise:
+        def __init__(self) -> None:
+            self.urls: list[str] = []
+
+        def add(self, url: str) -> bool:
+            self.urls.append(url)
+            return True
+
+        def notify(self, title: str = "", body: str = "") -> bool:
+            # Simulate a concurrent send on another thread logging to the same "apprise"
+            # logger while this send is in flight. Joined (not slept) so the emission is
+            # guaranteed to happen, deterministically, before notify() returns.
+            def emit_foreign_record() -> None:
+                logging.getLogger("apprise").warning("unrelated failure from another channel")
+
+            other = threading.Thread(target=emit_foreign_record)
+            other.start()
+            other.join()
+            return False  # this channel "fails" but logged nothing of its own
+
+    svc = NotificationService(apprise_factory=ForeignNoiseApprise)
+    report = svc.send_test(_notifications_config())
+
+    for result in report.results:
+        assert result.error is None or "unrelated failure" not in result.error
 
 
 def test_failed_channels_are_logged_on_a_run(caplog):
