@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0]
+
+### Added
+
+- **Dashboard integration** — a read-only, API-key-protected `GET /api/dashboard` endpoint plus a
+  Settings → Integrations panel (generate/rotate/disable the key and copy a ready-made config
+  snippet) so Joulenap's status — PBS power state, next/last run, datastore usage — shows on
+  homelab dashboards like Homepage, Homarr, Dashy, and Glance. See
+  [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+- **Persistent datastore usage** — disk used/total is cached whenever the PBS is awake and shown in
+  the web UI and the dashboard endpoint even while the PBS is powered off.
+
+### Fixed
+
+- Copy buttons now work over plain HTTP (a non-secure browser context) via a clipboard fallback, so
+  the API key and config snippets copy correctly when Joulenap is reached at a LAN `http://` address.
+
 ## [0.1.0] — first public release
 
 The first release of Joulenap: schedule energy-saving Proxmox backups to a normally-off Proxmox
@@ -40,5 +57,6 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Joulenap/joulenap/compare/v0.1.1...v0.2.0
 [0.1.0]: https://github.com/Joulenap/joulenap/releases/tag/v0.1.0

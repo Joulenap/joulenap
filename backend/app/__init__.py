@@ -1,3 +1,3 @@
 """Joulenap — web UI + scheduler for energy-saving Proxmox backups to a normally-off PBS."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
