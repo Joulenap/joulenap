@@ -28,7 +28,7 @@ function ShellInner() {
   }, [])
 
   return (
-    <div style={{ padding: '22px 22px 30px' }}>
+    <div className="jn-shell">
       <div style={{ maxWidth: 1220, margin: '0 auto' }}>
         <Header
           host={config?.pbs.host ?? ''}

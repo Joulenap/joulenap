@@ -1,1 +1,150 @@
-/* layout classes — see Task 3 */
+/* Layout classes for the responsive breakpoint.
+ *
+ * Base rules reproduce exactly what the inline styles they replaced computed to; the
+ * single @media block below is the only place mobile differs. Inline `style` beats these
+ * rules regardless of specificity, so a property that varies by breakpoint must not also
+ * be set inline. That is why, for example, .jn-day-btn owns `min-width` while the day
+ * button's state-dependent colours stay inline. */
+
+.jn-shell {
+  padding: 22px 22px 30px;
+}
+
+/* Header. Desktop equivalence note: the old markup was
+ *   header{display:flex;justify-content:space-between} > [brand, controls{gap:14}]
+ * with `controls` holding five items. Splitting `controls` into `status` + `actions` and
+ * replacing `space-between` with `gap:14` + `margin-right:auto` on `brand` right-packs the
+ * same five items with the same 14px gap between every adjacent pair, including across the
+ * new status/actions boundary. Computed layout is unchanged at >=900px. */
+.jn-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #20262e;
+}
+.jn-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-right: auto;
+}
+.jn-header-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.jn-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.jn-header-icon {
+  height: 58px;
+  width: 58px;
+}
+.jn-header-wordmark {
+  height: 38px;
+  width: 163px;
+}
+
+/* Dashboard rows */
+.jn-row-actions {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 26px;
+  align-items: start;
+  padding-bottom: 16px;
+}
+.jn-row-guests {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 22px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+/* Scheduler card */
+.jn-days {
+  display: flex;
+  gap: 8px;
+}
+.jn-day-btn {
+  flex: 0 0 auto;
+  min-width: 46px;
+}
+.jn-sched-divider {
+  width: 1px;
+  align-self: stretch;
+}
+
+/* Activity log */
+.jn-log-head {
+  display: grid;
+  grid-template-columns: 84px 96px 1fr;
+}
+.jn-log-row {
+  display: grid;
+  grid-template-columns: 84px 96px 1fr;
+}
+
+@media (max-width: 900px) {
+  .jn-shell {
+    padding: 14px 14px 24px;
+  }
+
+  /* Row 1: brand + actions. Row 2: status, full width.
+   * brand keeps margin-right:auto, so actions stay hard-right on row 1. */
+  .jn-header {
+    flex-wrap: wrap;
+    row-gap: 10px;
+    padding-bottom: 4px;
+  }
+  .jn-header-actions {
+    order: 2;
+  }
+  .jn-header-status {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .jn-header-icon {
+    height: 44px;
+    width: 44px;
+  }
+  .jn-header-wordmark {
+    height: 28px;
+    width: 120px;
+  }
+
+  .jn-row-actions,
+  .jn-row-guests {
+    grid-template-columns: 1fr;
+  }
+
+  /* 7 equal columns instead of 7 x 46px, which overflowed by ~39px. */
+  .jn-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+  }
+  .jn-day-btn {
+    min-width: 0;
+  }
+  .jn-sched-divider {
+    display: none;
+  }
+
+  /* Two-line rows: timestamp + level pill, then the message spanning both columns.
+   * The column-header row is dropped — three labels over a two-line row reads worse
+   * than none. */
+  .jn-log-head {
+    display: none;
+  }
+  .jn-log-row {
+    grid-template-columns: 60px 1fr;
+    row-gap: 4px;
+  }
+  .jn-log-row > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
