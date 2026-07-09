@@ -5,6 +5,7 @@ reachability + datastore/load probe."""
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +14,8 @@ from ..config import Config
 from ..connectors import net
 from ..connectors.errors import ConnectorError
 from ..connectors.pbs import DatastoreStatus, NodeLoad, PbsClient
+from ..db import session_scope
+from ..db.datastore_stats import get_datastore_stat, upsert_datastore_stat
 from ..db.models import Run, RunKind, RunStatus
 
 # Keep the reachability probe snappy — dashboards poll and the PBS is usually off.
@@ -59,3 +62,23 @@ def probe_pbs(
         except ConnectorError:
             pass
     return online, datastore, load
+
+
+class DatastoreView(NamedTuple):
+    total: int
+    used: int
+    used_pct: float
+
+
+def resolve_datastore(datastore: str, live: DatastoreStatus | None) -> DatastoreView | None:
+    """Live-or-cache datastore usage. When ``live`` is present (PBS online) persist it and
+    return it; otherwise return the cached row; otherwise None. Opens its own transaction, so
+    it is safe to call from a request handler and the values are detached (no lazy load)."""
+    with session_scope() as session:
+        if live is not None:
+            upsert_datastore_stat(session, datastore, live.total, live.used)
+            return DatastoreView(live.total, live.used, live.used_pct)
+        row = get_datastore_stat(session, datastore)
+        if row is None:
+            return None
+        return DatastoreView(row.total, row.used, row.used_pct)

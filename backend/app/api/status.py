@@ -56,7 +56,8 @@ def get_status(
 ) -> StatusResponse:
     config = store.config
     last = _probe.latest_cycle_run(session)
-    pbs_online, ds, nl = _probe.probe_pbs(config, job_service.deps.build_pbs)
+    pbs_online, live_ds, nl = _probe.probe_pbs(config, job_service.deps.build_pbs)
+    ds = _probe.resolve_datastore(config.pbs.datastore, live_ds)
 
     datastore = (
         DatastoreInfo(used=ds.used, total=ds.total, used_pct=ds.used_pct) if ds else None

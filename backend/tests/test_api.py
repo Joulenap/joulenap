@@ -409,6 +409,50 @@ def test_probe_pbs_offline_returns_no_datastore():
     assert load is None
 
 
+def test_resolve_datastore_live_upserts_and_returns_live(temp_db):
+    from app.api._probe import resolve_datastore
+    from app.connectors.pbs import DatastoreStatus
+    from app.db import session_scope
+    from app.db.datastore_stats import get_datastore_stat
+
+    view = resolve_datastore("backup", DatastoreStatus(total=10, used=4, avail=6))
+    assert (view.total, view.used) == (10, 4)
+    with session_scope() as s:
+        row = get_datastore_stat(s, "backup")
+    assert row is not None and row.used == 4  # live reading was persisted
+
+
+def test_resolve_datastore_offline_uses_cache(temp_db):
+    from app.api._probe import resolve_datastore
+    from app.db import session_scope
+    from app.db.datastore_stats import upsert_datastore_stat
+
+    with session_scope() as s:
+        upsert_datastore_stat(s, "backup", 8, 2)
+    view = resolve_datastore("backup", None)
+    assert (view.total, view.used, view.used_pct) == (8, 2, 25.0)
+
+
+def test_resolve_datastore_none_when_no_live_no_cache(temp_db):
+    from app.api._probe import resolve_datastore
+
+    assert resolve_datastore("backup", None) is None
+
+
+def test_status_datastore_from_cache_when_offline(app_ctx):
+    client, _app = app_ctx
+    with session_scope() as s:
+        from app.db.datastore_stats import upsert_datastore_stat
+        upsert_datastore_stat(s, "backup", 8_000_000_000, 2_000_000_000)
+
+    body = client.get("/api/status").json()
+    assert body["datastore"] is not None
+    assert body["datastore"]["used_pct"] == 25.0
+    assert body["datastore"]["used"] == 2_000_000_000
+    assert body["datastore"]["total"] == 8_000_000_000
+    assert body["load"] is None  # live-only, stays null when PBS offline
+
+
 def test_account_update_changes_username_and_password(app_ctx, temp_config):
     client, _app = app_ctx
     r = client.put("/api/account", json={"username": "newadmin", "password": "freshpass"})
@@ -508,6 +552,19 @@ def test_dashboard_200_with_header_key(app_ctx):
     assert body["datastore_used_pct"] is None
     assert body["datastore_used_bytes"] is None
     assert body["datastore_total_bytes"] is None
+
+
+def test_dashboard_datastore_from_cache_when_offline(app_ctx):
+    client, app = app_ctx
+    key = _enable_api_key(app)
+    with session_scope() as s:  # session_scope already imported at top of test_api.py
+        from app.db.datastore_stats import upsert_datastore_stat
+        upsert_datastore_stat(s, "backup", 8_000_000_000, 2_000_000_000)
+
+    body = client.get("/api/dashboard", headers={"X-API-Key": key}).json()
+    assert body["datastore_used_pct"] == 25.0
+    assert body["datastore_used_bytes"] == 2_000_000_000
+    assert body["datastore_total_bytes"] == 8_000_000_000
 
 
 def test_dashboard_200_with_query_param_key(app_ctx):

@@ -61,7 +61,8 @@ def get_dashboard(
 
     config = store.config
     last = _probe.latest_finished_cycle_run(session)
-    pbs_online, ds, _load = _probe.probe_pbs(config, job_service.deps.build_pbs)
+    pbs_online, live_ds, _load = _probe.probe_pbs(config, job_service.deps.build_pbs)
+    ds = _probe.resolve_datastore(config.pbs.datastore, live_ds)
 
     if job_service.is_running:
         pbs_state = "backing_up"
