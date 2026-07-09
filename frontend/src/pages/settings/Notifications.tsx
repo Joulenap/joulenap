@@ -77,7 +77,7 @@ export function Notifications() {
       setTestState({ channels: r.channels })
     } catch (e) {
       // Only transport/auth failures land here now — delivery outcomes come back as 200.
-      setTestState({ error: e instanceof ApiError ? e.message : t('common.saveFailed') })
+      setTestState({ error: e instanceof ApiError ? e.message : t('settings.notifications.testFailed') })
     } finally {
       setBusy(false)
     }

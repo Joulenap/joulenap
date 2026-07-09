@@ -184,7 +184,8 @@
       "saveFirst": "Salva le modifiche prima di inviare una prova.",
       "saved": "✓ Notifiche salvate",
       "testNoChannels": "Nessun canale configurato",
-      "testChannelFailed": "invio fallito"
+      "testChannelFailed": "invio fallito",
+      "testFailed": "Impossibile inviare la prova"
     },
     "safety": {
       "title": "Sicurezza dei backup",

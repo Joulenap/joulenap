@@ -184,7 +184,8 @@
       "saveFirst": "Save your changes before sending a test.",
       "saved": "✓ Notifications saved",
       "testNoChannels": "No channels configured",
-      "testChannelFailed": "delivery failed"
+      "testChannelFailed": "delivery failed",
+      "testFailed": "Couldn't send the test"
     },
     "safety": {
       "title": "Backup safety",
