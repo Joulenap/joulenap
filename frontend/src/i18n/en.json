@@ -183,8 +183,8 @@
       "sendTest": "Send test",
       "saveFirst": "Save your changes before sending a test.",
       "saved": "✓ Notifications saved",
-      "testOk": "✓ Test sent to {{n}} channel(s)",
-      "testFail": "Test failed"
+      "testNoChannels": "No channels configured",
+      "testChannelFailed": "delivery failed"
     },
     "safety": {
       "title": "Backup safety",

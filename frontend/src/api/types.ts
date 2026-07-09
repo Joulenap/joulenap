@@ -235,3 +235,15 @@ export interface NetInterface {
   netmask: string
   broadcast: string
 }
+
+// --- notifications ------------------------------------------------------------
+
+export type ChannelOutcome = {
+  channel: string
+  ok: boolean
+  error: string | null
+}
+
+export type NotifyTestResult = {
+  channels: ChannelOutcome[]
+}

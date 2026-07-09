@@ -183,8 +183,8 @@
       "sendTest": "Invia prova",
       "saveFirst": "Salva le modifiche prima di inviare una prova.",
       "saved": "✓ Notifiche salvate",
-      "testOk": "✓ Prova inviata a {{n}} canale/i",
-      "testFail": "Prova fallita"
+      "testNoChannels": "Nessun canale configurato",
+      "testChannelFailed": "invio fallito"
     },
     "safety": {
       "title": "Sicurezza dei backup",

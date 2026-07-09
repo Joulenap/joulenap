@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import type { NotificationsConfig } from '../../api/types'
+import type { ChannelOutcome, NotificationsConfig } from '../../api/types'
 import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
 import { c, ghostBtn, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
+import { channelLabel } from '../../utils/notifyChannels'
 
 // M7: Apprise-backed notification channels. The friendly forms here are turned into
 // Apprise URLs server-side (backend/app/notify); secrets arrive redacted and are sent
@@ -22,7 +23,7 @@ export function Notifications() {
   const [busy, setBusy] = useState(false)
   const [savedNote, setSavedNote] = useState(false)
   const [saveErr, setSaveErr] = useState<string | null>(null)
-  const [testState, setTestState] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+  const [testState, setTestState] = useState<{ channels: ChannelOutcome[] } | { error: string } | null>(null)
   const [replacing, setReplacing] = useState(false)
 
   // (Re)seed the editable draft whenever the loaded config changes.
@@ -73,10 +74,10 @@ export function Notifications() {
     setTestState(null)
     try {
       const r = await api.notifyTest()
-      setTestState({ kind: 'ok', msg: t('settings.notifications.testOk', { n: r.channels }) })
+      setTestState({ channels: r.channels })
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : t('settings.notifications.testFail')
-      setTestState({ kind: 'err', msg })
+      // Only transport/auth failures land here now — delivery outcomes come back as 200.
+      setTestState({ error: e instanceof ApiError ? e.message : t('common.saveFailed') })
     } finally {
       setBusy(false)
     }
@@ -262,8 +263,21 @@ export function Notifications() {
         </button>
         {savedNote && !dirty && <span style={{ fontSize: 12, color: c.green }}>{t(`${ns}.saved`)}</span>}
         {saveErr && <span style={{ fontSize: 12, color: c.red }}>{saveErr}</span>}
-        {testState && (
-          <span style={{ fontSize: 12, color: testState.kind === 'ok' ? c.green : c.red }}>{testState.msg}</span>
+        {testState && 'error' in testState && (
+          <span style={{ fontSize: 12, color: c.red }}>{testState.error}</span>
+        )}
+        {testState && 'channels' in testState && testState.channels.length === 0 && (
+          <span style={{ fontSize: 12, color: c.textMuted }}>{t(`${ns}.testNoChannels`)}</span>
+        )}
+        {testState && 'channels' in testState && testState.channels.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+            {testState.channels.map((ch) => (
+              <span key={ch.channel} style={{ fontSize: 12, color: ch.ok ? c.green : c.red }}>
+                {ch.ok ? '✓' : '✗'} {channelLabel(ch.channel, t)}
+                {!ch.ok && ` — ${ch.error ?? t(`${ns}.testChannelFailed`)}`}
+              </span>
+            ))}
+          </div>
         )}
       </div>
     </div>
