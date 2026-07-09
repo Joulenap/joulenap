@@ -190,7 +190,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
 
   return (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 26, alignItems: 'start', paddingBottom: 16 }}>
+      <div className="jn-row-actions">
         <ManualPanel
           status={status}
           onBackup={() => runAction('backup', api.runBackup, false, '▶')}
@@ -210,7 +210,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
         onApply={apply}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: 22, alignItems: 'start', marginTop: 16 }}>
+      <div className="jn-row-guests">
         <GuestsPanel
           guests={guests}
           mode={draft.guestsMode}
