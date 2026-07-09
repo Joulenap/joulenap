@@ -116,6 +116,16 @@
     width: 120px;
   }
 
+  /* Grid items default to `min-width: auto`, so a `1fr` track cannot shrink below its
+   * item's min-content. The guests panel's min-content is 378px — its guest-name span is
+   * `white-space: nowrap`, and a nowrap span's min-content is the whole string. That floored
+   * the track above the viewport and left the page 1px too wide. The ellipsis on that span
+   * exists for exactly this case; `min-width: 0` is what lets it engage. */
+  .jn-row-actions > *,
+  .jn-row-guests > * {
+    min-width: 0;
+  }
+
   .jn-row-actions,
   .jn-row-guests {
     grid-template-columns: 1fr;
