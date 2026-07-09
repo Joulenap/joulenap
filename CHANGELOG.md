@@ -7,6 +7,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Added
+
+- **Per-channel notification report** — the "Send test" button now shows one row per channel with
+  its own result, instead of a single "Test failed" that could not say which channel broke or why.
+  A failing ntfy no longer makes a working Telegram look broken, and the reason reported by the
+  delivery engine (unreachable host, `401 Unauthorized`, and so on) is shown next to the channel
+  that produced it. Secrets are stripped from the reason before it leaves the backend.
+- Failed notifications during a scheduled backup are now logged with the channel name and the
+  reason. Previously a channel that quietly stopped working left no trace anywhere.
+
+### Changed
+
+- `POST /api/notify/test` always answers `200` and returns the per-channel report as
+  `{"channels": [{"channel", "ok", "error"}, ...]}`. It no longer returns `400` when no channel is
+  configured (the report is simply empty) nor `502` when delivery fails — a delivery failure is a
+  result, not a transport error. Anything scripting this endpoint and treating a `502` as "the test
+  failed" must now read `ok` per channel instead.
+- Frontend dependencies moved to React 19, Vite 8, i18next 26 and TypeScript 6.
+
+### Fixed
+
+- A notification sent by the scheduler and a manual test running at the same time could attribute
+  one channel's failure reason to another. Each send now captures only its own thread's records.
+- An exception raised while parsing a channel's Apprise URL could reach the container logs with the
+  URL, and therefore its credentials, unredacted.
+- The Docker image builds the web UI on Node 24, matching CI.
+- On a transport error the test button no longer reports "couldn't save changes" for an action that
+  saved nothing.
+
 ## [0.2.0]
 
 ### Added
@@ -57,6 +88,7 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Joulenap/joulenap/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Joulenap/joulenap/compare/v0.1.1...v0.2.0
 [0.1.0]: https://github.com/Joulenap/joulenap/releases/tag/v0.1.0
