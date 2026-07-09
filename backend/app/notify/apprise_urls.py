@@ -9,6 +9,7 @@ form silently produces nothing rather than a broken URL.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from urllib.parse import quote, urlencode, urlparse
 
 from ..config import (
@@ -20,20 +21,33 @@ from ..config import (
 )
 
 
-def build_urls(n: NotificationsConfig) -> list[str]:
-    """All Apprise URLs for the enabled channels, followed by any custom URLs."""
-    urls: list[str] = []
-    for builder, channel in (
-        (_telegram_url, n.telegram),
-        (_ntfy_url, n.ntfy),
-        (_email_url, n.email),
-        (_discord_url, n.discord),
+@dataclass(frozen=True)
+class Channel:
+    """One delivery target: a display name for the report, and the Apprise URL to send with.
+
+    The URL carries the channel's secrets, so it stays inside the backend — only ``name``
+    is ever shown to the user.
+    """
+
+    name: str
+    url: str
+
+
+def build_channels(n: NotificationsConfig) -> list[Channel]:
+    """All enabled channels as ``(name, url)`` pairs, followed by any custom URLs."""
+    channels: list[Channel] = []
+    for name, builder, channel in (
+        ("telegram", _telegram_url, n.telegram),
+        ("ntfy", _ntfy_url, n.ntfy),
+        ("email", _email_url, n.email),
+        ("discord", _discord_url, n.discord),
     ):
         url = builder(channel) if channel.enabled else None
         if url:
-            urls.append(url)
-    urls.extend(u for u in n.custom_urls if u.strip())
-    return urls
+            channels.append(Channel(name=name, url=url))
+    for i, url in enumerate((u.strip() for u in n.custom_urls if u.strip()), start=1):
+        channels.append(Channel(name=f"custom #{i}", url=url))
+    return channels
 
 
 def _telegram_url(t: TelegramConfig) -> str | None:

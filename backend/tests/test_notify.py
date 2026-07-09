@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from fakes import make_deps
@@ -13,18 +14,32 @@ from app.jobs.backup_cycle import run_backup_cycle
 from app.jobs.recorder import RunRecorder
 from app.main import create_app
 from app.notify import NotificationService
-from app.notify.apprise_urls import build_urls
+from app.notify.apprise_urls import Channel, build_channels
 from app.notify.messages import build_run_message, build_test_message
 
 # --- fake Apprise engine -----------------------------------------------------
 
 
 class FakeApprise:
-    """Records the URLs added and the last notify() payload; reports success."""
+    """Records the URLs added and the last notify() payload.
 
-    def __init__(self, *, add_ok: bool = True, notify_ok: bool = True):
+    ``fail_urls`` maps a URL to the WARNING message Apprise would log for it; a URL mapped to
+    ``None`` fails silently, like a plugin that returns False without logging. ``raise_urls``
+    maps a URL to an exception message, for the plugin that blows up instead of returning.
+    """
+
+    def __init__(
+        self,
+        *,
+        add_ok: bool = True,
+        notify_ok: bool = True,
+        fail_urls: dict[str, str | None] | None = None,
+        raise_urls: dict[str, str] | None = None,
+    ):
         self.add_ok = add_ok
         self.notify_ok = notify_ok
+        self.fail_urls = fail_urls or {}
+        self.raise_urls = raise_urls or {}
         self.urls: list[str] = []
         self.payload: tuple[str, str] | None = None
 
@@ -36,6 +51,14 @@ class FakeApprise:
 
     def notify(self, title: str = "", body: str = "") -> bool:
         self.payload = (title, body)
+        url = self.urls[-1]
+        if url in self.raise_urls:
+            raise RuntimeError(self.raise_urls[url])
+        if url in self.fail_urls:
+            message = self.fail_urls[url]
+            if message is not None:
+                logging.getLogger("apprise").warning(message)
+            return False
         return self.notify_ok
 
 
@@ -61,11 +84,31 @@ def _notifications_config() -> Config:
     return cfg
 
 
+def _urls(cfg: Config) -> list[str]:
+    return [c.url for c in build_channels(cfg.notifications)]
+
+
+def test_build_channels_labels_every_channel():
+    channels = build_channels(_notifications_config().notifications)
+    assert [c.name for c in channels] == ["telegram", "ntfy", "email", "discord", "custom #1"]
+    assert Channel(name="ntfy", url="ntfys://ntfy.sh/homelab") in channels
+
+
+def test_custom_urls_are_numbered_from_one():
+    cfg = Config()
+    cfg.notifications.custom_urls = ["gotify://host/a", "  ", "json://host/b"]
+    channels = build_channels(cfg.notifications)
+    assert [(c.name, c.url) for c in channels] == [
+        ("custom #1", "gotify://host/a"),
+        ("custom #2", "json://host/b"),
+    ]
+
+
 # --- URL building ------------------------------------------------------------
 
 
-def test_build_urls_for_all_channels():
-    urls = build_urls(_notifications_config().notifications)
+def test_build_channels_for_all_channels():
+    urls = _urls(_notifications_config())
     assert "tgram://123:ABC/456" in urls
     assert "ntfys://ntfy.sh/homelab" in urls
     assert "discord://111/tok" in urls
@@ -82,7 +125,7 @@ def test_special_chars_in_telegram_and_ntfy_are_percent_encoded():
     cfg = _notifications_config()
     cfg.notifications.telegram.bot_token = "123:AB/C"
     cfg.notifications.ntfy.topic = "home lab/#1"
-    urls = build_urls(cfg.notifications)
+    urls = _urls(cfg)
     assert "tgram://123:AB%2FC/456" in urls
     assert "ntfys://ntfy.sh/home%20lab%2F%231" in urls
 
@@ -90,7 +133,7 @@ def test_special_chars_in_telegram_and_ntfy_are_percent_encoded():
 def test_disabled_channel_is_skipped():
     cfg = _notifications_config()
     cfg.notifications.telegram.enabled = False
-    urls = build_urls(cfg.notifications)
+    urls = _urls(cfg)
     assert not any(u.startswith("tgram://") for u in urls)
 
 
@@ -99,7 +142,7 @@ def test_incomplete_channel_produces_no_url():
     cfg.notifications.telegram.enabled = True  # but no token/chat_id
     cfg.notifications.ntfy.enabled = True
     cfg.notifications.ntfy.url = "http://192.168.1.9"  # but no topic
-    assert build_urls(cfg.notifications) == []
+    assert _urls(cfg) == []
 
 
 def test_ntfy_http_uses_insecure_scheme():
@@ -107,7 +150,7 @@ def test_ntfy_http_uses_insecure_scheme():
     cfg.notifications.ntfy.enabled = True
     cfg.notifications.ntfy.url = "http://192.168.1.9:8080"
     cfg.notifications.ntfy.topic = "t"
-    assert build_urls(cfg.notifications) == ["ntfy://192.168.1.9:8080/t"]
+    assert _urls(cfg) == ["ntfy://192.168.1.9:8080/t"]
 
 
 # --- messages ----------------------------------------------------------------
@@ -192,12 +235,20 @@ def test_test_message_falls_back_to_english_for_unknown_language():
 # --- service dispatch & routing ----------------------------------------------
 
 
-def test_send_test_dispatches_to_all_channels():
+def test_send_test_dispatches_to_every_channel():
     fake = FakeApprise()
     svc = NotificationService(apprise_factory=lambda: fake)
     report = svc.send_test(_notifications_config())
     assert report.sent is True
     assert report.channels == 5
+    assert [r.channel for r in report.results] == [
+        "telegram",
+        "ntfy",
+        "email",
+        "discord",
+        "custom #1",
+    ]
+    assert all(r.ok and r.error is None for r in report.results)
     assert fake.payload is not None
 
 
@@ -206,6 +257,90 @@ def test_send_test_with_no_channels_reports_reason():
     report = svc.send_test(Config())
     assert report.sent is False
     assert report.reason == "no_channels"
+    assert report.results == []
+
+
+def test_report_attributes_the_failure_to_the_right_channel():
+    fake = FakeApprise(
+        fail_urls={
+            "ntfys://ntfy.sh/homelab": (
+                "A Connection error occurred sending ntfy:https://ntfy.sh notification."
+            )
+        }
+    )
+    svc = NotificationService(apprise_factory=lambda: fake)
+    report = svc.send_test(_notifications_config())
+
+    assert report.sent is False  # one bad channel is enough
+    assert report.channels == 5  # but every channel was still attempted
+    by_name = {r.channel: r for r in report.results}
+    assert by_name["ntfy"].ok is False
+    assert "Connection error" in by_name["ntfy"].error
+    assert by_name["telegram"].ok is True
+    assert by_name["email"].ok is True
+
+
+def test_failure_without_a_logged_reason_yields_no_error_text():
+    # Apprise's log wording is not an API: a silent False must not crash or invent a reason.
+    fake = FakeApprise(fail_urls={"ntfys://ntfy.sh/homelab": None})
+    svc = NotificationService(apprise_factory=lambda: fake)
+    report = svc.send_test(_notifications_config())
+    ntfy = next(r for r in report.results if r.channel == "ntfy")
+    assert ntfy.ok is False
+    assert ntfy.error is None
+
+
+def test_rejected_url_is_reported_without_sending():
+    svc = NotificationService(apprise_factory=lambda: FakeApprise(add_ok=False))
+    report = svc.send_test(_notifications_config())
+    assert report.sent is False
+    assert all(r.ok is False and r.error == "invalid URL" for r in report.results)
+
+
+def test_a_raising_channel_is_isolated_from_the_others():
+    # The spec's guarantee: one broken channel never prevents the others from being tried.
+    fake = FakeApprise(raise_urls={"ntfys://ntfy.sh/homelab": "plugin exploded"})
+    svc = NotificationService(apprise_factory=lambda: fake)
+    report = svc.send_test(_notifications_config())
+
+    by_name = {r.channel: r for r in report.results}
+    assert by_name["ntfy"].ok is False
+    assert "plugin exploded" in by_name["ntfy"].error
+    # every channel after the raising one was still attempted
+    assert by_name["email"].ok is True
+    assert by_name["discord"].ok is True
+    assert by_name["custom #1"].ok is True
+    assert report.channels == 5
+
+
+def test_secrets_never_appear_in_a_channel_error():
+    # Apprise sometimes logs the full target URL. Credentials must be scrubbed out of it.
+    cfg = _notifications_config()
+    fake = FakeApprise(
+        fail_urls={
+            "tgram://123:ABC/456": "Failed sending to tgram://123:ABC/456",
+            "mailtos://user%40example.com:p%40ss%2Fword@smtp.example.com:587"
+            "?from=joulenap%40example.com&to=me%40example.com&mode=starttls": (
+                "SMTP error for mailtos://user%40example.com:p%40ss%2Fword@smtp.example.com:587"
+            ),
+        }
+    )
+    svc = NotificationService(apprise_factory=lambda: fake)
+    report = svc.send_test(cfg)
+
+    blob = " ".join(r.error or "" for r in report.results)
+    assert "ABC" not in blob
+    assert "p@ss/word" not in blob
+    assert "p%40ss%2Fword" not in blob
+    assert "***" in blob
+
+
+def test_failed_channels_are_logged_on_a_run(caplog):
+    fake = FakeApprise(fail_urls={"ntfys://ntfy.sh/homelab": "boom"})
+    svc = NotificationService(apprise_factory=lambda: fake)
+    with caplog.at_level(logging.WARNING, logger="app.notify.service"):
+        svc.send_run_result(_notifications_config(), _run(RunStatus.SUCCESS))
+    assert any("ntfy" in r.message and "boom" in r.message for r in caplog.records)
 
 
 def test_success_skipped_when_on_success_disabled():
@@ -225,21 +360,12 @@ def test_failure_sent_when_on_failure_enabled():
     assert "boom" in fake.payload[1]
 
 
-def test_delivery_failure_is_reported():
-    svc = NotificationService(apprise_factory=lambda: FakeApprise(notify_ok=False))
-    report = svc.send_test(_notifications_config())
-    assert report.sent is False
-    assert report.error == "delivery failed"
-
-
 # --- cycle integration -------------------------------------------------------
 
 
 def test_backup_cycle_notifies_with_final_run(temp_db):
     captured: list[tuple[RunStatus, bool]] = []
-    deps, *_ = make_deps(
-        notify=lambda _c, run, ds: captured.append((run.status, ds is not None))
-    )
+    deps, *_ = make_deps(notify=lambda _c, run, ds: captured.append((run.status, ds is not None)))
     cfg = Config()
     cfg.pve.storage_id = "pbs"
     with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
