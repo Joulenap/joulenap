@@ -96,7 +96,7 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
           </div>
         </div>
 
-        <div style={{ width: 1, alignSelf: 'stretch', background: c.border }} />
+        <div className="jn-sched-divider" style={{ background: c.border }} />
 
         <div>
           <span style={{ ...label, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -132,7 +132,7 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
           </div>
         </div>
 
-        <div style={{ width: 1, alignSelf: 'stretch', background: c.border }} />
+        <div className="jn-sched-divider" style={{ background: c.border }} />
 
         <label style={{ display: 'block', width: 210 }}>
           <span style={label}>{t('dashboard.wakeTimeout')}</span>
@@ -178,12 +178,13 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
       </div>
 
       <span style={label}>{t('dashboard.backupDays')}</span>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="jn-days">
         {DAY_KEYS.map((key, i) => {
           const on = draft.days[i]
           return (
             <button
               key={key}
+              className="jn-day-btn"
               disabled={advanced}
               onClick={() => {
                 if (advanced) return
@@ -192,8 +193,6 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
                 patch({ days })
               }}
               style={{
-                flex: '0 0 auto',
-                minWidth: 46,
                 textAlign: 'center',
                 background: on ? c.accent : 'transparent',
                 color: on ? c.accentInk : c.textFaint,
