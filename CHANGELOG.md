@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1]
+
+### Fixed
+
+- **SQLite concurrency** — the database is opened in WAL mode with a busy timeout, so a
+  running backup cycle's frequent commits no longer risk "database is locked" errors against
+  the dashboard's polling; foreign-key enforcement is also enabled.
+- **Manual power-off race** — powering the PBS off manually now holds the single-run lock
+  across the operation, so a scheduled cycle can't start in the gap and get its PBS shut down
+  mid-backup.
+- **Job-lock leak** — if a worker thread fails to start (e.g. resource exhaustion), the run is
+  marked failed and the single-run lock is released, instead of being held forever and
+  blocking every later run until restart.
+- **History-prune timezone** — a timezone change applied at runtime now moves the daily prune
+  job into the new zone, instead of leaving it in the boot-time zone until restart.
+
+### Security
+
+- **`config.yaml` written owner-only (0600)** — the config file holds API tokens, the session
+  key, and notification secrets, so it is now created with owner-only permissions (matching the
+  SSH key) instead of the default world-readable mode.
+
 ## [0.4.0]
 
 ### Added
@@ -135,7 +157,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Joulenap/joulenap/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Joulenap/joulenap/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Joulenap/joulenap/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Joulenap/joulenap/compare/v0.2.0...v0.3.0
