@@ -27,7 +27,7 @@ def test_run_backup_records_a_run(temp_config, temp_db):
 
 
 def test_run_gc_records_gc_run(temp_config, temp_db):
-    deps, _pve, pbs, _power = make_deps()
+    deps, _pve, pbs, power = make_deps()
     service = JobService(ConfigStore.load_or_create(), deps=deps)
 
     run_id = service.run_gc()
@@ -37,6 +37,7 @@ def test_run_gc_records_gc_run(temp_config, temp_db):
         assert run.kind == RunKind.GC
         assert run.status == RunStatus.SUCCESS
     assert pbs.gc_started is True
+    assert power.powered_off is True  # GC is now a power-managed cycle
 
 
 def test_overlapping_run_is_rejected(temp_config, temp_db):

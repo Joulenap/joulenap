@@ -438,7 +438,11 @@ export function SetupWizard() {
       node: w.node,
       verify_tls: false,
       api_token_id: w.tokenId,
-      api_token_secret: w.tokenSecret,
+      // Mirror the PBS guard below: after a reload the secret isn't rehydrated (w.tokenSecret
+      // is ''), and next.pve.api_token_secret is the ***REDACTED*** sentinel from GET /config,
+      // which the backend keeps as-is. Sending '' unconditionally would CLEAR the stored PVE
+      // token and break every backup (FE-C1).
+      api_token_secret: w.tokenSecret || next.pve.api_token_secret,
       storage_id: w.storage,
     }
     next.pbs = {

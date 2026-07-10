@@ -62,8 +62,12 @@ export const api = {
   login: (username: string, password: string) =>
     req<UserInfo>('POST', '/login', { username, password }),
   logout: () => req<void>('POST', '/logout'),
-  updateAccount: (username: string, password?: string) =>
-    req<UserInfo>('PUT', '/account', { username, password: password || null }),
+  updateAccount: (currentPassword: string, username: string, password?: string) =>
+    req<UserInfo>('PUT', '/account', {
+      current_password: currentPassword,
+      username,
+      password: password || null,
+    }),
 
   // dashboard
   status: () => req<StatusResponse>('GET', '/status'),
@@ -74,8 +78,8 @@ export const api = {
   guests: () => req<GuestInfo[]>('GET', '/guests'),
   toggleScheduler: (enabled: boolean) =>
     req<{ enabled: boolean; next_run: string | null }>('POST', '/scheduler/toggle', { enabled }),
-  runBackup: () => req<{ run_id: number }>('POST', '/backup/run'),
-  runGc: () => req<{ run_id: number }>('POST', '/gc/run'),
+  runBackup: (keepOn: boolean) => req<{ run_id: number }>('POST', '/backup/run', { keep_on: keepOn }),
+  runGc: (keepOn: boolean) => req<{ run_id: number }>('POST', '/gc/run', { keep_on: keepOn }),
   powerOn: () => req<{ ok: boolean }>('POST', '/power/on'),
   powerOff: () => req<{ ok: boolean }>('POST', '/power/off'),
   wolTest: () => req<{ sent: boolean; mac: string }>('POST', '/wol/test'),

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { c } from '../theme'
+import { Toggle } from './Toggle'
 
 export interface ConfirmState {
   title: string
@@ -8,6 +9,8 @@ export interface ConfirmState {
   danger: boolean
   icon: string
   onConfirm: () => void
+  // Optional switch shown above the buttons (e.g. "Keep PBS on after the job").
+  toggle?: { label: string; value: boolean; onChange: (v: boolean) => void }
 }
 
 export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; onCancel: () => void }) {
@@ -62,6 +65,22 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
         <p style={{ margin: '0 0 20px', fontSize: 14, lineHeight: 1.55, color: '#a8b0ba' }}>
           {state.message}
         </p>
+        {state.toggle && (
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              margin: '0 0 18px',
+              fontSize: 13,
+              color: c.textMid,
+              cursor: 'pointer',
+            }}
+          >
+            <Toggle on={state.toggle.value} onClick={() => state.toggle!.onChange(!state.toggle!.value)} size="sm" />
+            <span>{state.toggle.label}</span>
+          </label>
+        )}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button
             onClick={onCancel}

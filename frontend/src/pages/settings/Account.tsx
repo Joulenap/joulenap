@@ -10,6 +10,7 @@ export function Account() {
 
   const [editing, setEditing] = useState(false)
   const [user, setUser] = useState(username ?? '')
+  const [current, setCurrent] = useState('')
   const [pass, setPass] = useState('')
   const [busy, setBusy] = useState(false)
   const [savedNote, setSavedNote] = useState(false)
@@ -17,6 +18,7 @@ export function Account() {
 
   function startEdit() {
     setUser(username ?? '')
+    setCurrent('')
     setPass('')
     setSavedNote(false)
     setErr(null)
@@ -27,7 +29,7 @@ export function Account() {
     setBusy(true)
     setErr(null)
     try {
-      const u = await api.updateAccount(user.trim() || (username ?? ''), pass || undefined)
+      const u = await api.updateAccount(current, user.trim() || (username ?? ''), pass || undefined)
       setUsername(u.username)
       setEditing(false)
       setSavedNote(true)
@@ -84,6 +86,16 @@ export function Account() {
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 360, marginBottom: 22 }}>
             <label style={{ display: 'block' }}>
+              <span style={labelStyle}>{t('settings.account.currentPassword')}</span>
+              <input
+                type="password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                autoComplete="current-password"
+                style={inputStyle}
+              />
+            </label>
+            <label style={{ display: 'block' }}>
               <span style={labelStyle}>{t('settings.account.username')}</span>
               <input value={user} onChange={(e) => setUser(e.target.value)} autoComplete="off" style={inputStyle} />
             </label>
@@ -99,7 +111,7 @@ export function Account() {
             </label>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={onSave} disabled={busy} style={{ ...primaryBtn, padding: '10px 24px' }}>
+            <button onClick={onSave} disabled={busy || !current} style={{ ...primaryBtn, padding: '10px 24px' }}>
               {t('common.save')}
             </button>
             <button onClick={() => setEditing(false)} style={{ ...ghostBtn, padding: '10px 20px' }}>

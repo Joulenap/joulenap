@@ -256,8 +256,24 @@ def _poweroff(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
             recorder.log(LogLevel.WARN, f"power-off failed, PBS left on: {exc}")
 
 
-def run_backup_cycle(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
-    """Execute the full cycle, recording each step. Sets the final run status itself."""
+def _finish_power(
+    config: Config, recorder: RunRecorder, deps: CycleDeps, *, power_off: bool
+) -> None:
+    """Either power the PBS off (normal energy-saving path) or leave it on by explicit
+    request, recording the skip so the run history shows why the box is still awake."""
+    if not power_off:
+        recorder.skip_step(StepName.POWEROFF, "kept on by request")
+        return
+    _poweroff(config, recorder, deps)
+
+
+def run_backup_cycle(
+    config: Config, recorder: RunRecorder, deps: CycleDeps, *, power_off: bool = True
+) -> None:
+    """Execute the full cycle, recording each step. Sets the final run status itself.
+
+    ``power_off=False`` (manual "keep PBS on") runs everything but the final power-off, so a
+    PBS the user wants to keep awake (e.g. woken for a restore) is left on."""
     datastore: DatastoreStatus | None = None
     try:
         with recorder.step(StepName.WAKE):
@@ -289,7 +305,7 @@ def run_backup_cycle(config: Config, recorder: RunRecorder, deps: CycleDeps) -> 
         # last-backup cache before powering off (both best-effort, PBS still awake).
         datastore = _read_datastore(config, recorder, deps)
         _refresh_backup_cache(config, recorder, deps)
-        _poweroff(config, recorder, deps)
+        _finish_power(config, recorder, deps, power_off=power_off)
 
         recorder.finish(RunStatus.SUCCESS)
     except CycleAbort as exc:
@@ -300,7 +316,9 @@ def run_backup_cycle(config: Config, recorder: RunRecorder, deps: CycleDeps) -> 
     _notify_result(config, recorder, deps, datastore)
 
 
-def run_verify_cycle(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
+def run_verify_cycle(
+    config: Config, recorder: RunRecorder, deps: CycleDeps, *, power_off: bool = True
+) -> None:
     """Scheduled full verification: wake -> verify -> power-off, mirroring the backup cycle
     but verifying existing snapshots instead of creating new ones. The PBS is normally off,
     so this owns its own power cycle. Sets the final run status itself."""
@@ -322,7 +340,41 @@ def run_verify_cycle(config: Config, recorder: RunRecorder, deps: CycleDeps) -> 
         )
 
         datastore = _read_datastore(config, recorder, deps)
-        _poweroff(config, recorder, deps)
+        _finish_power(config, recorder, deps, power_off=power_off)
+
+        recorder.finish(RunStatus.SUCCESS)
+    except CycleAbort as exc:
+        recorder.finish(RunStatus.ABORTED, error=str(exc))
+    except Exception as exc:  # connector/task failures: leave PBS on, mark failed
+        recorder.finish(RunStatus.FAILURE, error=str(exc))
+
+    _notify_result(config, recorder, deps, datastore)
+
+
+def run_gc_cycle(
+    config: Config, recorder: RunRecorder, deps: CycleDeps, *, power_off: bool = True
+) -> None:
+    """Manual garbage collection as a full cycle: wake -> verify reachable -> GC ->
+    power-off (unless kept on). The PBS is normally off, so — like the verify cycle — GC
+    owns its own power cycle rather than requiring a separately-awake box. Sets the final
+    run status itself."""
+    datastore: DatastoreStatus | None = None
+    try:
+        with recorder.step(StepName.WAKE):
+            deps.send_wol(config)
+
+        with recorder.step(StepName.WAIT):
+            if not _wait_for_pbs(config, recorder, deps):
+                raise CycleAbort(
+                    f"PBS {config.pbs.host}:{config.pbs.port} not reachable after "
+                    f"{config.pbs.wol_retries + 1} wake attempt(s) of "
+                    f"{config.pbs.wait_timeout}s each"
+                )
+
+        run_gc_step(config, recorder, deps)
+
+        datastore = _read_datastore(config, recorder, deps)
+        _finish_power(config, recorder, deps, power_off=power_off)
 
         recorder.finish(RunStatus.SUCCESS)
     except CycleAbort as exc:

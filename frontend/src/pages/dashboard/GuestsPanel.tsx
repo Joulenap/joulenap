@@ -6,7 +6,8 @@ import { fmtShort } from '../../utils/format'
 
 interface Props {
   guests: GuestInfo[]
-  mode: 'general' | 'selective'
+  // 'exclude' renders read-only (locked) — the switcher only ever *sets* general/selective.
+  mode: 'general' | 'selective' | 'exclude'
   onModeChange: (m: 'general' | 'selective') => void
   selected: Set<number>
   onToggleGuest: (vmid: number) => void
@@ -32,8 +33,15 @@ function modeBtn(active: boolean): React.CSSProperties {
 export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGuest, onRefresh, refreshing }: Props) {
   const { t } = useTranslation()
   const selective = mode === 'selective'
-  const count =
-    selective ? `${guests.length} · ${t('dashboard.selectedCount', { n: selected.size })}` : `${guests.length}`
+  // Exclude mode is set in config.yaml and can't be represented by the general/selective
+  // switcher, so it's shown locked (like the advanced-schedule escape hatch) — never edited
+  // here, where it would be silently inverted into an 'include' set (FE-H1).
+  const excludeMode = mode === 'exclude'
+  const count = selective
+    ? `${guests.length} · ${t('dashboard.selectedCount', { n: selected.size })}`
+    : excludeMode
+      ? `${guests.length} · ${t('dashboard.excludedCount', { n: selected.size })}`
+      : `${guests.length}`
 
   return (
     <div style={{ ...panelStyle, padding: '8px 0 8px', alignSelf: 'stretch' }}>
@@ -64,20 +72,45 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
       </div>
 
       <div style={{ padding: '0 18px 12px' }}>
-        <div style={{ display: 'flex', background: c.inputBg, border: `1px solid ${c.inputBorder}`, borderRadius: 8, padding: 3, gap: 3 }}>
-          <button style={modeBtn(!selective)} onClick={() => onModeChange('general')}>
-            {t('dashboard.general')}
-          </button>
-          <button style={modeBtn(selective)} onClick={() => onModeChange('selective')}>
-            {t('dashboard.selective')}
-          </button>
-        </div>
+        {excludeMode ? (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: c.inputBg,
+                border: `1px solid ${c.inputBorder}`,
+                borderRadius: 8,
+                padding: '7px 4px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#9aa2ac',
+              }}
+            >
+              🔒 {t('dashboard.excludeMode')}
+            </div>
+            <span style={{ display: 'block', marginTop: 8, fontSize: 11, color: c.textFaint, lineHeight: 1.5 }}>
+              {t('dashboard.excludeNote')}
+            </span>
+          </>
+        ) : (
+          <div style={{ display: 'flex', background: c.inputBg, border: `1px solid ${c.inputBorder}`, borderRadius: 8, padding: 3, gap: 3 }}>
+            <button style={modeBtn(!selective)} onClick={() => onModeChange('general')}>
+              {t('dashboard.general')}
+            </button>
+            <button style={modeBtn(selective)} onClick={() => onModeChange('selective')}>
+              {t('dashboard.selective')}
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={{ maxHeight: 250, overflowY: 'auto', overflowX: 'hidden' }}>
         {guests.map((g) => {
           const isCt = g.type === 'lxc'
           const on = selected.has(g.vmid)
+          const excluded = excludeMode && on
           return (
             <div
               key={g.vmid}
@@ -90,6 +123,21 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
               }}
             >
               {selective && <Toggle on={on} onClick={() => onToggleGuest(g.vmid)} size="sm" />}
+              {excludeMode && (
+                <span
+                  title={t('dashboard.excludeNote')}
+                  style={{
+                    width: 32,
+                    flex: '0 0 auto',
+                    textAlign: 'center',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: excluded ? c.red : c.textMuted,
+                  }}
+                >
+                  {excluded ? '✕' : '·'}
+                </span>
+              )}
               <span
                 style={{
                   display: 'inline-flex',
@@ -114,7 +162,7 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
                   flex: 1,
                   minWidth: 0,
                   fontSize: 13,
-                  color: selective && !on ? c.textMuted : c.text,
+                  color: (selective && !on) || excluded ? c.textMuted : c.text,
                   fontWeight: 500,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',

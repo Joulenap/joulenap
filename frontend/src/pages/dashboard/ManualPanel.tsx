@@ -47,7 +47,10 @@ export function ManualPanel({ status, onBackup, onGc, onPowerOn, onPowerOff }: P
   const { t } = useTranslation()
   const online = !!status?.pbs_online
   const busy = !!status?.job_running
-  const canJob = online && !busy
+  // Backup and GC both wake the PBS themselves (wake -> ... -> power-off), so they only
+  // need "not already running" — not "PBS currently on". Power on/off still gate on state.
+  const canJob = !busy
+  const canPower = online && !busy
 
   return (
     <div style={{ ...panelStyle, padding: '16px 18px', height: '100%' }}>
@@ -69,7 +72,7 @@ export function ManualPanel({ status, onBackup, onGc, onPowerOn, onPowerOff }: P
             <button style={actionBtn('green', !online)} disabled={online} onClick={onPowerOn}>
               ⏻ {t('dashboard.powerOn')}
             </button>
-            <button style={actionBtn('red', canJob)} disabled={!canJob} onClick={onPowerOff}>
+            <button style={actionBtn('red', canPower)} disabled={!canPower} onClick={onPowerOff}>
               ⏻ {t('dashboard.powerOff')}
             </button>
           </div>

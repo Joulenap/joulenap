@@ -82,6 +82,15 @@ def _build_trigger(schedule: str, tz: tzinfo) -> CronTrigger:
     )
 
 
+def validate_cron(schedule: str) -> None:
+    """Raise ``ValueError``/``TypeError`` if ``schedule`` can't be built into a cron trigger.
+
+    Used by ``PUT /api/config`` to reject a bad schedule *before* it is persisted (BE-B1),
+    so an invalid string can never reach disk and brick the next startup's ``rearm``.
+    """
+    _build_trigger(schedule, UTC)
+
+
 def _translate_dow(dow: str) -> str:
     """Map a cron day-of-week field (e.g. ``1,2,3,4,5,6``) to APScheduler names
     (``mon,tue,wed,thu,fri,sat``). ``*`` and any non-numeric token pass through."""
@@ -133,7 +142,15 @@ class Scheduler:
         if not config.backup.enabled or not config.backup.schedule:
             log.info("Backup job disabled; no schedule armed")
             return
-        trigger = _build_trigger(config.backup.schedule, self._timezone)
+        try:
+            trigger = _build_trigger(config.backup.schedule, self._timezone)
+        except (ValueError, TypeError) as exc:
+            # A hand-edited/legacy invalid schedule must not crash arming — otherwise a bad
+            # string on disk bricks every startup (BE-B1). Skip arming, like _rearm_verify.
+            log.warning(
+                "Invalid backup schedule %r: %s; backup job not armed", config.backup.schedule, exc
+            )
+            return
         self._scheduler.add_job(
             self._fire_backup,
             trigger,

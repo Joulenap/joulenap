@@ -136,6 +136,9 @@ def me(user: str = security.CurrentUser) -> UserInfo:
 
 
 class AccountUpdate(BaseModel):
+    # Confirming the current password re-authenticates this sensitive change, so a
+    # hijacked session alone can't silently rotate the admin credentials (BE-S9).
+    current_password: str = Field(min_length=1)
     username: str = Field(min_length=3)
     # Optional: empty string / null / omitted all mean "keep the current password"
     # (the design's "leave empty"). Length is enforced only for a real new password.
@@ -156,7 +159,12 @@ def update_account(
     _user: str = security.CurrentUser,
     store: ConfigStore = Depends(get_config_store),
 ) -> UserInfo:
-    """Change the admin username and (optionally) password. Auth-guarded."""
+    """Change the admin username and (optionally) password. Auth-guarded, and gated on
+    re-confirming the current password (defends against session-riding takeover)."""
+    if not security.verify_password(body.current_password, store.config.app.auth.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect"
+        )
     password_hash = security.hash_password(body.password) if body.password else None
 
     def apply(cfg) -> None:

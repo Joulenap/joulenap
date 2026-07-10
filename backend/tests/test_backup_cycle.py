@@ -104,6 +104,68 @@ def test_verify_cycle_wakes_verifies_and_powers_off(temp_db):
     assert power.powered_off is True
 
 
+def test_power_off_false_leaves_pbs_on_and_skips_step(temp_db):
+    deps, _pve, _pbs, power = make_deps()
+
+    with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
+        run_backup_cycle(_config(), recorder, deps, power_off=False)
+        run_id = recorder.run_id
+
+    status, steps = _load(run_id)
+    assert status == RunStatus.SUCCESS
+    assert steps[StepName.POWEROFF] == StepStatus.SKIPPED
+    assert power.powered_off is False
+
+
+def test_gc_cycle_wakes_runs_gc_and_powers_off(temp_db):
+    from app.jobs.backup_cycle import run_gc_cycle
+
+    wol_calls: list[int] = []
+    pbs = FakePbs()
+    deps, _pve, _pbs, power = make_deps(pbs=pbs, wol=lambda _c: wol_calls.append(1))
+
+    with RunRecorder(RunKind.GC, RunTrigger.MANUAL) as recorder:
+        run_gc_cycle(_config(), recorder, deps)
+        run_id = recorder.run_id
+
+    status, steps = _load(run_id)
+    assert status == RunStatus.SUCCESS
+    assert steps[StepName.WAKE] == StepStatus.SUCCESS
+    assert steps[StepName.WAIT] == StepStatus.SUCCESS
+    assert steps[StepName.GC] == StepStatus.SUCCESS
+    assert steps[StepName.POWEROFF] == StepStatus.SUCCESS
+    assert wol_calls == [1]
+    assert pbs.gc_started is True
+    assert power.powered_off is True
+
+
+def test_gc_cycle_keep_on_leaves_pbs_up(temp_db):
+    from app.jobs.backup_cycle import run_gc_cycle
+
+    deps, _pve, _pbs, power = make_deps()
+    with RunRecorder(RunKind.GC, RunTrigger.MANUAL) as recorder:
+        run_gc_cycle(_config(), recorder, deps, power_off=False)
+        run_id = recorder.run_id
+
+    status, steps = _load(run_id)
+    assert status == RunStatus.SUCCESS
+    assert steps[StepName.POWEROFF] == StepStatus.SKIPPED
+    assert power.powered_off is False
+
+
+def test_gc_cycle_aborts_when_pbs_never_wakes(temp_db):
+    from app.jobs.backup_cycle import run_gc_cycle
+
+    deps, _pve, _pbs, power = make_deps(reachable=False)
+    with RunRecorder(RunKind.GC, RunTrigger.MANUAL) as recorder:
+        run_gc_cycle(_config(), recorder, deps)
+        run_id = recorder.run_id
+
+    status, _steps = _load(run_id)
+    assert status == RunStatus.ABORTED
+    assert power.powered_off is False
+
+
 def test_cycle_captures_task_log_lines_per_step(temp_db):
     """Backup (PVE), GC (PBS), and VERIFY (PBS) task output is persisted as task_log_lines,
     tagged by the correct step — each source has DISTINCT lines so mis-tagging is detectable."""

@@ -14,9 +14,8 @@ from ..core.config_store import ConfigStore
 from ..db import session_scope
 from ..db.models import RunKind, RunTrigger
 from ..db.prune import PruneResult, prune_history
-from .backup_cycle import run_backup_cycle, run_verify_cycle
+from .backup_cycle import run_backup_cycle, run_gc_cycle, run_verify_cycle
 from .deps import CycleDeps
-from .gc import run_gc
 from .recorder import RunRecorder
 
 log = logging.getLogger("joulenap.jobs")
@@ -38,13 +37,19 @@ class JobService:
 
     # --- blocking entry points (internal / tests) ----------------------------
 
-    def run_backup(self, trigger: RunTrigger = RunTrigger.MANUAL) -> int:
+    def run_backup(
+        self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True
+    ) -> int:
         """Run a full backup cycle to completion. Returns the run id."""
-        return self._run(RunKind.CYCLE, trigger, run_backup_cycle)
+        return self._run(
+            RunKind.CYCLE, trigger, lambda c, r, d: run_backup_cycle(c, r, d, power_off=power_off)
+        )
 
-    def run_gc(self, trigger: RunTrigger = RunTrigger.MANUAL) -> int:
-        """Run a standalone GC (no power management) to completion. Returns the run id."""
-        return self._run(RunKind.GC, trigger, run_gc)
+    def run_gc(self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True) -> int:
+        """Run a full GC cycle (wake -> GC -> power-off) to completion. Returns the run id."""
+        return self._run(
+            RunKind.GC, trigger, lambda c, r, d: run_gc_cycle(c, r, d, power_off=power_off)
+        )
 
     def run_verify(self, trigger: RunTrigger = RunTrigger.MANUAL) -> int:
         """Run a full verification cycle (wake -> verify -> power-off). Returns the run id."""
@@ -52,13 +57,19 @@ class JobService:
 
     # --- non-blocking entry points (HTTP / scheduler) ------------------------
 
-    def submit_backup(self, trigger: RunTrigger = RunTrigger.MANUAL) -> int:
+    def submit_backup(
+        self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True
+    ) -> int:
         """Start a backup cycle in the background; return its run id immediately."""
-        return self._submit(RunKind.CYCLE, trigger, run_backup_cycle)
+        return self._submit(
+            RunKind.CYCLE, trigger, lambda c, r, d: run_backup_cycle(c, r, d, power_off=power_off)
+        )
 
-    def submit_gc(self, trigger: RunTrigger = RunTrigger.MANUAL) -> int:
-        """Start a standalone GC in the background; return its run id immediately."""
-        return self._submit(RunKind.GC, trigger, run_gc)
+    def submit_gc(self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True) -> int:
+        """Start a full GC cycle in the background; return its run id immediately."""
+        return self._submit(
+            RunKind.GC, trigger, lambda c, r, d: run_gc_cycle(c, r, d, power_off=power_off)
+        )
 
     def submit_verify(self, trigger: RunTrigger = RunTrigger.MANUAL) -> int:
         """Start a full verification cycle in the background; return its run id immediately."""

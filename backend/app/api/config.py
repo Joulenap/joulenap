@@ -22,6 +22,7 @@ from ..config import (
     restore_secrets,
 )
 from ..core.config_store import ConfigStore
+from ..core.scheduler import validate_cron
 from .deps import Scheduler, get_config_store, get_scheduler, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["config"])
@@ -54,6 +55,27 @@ def put_config(
         # 422 to mirror FastAPI's own body-validation responses (literal avoids the
         # deprecated HTTP_422_UNPROCESSABLE_ENTITY constant name).
         raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors())) from exc
+
+    # Reject a newly-set invalid cron schedule before it can be persisted (BE-B1): an
+    # unparseable string would 500 the rearm below and then brick every restart. Only
+    # *changed* values are checked so a legacy on-disk schedule carried through an
+    # unrelated edit doesn't lock the user out of saving (the rearm guards tolerate it).
+    old = store.config
+    for label, new_val, old_val in (
+        ("backup.schedule", new_config.backup.schedule, old.backup.schedule),
+        (
+            "maintenance.verify.schedule",
+            new_config.maintenance.verify.schedule,
+            old.maintenance.verify.schedule,
+        ),
+    ):
+        if new_val and new_val != old_val:
+            try:
+                validate_cron(new_val)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid {label} {new_val!r}: {exc}"
+                ) from exc
 
     try:
         store.replace(new_config)

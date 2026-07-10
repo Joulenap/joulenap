@@ -7,6 +7,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0]
+
+### Added
+
+- **"Keep PBS on" after a manual job** — the Run backup / Run GC confirmation now offers a
+  toggle to leave the PBS powered on after the job instead of powering it back off. It defaults
+  to the PBS's current state: a box that is already awake (for example, woken for a restore)
+  stays on, while one that was asleep goes back to sleep afterwards. `POST /api/backup/run` and
+  `POST /api/gc/run` accept an optional `{"keep_on": true}` body. Scheduled runs always power
+  off, unchanged.
+- **Manual GC now wakes the PBS** — "Run GC" runs as a full wake to GC to power-off cycle, so it
+  works against a normally-off PBS instead of failing when the box is asleep.
+
+### Changed
+
+- Manual **Run backup / Run GC** are now available while the PBS is asleep — they wake it
+  themselves, so they only require that no other run is already in progress.
+- Changing the admin account now requires confirming the current password (`PUT /api/account`),
+  so a stolen session alone can no longer rotate the credentials.
+
+### Fixed
+
+- **Setup wizard no longer wipes the PVE token secret on re-save.** Re-saving a completed wizard
+  sent an empty secret, which the backend read as "clear it" — silently breaking every
+  subsequent backup. The wizard now preserves the stored secret unless a new one is entered.
+- **`exclude` guest mode is no longer inverted.** The dashboard showed an `exclude` list as a
+  selective (include) set and, on Apply, rewrote it as `include` — flipping the backup set to
+  exactly the guests meant to be skipped. Exclude mode is now shown read-only (edit `config.yaml`
+  to change it) and preserved on save.
+- **An invalid backup cron no longer bricks startup.** An unparseable `backup.schedule` is now
+  rejected on save (`422`) and, if already present on disk, is skipped with a warning instead of
+  crashing the scheduler on every restart.
+
 ## [0.3.1]
 
 ### Changed
@@ -102,7 +135,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Joulenap/joulenap/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Joulenap/joulenap/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Joulenap/joulenap/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Joulenap/joulenap/compare/v0.1.1...v0.2.0

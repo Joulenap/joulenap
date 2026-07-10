@@ -166,6 +166,14 @@ def test_rearm_to_disabled_clears_verify_job():
     assert sched.verify_job is None
 
 
+def test_invalid_backup_schedule_does_not_crash_rearm():
+    # A hand-edited/invalid backup schedule must not raise out of rearm (BE-B1) — otherwise
+    # a bad string on disk bricks every startup. It's skipped, leaving nothing armed.
+    sched = Scheduler(lambda _trigger: None)
+    sched.rearm(_config(schedule="0 4 * *"))  # 4 fields, unparseable
+    assert sched.backup_job is None
+
+
 def test_legacy_verify_schedule_does_not_crash_or_arm():
     # The old config used schedule "monthly" (not cron). Arming must not raise, just skip.
     sched = Scheduler(lambda _t: None, run_verify=lambda _t: None)
