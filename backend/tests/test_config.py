@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,31 @@ def test_save_falls_back_to_in_place_when_rename_is_busy(tmp_path: Path, monkeyp
 
     assert load_config(out).app.port == 9090
     assert not (tmp_path / "config.yaml.tmp").exists()  # temp cleaned up
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes only (Windows/NTFS has no 0600)")
+def test_save_config_is_owner_only(tmp_path: Path, monkeypatch):
+    # config.yaml holds plaintext secrets (tokens, secret_key, passwords), so it must not be
+    # world-readable (BE-S2) — mirrors the SSH key's 0600.
+    import errno
+    import stat
+
+    cfg = load_config(EXAMPLE)
+    out = tmp_path / "config.yaml"
+
+    # Atomic path (temp + rename): the fresh file lands owner-only.
+    save_config(cfg, out)
+    assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
+
+    # In-place fallback (bind-mount EBUSY) re-tightens even a loosened existing file.
+    os.chmod(out, 0o644)
+
+    def busy_replace(_src, _dst):
+        raise OSError(errno.EBUSY, "Device or resource busy")
+
+    monkeypatch.setattr(os, "replace", busy_replace)
+    save_config(cfg, out)
+    assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
 
 
 def test_redaction_masks_secrets_keeps_empty():

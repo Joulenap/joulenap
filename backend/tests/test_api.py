@@ -415,7 +415,9 @@ def test_power_off_conflict_when_busy(app_ctx):
     client, app = app_ctx
 
     class _Busy:
-        is_running = True
+        def exclusive(self):
+            # A run holds the lock: entering the guard raises, mapping to 409.
+            raise AlreadyRunningError("A backup or GC run is already in progress")
 
     app.state.job_service = _Busy()
     assert client.post("/api/power/off").status_code == 409

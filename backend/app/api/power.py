@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ..connectors.errors import ConnectorError
 from ..core.config_store import ConfigStore
+from ..jobs import AlreadyRunningError
 from .deps import JobService, get_config_store, get_job_service, require_auth
 
 router = APIRouter(prefix="/power", dependencies=[Depends(require_auth)], tags=["power"])
@@ -43,13 +44,16 @@ def power_off(
     store: ConfigStore = Depends(get_config_store),
     job_service: JobService = Depends(get_job_service),
 ) -> PowerResult:
-    if job_service.is_running:
+    # Hold the single-run lock across the poweroff so a scheduled cycle can't start in the
+    # gap between "is a run active?" and the SSH poweroff and get its PBS shut down mid-backup.
+    try:
+        with job_service.exclusive():
+            job_service.deps.build_power(store.config).poweroff()
+    except AlreadyRunningError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A backup or GC run is in progress; cannot power off the PBS",
-        )
-    try:
-        job_service.deps.build_power(store.config).poweroff()
+        ) from exc
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return PowerResult(ok=True)

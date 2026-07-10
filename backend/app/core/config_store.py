@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .. import paths
-from ..config import Config, load_config, save_config
+from ..config import Config, load_config, restrict_secret_file, save_config
 
 log = logging.getLogger("joulenap.config")
 
@@ -40,6 +40,7 @@ class ConfigStore:
             example = paths.config_example_path()
             log.warning("config.yaml not found at %s — creating from %s", target, example)
             shutil.copyfile(example, target)
+            restrict_secret_file(target)  # owner-only from the start (secrets land here later)
 
         config = load_config(target)
         store = cls(config, target)

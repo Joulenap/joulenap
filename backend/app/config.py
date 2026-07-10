@@ -243,13 +243,25 @@ def load_config(path: Path | None = None) -> Config:
     return Config.model_validate(raw)
 
 
+def restrict_secret_file(path: Path) -> None:
+    """Best-effort ``chmod 0600`` so config.yaml's plaintext secrets (API tokens, secret_key,
+    SMTP/bot passwords) aren't world-readable — matching the SSH key's perms. Silently ignored
+    where it isn't meaningful: a foreign-owned/exotic mount, or a filesystem (Windows/NTFS)
+    without POSIX permission bits."""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
 def save_config(cfg: Config, path: Path | None = None) -> None:
     """Write the full config (real secrets) back to disk.
 
     Prefers an atomic temp-file + ``os.replace`` so a crash mid-write can't truncate the
     live config. When the target is a single-file Docker bind mount (``config.yaml`` mapped
     in directly), the rename can't replace the mount point (EBUSY) — and a cross-device tmp
-    can't be renamed (EXDEV) — so we fall back to an in-place overwrite. Raises a clear error
+    can't be renamed (EXDEV) — so we fall back to an in-place overwrite. The file is written
+    owner-only (0600) so the plaintext secrets aren't world-readable. Raises a clear error
     if the file isn't writable (e.g. mounted read-only).
     """
     p = path or paths.config_path()
@@ -257,7 +269,10 @@ def save_config(cfg: Config, path: Path | None = None) -> None:
     text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False)
     tmp = p.with_suffix(p.suffix + ".tmp")
     try:
-        with tmp.open("w", encoding="utf-8") as fh:
+        # Create the temp with owner-only perms up front so the plaintext secrets never sit in
+        # a world-readable file; os.replace then carries those perms onto config.yaml.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
         try:
             os.replace(tmp, p)
@@ -267,8 +282,11 @@ def save_config(cfg: Config, path: Path | None = None) -> None:
             # onto a single-file bind mount, which is how the compose example maps config.yaml.
             if exc.errno not in (errno.EBUSY, errno.EXDEV):
                 raise
-            with p.open("w", encoding="utf-8") as fh:
+            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(text)
+            # O_CREAT doesn't change an already-existing file's mode, so tighten it explicitly.
+            restrict_secret_file(p)
             tmp.unlink(missing_ok=True)
     except PermissionError as exc:
         tmp.unlink(missing_ok=True)
