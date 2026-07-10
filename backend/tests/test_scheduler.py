@@ -116,6 +116,26 @@ def test_rearm_preserves_prune_job():
     assert {j.id for j in sched._scheduler.get_jobs()} == {PRUNE_JOB_ID}
 
 
+def test_rearm_updates_prune_job_timezone():
+    # A runtime timezone change (via rearm) must move the prune job into the new zone, not
+    # leave it firing in the boot-time zone (BE-B7). Started so replace_existing dedups the
+    # prune job (as it does in production, where rearm always runs on a started scheduler).
+    sched = Scheduler(lambda _trigger: None, run_prune=lambda: None, timezone="UTC")
+    sched.start()
+    try:
+        sched.arm_prune()
+        assert sched.prune_job is not None
+        assert str(sched.prune_job.trigger.timezone) == "UTC"
+
+        cfg = _config()
+        cfg.app.timezone = "Europe/Rome"
+        sched.rearm(cfg)
+        assert sched.prune_job is not None
+        assert str(sched.prune_job.trigger.timezone) == "Europe/Rome"
+    finally:
+        sched.shutdown()
+
+
 def test_fire_prune_invokes_callback():
     calls: list[int] = []
     sched = Scheduler(lambda _trigger: None, run_prune=lambda: calls.append(1))

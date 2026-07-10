@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from ..core.config_store import ConfigStore
 from ..db import session_scope
-from ..db.models import RunKind, RunTrigger
+from ..db.models import RunKind, RunStatus, RunTrigger
 from ..db.prune import PruneResult, prune_history
 from .backup_cycle import run_backup_cycle, run_gc_cycle, run_verify_cycle
 from .deps import CycleDeps
@@ -34,6 +36,18 @@ class JobService:
     @property
     def is_running(self) -> bool:
         return self._lock.locked()
+
+    @contextmanager
+    def exclusive(self) -> Iterator[None]:
+        """Hold the single-run lock for a non-job operation (e.g. a manual power-off) so it
+        can't race a run *starting* in the gap of a check-then-act. Raises AlreadyRunningError
+        if a run already holds the lock; releases it when the block exits."""
+        if not self._lock.acquire(blocking=False):
+            raise AlreadyRunningError("A backup or GC run is already in progress")
+        try:
+            yield
+        finally:
+            self._lock.release()
 
     # --- blocking entry points (internal / tests) ----------------------------
 
@@ -131,5 +145,16 @@ class JobService:
             finally:
                 self._lock.release()
 
-        threading.Thread(target=worker, name=f"joulenap-{kind.value}", daemon=True).start()
+        try:
+            threading.Thread(target=worker, name=f"joulenap-{kind.value}", daemon=True).start()
+        except BaseException:
+            # The worker (and its lock-release + recorder finalisation) never runs, so do it
+            # here — otherwise the run is stuck RUNNING and the single-run lock is held forever,
+            # 409-ing every later run until restart (BE-B6).
+            try:
+                recorder.finish(RunStatus.FAILURE, error="worker thread failed to start")
+            finally:
+                recorder.close()
+                self._lock.release()
+            raise
         return run_id

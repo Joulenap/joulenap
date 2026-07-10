@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.db import session_scope
 from app.db.models import LogEvent, LogLevel, Run, RunKind, RunStatus, RunTrigger
+
+
+def test_sqlite_pragmas_applied(temp_db):
+    # WAL + busy_timeout + foreign_keys keep concurrent access safe while a running cycle
+    # commits and the dashboard polls (BE-B3). Assert they're set on a fresh connection.
+    with session_scope() as s:
+        assert s.execute(text("PRAGMA journal_mode")).scalar() == "wal"
+        assert s.execute(text("PRAGMA foreign_keys")).scalar() == 1
+        assert s.execute(text("PRAGMA busy_timeout")).scalar() == 5000
 
 
 def test_create_run_with_logs(temp_db):

@@ -126,15 +126,18 @@ class Scheduler:
             self._scheduler.shutdown(wait=False)
 
     def rearm(self, config: Config) -> None:
-        """(Re)build the config-driven cron jobs (backup + scheduled verify). Each existing
-        job is removed first so a disabled/empty schedule leaves nothing armed. The prune
-        housekeeping job (armed separately) is left untouched."""
+        """(Re)build the config-driven cron jobs (backup + scheduled verify) and re-arm the
+        prune housekeeping job so its timezone stays in sync. Each config-driven job is
+        removed first so a disabled/empty schedule leaves nothing armed."""
         # Re-resolve app.timezone here so a timezone changed at runtime (e.g. saved via
         # Settings, which calls rearm) actually takes effect. Without this the zone is fixed
         # at construction and a new schedule would stay in the old zone until restart.
         self._timezone = resolve_timezone(config.app.timezone)
         self._rearm_backup(config)
         self._rearm_verify(config)
+        # Prune isn't config-driven, but its trigger carries a timezone too, so re-arm it in
+        # the (possibly new) zone — otherwise it keeps firing in the boot-time zone (BE-B7).
+        self.arm_prune()
 
     def _rearm_backup(self, config: Config) -> None:
         if self._scheduler.get_job(BACKUP_JOB_ID):
@@ -204,9 +207,10 @@ class Scheduler:
             log.exception("Scheduled verify run failed to start")
 
     def arm_prune(self) -> None:
-        """Arm the daily history-prune job. No-op when no prune callback was provided.
-        Independent of backup config, so it survives ``rearm`` and runs even when backups
-        are disabled."""
+        """Arm (or, via ``replace_existing``, re-arm) the daily history-prune job in the
+        current timezone. No-op when no prune callback was provided. Independent of backup
+        config, so it runs even when backups are disabled; ``rearm`` calls it to keep the
+        prune trigger's timezone in sync."""
         if self._run_prune is None:
             return
         self._scheduler.add_job(

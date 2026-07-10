@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .. import paths
@@ -26,11 +26,29 @@ class Base(DeclarativeBase):
 
 def _make_engine(db_file: Path):
     # check_same_thread=False: FastAPI may touch a session from a threadpool worker.
-    return create_engine(
+    engine = create_engine(
         f"sqlite:///{db_file.as_posix()}",
         future=True,
         connect_args={"check_same_thread": False},
     )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, _record):
+        # A running backup cycle commits after every step/log line while the dashboard
+        # polls (and writes datastore usage on GET), so concurrent access is the norm:
+        #  - WAL lets those readers keep going while the cycle writes, instead of
+        #    blocking each other (the default rollback journal serialises them).
+        #  - busy_timeout makes a genuinely contended write WAIT rather than fail
+        #    instantly with "database is locked".
+        #  - foreign_keys makes the ondelete=CASCADE relationships actually enforce
+        #    (SQLite leaves FK enforcement off by default).
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
+    return engine
 
 
 def init_db(db_file: Path | None = None) -> None:
