@@ -64,8 +64,8 @@ Everything is served under `/api`. Auth is a signed **session cookie** started b
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/backup/run` | run a backup cycle now |
-| POST | `/api/gc/run` | run Garbage Collection now |
+| POST | `/api/backup/run` | run a backup cycle now (optional `{keep_on}` to leave the PBS on) |
+| POST | `/api/gc/run` | run a GC cycle now: wake → GC → power-off (optional `{keep_on}` to leave the PBS on) |
 | POST | `/api/power/on` | wake the PBS (Wake-on-LAN) |
 | POST | `/api/power/off` | power the PBS off (SSH) |
 | POST | `/api/wol/test` | send a test magic packet |

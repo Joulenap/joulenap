@@ -19,7 +19,10 @@ interface DashboardProps {
 }
 
 interface Draft extends SchedulerDraft {
-  guestsMode: 'general' | 'selective'
+  // 'exclude' is a read-only escape hatch: the backend supports it but the simple
+  // switcher can't represent "back up everything except these", so the panel locks it
+  // (mirrors the advanced-schedule escape hatch) rather than corrupting it into 'include'.
+  guestsMode: 'general' | 'selective' | 'exclude'
   selected: number[]
 }
 
@@ -37,7 +40,12 @@ function draftFromConfig(cfg: Config): Draft {
     keepMonthly: cfg.backup.retention.keep_monthly,
     wakeTimeout: cfg.pbs.wait_timeout,
     wakeRetries: cfg.pbs.wol_retries,
-    guestsMode: cfg.backup.guests.mode === 'all' ? 'general' : 'selective',
+    guestsMode:
+      cfg.backup.guests.mode === 'all'
+        ? 'general'
+        : cfg.backup.guests.mode === 'exclude'
+          ? 'exclude'
+          : 'selective',
     selected: [...cfg.backup.guests.list],
   }
 }
@@ -52,6 +60,10 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [logs, setLogs] = useState<LogLine[]>([])
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  // "Keep PBS on after the job" choice for the backup/GC confirm dialog. A ref mirrors it so
+  // the confirm's onConfirm (captured at setConfirm time) reads the latest value.
+  const [keepOn, setKeepOn] = useState(false)
+  const keepOnRef = useRef(false)
 
   // Live PVE/PBS task narration (backup, GC, verify) for the Task-log panel.
   const jobRunning = status?.job_running ?? false
@@ -105,6 +117,10 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
 
   useEffect(() => () => pollTimers.current.forEach(clearTimeout), [])
 
+  useEffect(() => {
+    keepOnRef.current = keepOn
+  }, [keepOn])
+
   const original = useMemo(() => (config ? draftFromConfig(config) : null), [config])
   const dirty = useMemo(() => {
     if (!draft || !original) return false
@@ -149,6 +165,11 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     next.maintenance.gc.enabled = draft.gcEnabled
     if (draft.guestsMode === 'general') {
       next.backup.guests.mode = 'all'
+    } else if (draft.guestsMode === 'exclude') {
+      // Locked/read-only: preserve the stored exclude set verbatim, never rewrite it as
+      // 'include' (which would invert the backup set — FE-H1).
+      next.backup.guests.mode = 'exclude'
+      next.backup.guests.list = [...draft.selected].sort((a, b) => a - b)
     } else {
       next.backup.guests.mode = 'include'
       next.backup.guests.list = [...draft.selected].sort((a, b) => a - b)
@@ -159,19 +180,27 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
 
   const runAction = (
     key: 'backup' | 'gc' | 'on' | 'off',
-    fn: () => Promise<unknown>,
+    fn: (keepOn: boolean) => Promise<unknown>,
     danger = false,
     icon = '▶',
   ) => {
+    const isJob = key === 'backup' || key === 'gc'
+    // Default the switch to the PBS's current state: already-on stays on (e.g. woken for a
+    // restore); asleep goes back to sleep after the job. The user can override either way.
+    const initialKeepOn = !!status?.pbs_online
+    if (isJob) setKeepOn(initialKeepOn)
     setConfirm({
       title: t(`dashboard.confirm.${key}Title`),
       message: t(`dashboard.confirm.${key}Msg`, { timeout: draft.wakeTimeout }),
       confirmLabel: t(`dashboard.confirm.${key}Yes`),
       danger,
       icon,
+      ...(isJob
+        ? { toggle: { label: t('dashboard.confirm.keepOn'), value: initialKeepOn, onChange: setKeepOn } }
+        : {}),
       onConfirm: async () => {
         try {
-          await fn()
+          await fn(keepOnRef.current)
         } catch {
           /* surfaced in the activity log / status */
         }
@@ -193,10 +222,10 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
       <div className="jn-row-actions">
         <ManualPanel
           status={status}
-          onBackup={() => runAction('backup', api.runBackup, false, '▶')}
-          onGc={() => runAction('gc', api.runGc, false, '⟳')}
-          onPowerOn={() => runAction('on', api.powerOn, false, '⏻')}
-          onPowerOff={() => runAction('off', api.powerOff, true, '⏻')}
+          onBackup={() => runAction('backup', (k) => api.runBackup(k), false, '▶')}
+          onGc={() => runAction('gc', (k) => api.runGc(k), false, '⟳')}
+          onPowerOn={() => runAction('on', () => api.powerOn(), false, '⏻')}
+          onPowerOff={() => runAction('off', () => api.powerOff(), true, '⏻')}
         />
         <StatTiles status={status} />
       </div>
@@ -225,7 +254,14 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
 
       <TaskLog lines={taskLog.lines} running={jobRunning} runId={taskLog.runId} />
 
-      <ConfirmModal state={confirm} onCancel={() => setConfirm(null)} />
+      <ConfirmModal
+        state={
+          confirm && confirm.toggle
+            ? { ...confirm, toggle: { ...confirm.toggle, value: keepOn, onChange: setKeepOn } }
+            : confirm
+        }
+        onCancel={() => setConfirm(null)}
+      />
     </>
   )
 }

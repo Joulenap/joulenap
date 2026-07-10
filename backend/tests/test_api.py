@@ -122,6 +122,17 @@ def test_config_put_rejects_invalid(app_ctx):
     assert client.put("/api/config", json=cfg).status_code == 422
 
 
+def test_config_put_rejects_invalid_backup_schedule(app_ctx, temp_config):
+    # A newly-set unparseable cron must 422 before persisting, not 500 the rearm and then
+    # brick the next startup (BE-B1).
+    client, _app = app_ctx
+    before = load_config(temp_config).backup.schedule
+    r = client.put("/api/config", json={"backup": {"schedule": "0 4 * *"}})  # 4 fields
+    assert r.status_code == 422
+    # Nothing was written: the old (valid) schedule is intact on disk.
+    assert load_config(temp_config).backup.schedule == before
+
+
 def test_config_put_partial_body_preserves_secrets(app_ctx, temp_config):
     client, _app = app_ctx
     before = load_config(temp_config)
@@ -313,7 +324,7 @@ def test_gc_run_records(app_ctx):
 def test_backup_run_conflict_when_busy(app_ctx):
     client, app = app_ctx
 
-    def busy(_trigger):
+    def busy(_trigger, *, power_off=True):
         raise AlreadyRunningError("already running")
 
     app.state.job_service.submit_backup = busy
@@ -362,6 +373,35 @@ def test_power_on_sends_wol(app_ctx):
     _inject(app, wol=lambda _c: calls.append(1))
     assert client.post("/api/power/on").json() == {"ok": True}
     assert calls == [1]
+
+
+def test_backup_run_keep_on_leaves_pbs_up(app_ctx):
+    client, app = app_ctx
+    _pve, _pbs, power = _inject(app)
+    r = client.post("/api/backup/run", json={"keep_on": True})
+    assert r.status_code == 202
+    body = _wait_run(client, r.json()["run_id"])
+    assert body["status"] == "success"
+    assert power.powered_off is False
+
+
+def test_backup_run_default_powers_off(app_ctx):
+    client, app = app_ctx
+    _pve, _pbs, power = _inject(app)
+    r = client.post("/api/backup/run")  # no body → keep_on defaults false
+    assert r.status_code == 202
+    _wait_run(client, r.json()["run_id"])
+    assert power.powered_off is True
+
+
+def test_gc_run_keep_on_leaves_pbs_up(app_ctx):
+    client, app = app_ctx
+    _pve, _pbs, power = _inject(app)
+    r = client.post("/api/gc/run", json={"keep_on": True})
+    assert r.status_code == 202
+    body = _wait_run(client, r.json()["run_id"])
+    assert body["status"] == "success"
+    assert power.powered_off is False
 
 
 def test_power_off_calls_poweroff(app_ctx):
@@ -455,7 +495,10 @@ def test_status_datastore_from_cache_when_offline(app_ctx):
 
 def test_account_update_changes_username_and_password(app_ctx, temp_config):
     client, _app = app_ctx
-    r = client.put("/api/account", json={"username": "newadmin", "password": "freshpass"})
+    r = client.put(
+        "/api/account",
+        json={"current_password": "secret12", "username": "newadmin", "password": "freshpass"},
+    )
     assert r.status_code == 200 and r.json() == {"username": "newadmin"}
 
     cfg = load_config(temp_config)
@@ -468,7 +511,9 @@ def test_account_update_changes_username_and_password(app_ctx, temp_config):
 
 def test_account_update_empty_password_keeps_current(app_ctx, temp_config):
     client, _app = app_ctx
-    r = client.put("/api/account", json={"username": "admin2", "password": ""})
+    r = client.put(
+        "/api/account", json={"current_password": "secret12", "username": "admin2", "password": ""}
+    )
     assert r.status_code == 200
     client.post("/api/logout")
     # Old password still valid under the new username => password unchanged.
@@ -479,7 +524,7 @@ def test_account_update_empty_password_keeps_current(app_ctx, temp_config):
 def test_account_update_omitted_password_keeps_current(app_ctx, temp_config):
     client, _app = app_ctx
     # Password key entirely absent (not just "") also means "keep current".
-    r = client.put("/api/account", json={"username": "admin4"})
+    r = client.put("/api/account", json={"current_password": "secret12", "username": "admin4"})
     assert r.status_code == 200
     client.post("/api/logout")
     login = client.post("/api/login", json={"username": "admin4", "password": "secret12"})
@@ -488,7 +533,32 @@ def test_account_update_omitted_password_keeps_current(app_ctx, temp_config):
 
 def test_account_update_short_password_rejected(app_ctx, temp_config):
     client, _app = app_ctx
-    r = client.put("/api/account", json={"username": "admin", "password": "ab"})
+    r = client.put(
+        "/api/account",
+        json={"current_password": "secret12", "username": "admin", "password": "ab"},
+    )
+    assert r.status_code == 422
+
+
+def test_account_update_wrong_current_password_rejected(app_ctx, temp_config):
+    client, _app = app_ctx
+    # A valid session alone must not be enough to rotate credentials (BE-S9).
+    r = client.put(
+        "/api/account",
+        json={"current_password": "wrong-pass", "username": "hacker", "password": "takeover1"},
+    )
+    assert r.status_code == 401
+    # Nothing changed: the original credentials still work.
+    cfg = load_config(temp_config)
+    assert cfg.app.auth.username == "admin"
+    client.post("/api/logout")
+    login = client.post("/api/login", json={"username": "admin", "password": "secret12"})
+    assert login.status_code == 200
+
+
+def test_account_update_missing_current_password_rejected(app_ctx, temp_config):
+    client, _app = app_ctx
+    r = client.put("/api/account", json={"username": "admin", "password": "newpass-88"})
     assert r.status_code == 422
 
 
@@ -500,7 +570,10 @@ def test_password_change_keeps_acting_session_but_revokes_others(app_ctx):
         assert login.status_code == 200
         assert other.get("/api/auth/me").status_code == 200
         # Acting client changes the password.
-        r = client.put("/api/account", json={"username": "admin", "password": "newpass-88"})
+        r = client.put(
+            "/api/account",
+            json={"current_password": "secret12", "username": "admin", "password": "newpass-88"},
+        )
         assert r.status_code == 200
         # Acting session is kept alive (cookie re-issued with the new hash).
         assert client.get("/api/auth/me").status_code == 200
