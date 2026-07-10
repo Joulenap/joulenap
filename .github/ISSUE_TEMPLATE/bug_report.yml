@@ -13,7 +13,7 @@ body:
     attributes:
       label: Joulenap version
       description: Shown in the UI footer.
-      placeholder: "0.3.1"
+      placeholder: "0.4.0"
     validations:
       required: true
   - type: dropdown
