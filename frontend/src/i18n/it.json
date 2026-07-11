@@ -6,10 +6,14 @@
     "confirm": "Conferma",
     "loading": "Caricamento…",
     "never": "mai",
-    "saveFailed": "Impossibile salvare le modifiche"
+    "saveFailed": "Impossibile salvare le modifiche",
+    "backendUnreachable": "Impossibile raggiungere Joulenap — mostro gli ultimi dati noti.",
+    "notConfigured": "Joulenap non è ancora configurato — collega Proxmox VE e PBS per iniziare a fare backup.",
+    "runSetup": "Avvia la configurazione →"
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
+    "sessionExpired": "La sessione è scaduta. Accedi di nuovo.",
     "username": "Nome utente",
     "password": "Password",
     "confirmPassword": "Conferma password",
@@ -79,6 +83,7 @@
     "backupDays": "Giorni di backup",
     "scheduleCustom": "Pianificazione personalizzata impostata in config.yaml ({{cron}}) — modificala lì per cambiarla.",
     "apply": "Applica modifiche",
+    "saved": "✓ Pianificazione salvata",
     "guests": "Guest",
     "refresh": "Aggiorna",
     "general": "Backup generale",

@@ -118,8 +118,9 @@ const pbsCli = (datastore: string) =>
   ].join('\n')
 
 // A saved config counts as "set up" once the connection identity the wizard writes is
-// present. Used to show the completed state (and the reset button) after a reload.
-function isConfigured(cfg: Config): boolean {
+// present. Used to show the completed state (and the reset button) after a reload, and to
+// drive the "not configured yet" banner on the dashboard (single source of truth).
+export function isConfigured(cfg: Config): boolean {
   return !!(cfg.pve.host && cfg.pve.api_token_id && cfg.pbs.host && cfg.pbs.mac)
 }
 

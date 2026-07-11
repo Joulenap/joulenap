@@ -8,7 +8,7 @@ import { TIMEZONES, detectTimezone } from '../utils/timezones'
 
 export function Login() {
   const { t } = useTranslation()
-  const { setupNeeded, login, setup } = useAuth()
+  const { setupNeeded, expired, login, setup } = useAuth()
   const register = setupNeeded
 
   const [user, setUser] = useState('')
@@ -98,6 +98,25 @@ export function Login() {
           >
             {register ? t('auth.registerSubtitle') : t('auth.signInSubtitle')}
           </span>
+
+          {expired && !register && !error && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'rgba(232,131,15,.1)',
+                border: '1px solid rgba(232,131,15,.4)',
+                borderRadius: 7,
+                padding: '9px 12px',
+                marginBottom: 14,
+                fontSize: 12,
+                color: c.textMid,
+              }}
+            >
+              ⚠ {t('auth.sessionExpired')}
+            </div>
+          )}
 
           <label style={{ display: 'block', marginBottom: 14 }}>
             <span style={labelStyle}>{t('auth.username')}</span>
