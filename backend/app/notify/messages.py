@@ -8,6 +8,7 @@ the UI locales but kept deliberately tiny (only the strings that ship in a notif
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from ..config import Config
@@ -22,6 +23,15 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
         "success": {"title": "✅ Joulenap — backup succeeded"},
         "failure": {"title": "❌ Joulenap — backup failed"},
         "aborted": {"title": "⚠️ Joulenap — backup aborted"},
+        "missed": {
+            "title": "⚠️ Joulenap — missed scheduled backup",
+            "intro": "A scheduled backup was skipped because Joulenap was offline when it "
+            "was due.",
+        },
+        "interrupted": {
+            "title": "⚠️ Joulenap — run interrupted by a restart",
+            "intro": "Joulenap restarted while a run was in progress; it was marked failed.",
+        },
         "test": {
             "title": "🔔 Joulenap — test notification",
             "body": "If you can read this, notifications are configured correctly.",
@@ -34,12 +44,25 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "free": "free",
             "error": "Error",
             "pbs_left_on": "⚠️ PBS left powered on — check it",
+            "missed_run": "Missed run",
+            "last_run": "Last backup run",
+            "next_run": "Next scheduled run",
         },
     },
     "it": {
         "success": {"title": "✅ Joulenap — backup riuscito"},
         "failure": {"title": "❌ Joulenap — backup fallito"},
         "aborted": {"title": "⚠️ Joulenap — backup interrotto"},
+        "missed": {
+            "title": "⚠️ Joulenap — backup pianificato mancato",
+            "intro": "Un backup pianificato è stato saltato perché Joulenap era offline "
+            "al momento previsto.",
+        },
+        "interrupted": {
+            "title": "⚠️ Joulenap — esecuzione interrotta da un riavvio",
+            "intro": "Joulenap si è riavviato mentre un'esecuzione era in corso; "
+            "è stata contrassegnata come fallita.",
+        },
         "test": {
             "title": "🔔 Joulenap — notifica di prova",
             "body": "Se leggi questo messaggio, le notifiche sono configurate correttamente.",
@@ -52,6 +75,9 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "free": "liberi",
             "error": "Errore",
             "pbs_left_on": "⚠️ PBS lasciato acceso — controllalo",
+            "missed_run": "Esecuzione mancata",
+            "last_run": "Ultimo backup eseguito",
+            "next_run": "Prossima esecuzione pianificata",
         },
     },
 }
@@ -89,14 +115,24 @@ def human_bytes(n: int) -> str:
 
 
 def _pbs_left_on(run: Run) -> bool:
-    """True if the cycle finished without powering the PBS off — a POWEROFF step exists but
-    didn't succeed (poweroff failed, or was skipped because the PBS was busy).
+    """True if the cycle woke the PBS but never powered it back off — so the box is still
+    burning energy and the user should check it.
 
-    Only ever called on a success run (the caller guards with ``event == "success"``), so a
-    failed/aborted run — which may have no POWEROFF step at all — never reaches here."""
-    return any(
-        s.name == StepName.POWEROFF and s.status != StepStatus.SUCCESS for s in run.steps
+    The rule: the WAIT step succeeded (the PBS actually came up) **and** no POWEROFF step
+    succeeded. That single condition covers every "left on" case uniformly:
+
+      * success but power-off failed / was skipped (PBS busy) — POWEROFF present, not SUCCESS;
+      * failure after the PBS woke (vzdump/GC/verify errored) — no POWEROFF step at all;
+      * abort after wake (preflight free-space, no guests selected) — no POWEROFF step.
+
+    An abort *before* the box came up (wake/wait timeout) leaves the WAIT step non-SUCCESS, so
+    the PBS is off and this correctly returns False — hence why it keys on WAIT, not on the
+    run status."""
+    woke = any(s.name == StepName.WAIT and s.status == StepStatus.SUCCESS for s in run.steps)
+    powered_off = any(
+        s.name == StepName.POWEROFF and s.status == StepStatus.SUCCESS for s in run.steps
     )
+    return woke and not powered_off
 
 
 def build_run_message(
@@ -126,10 +162,53 @@ def build_run_message(
     if run.error:
         lines.append(f"{labels['error']}: {run.error}")
 
-    if event == "success" and _pbs_left_on(run):
+    if _pbs_left_on(run):
         lines.append(labels["pbs_left_on"])
 
     return pack[event]["title"], "\n".join(lines)
+
+
+def _format_dt(dt: datetime | None) -> str:
+    """A short absolute timestamp for notifications, e.g. ``2026-07-11 04:00 CEST``.
+
+    The datetimes passed here come straight from the schedule's cron trigger, so they are
+    already in the user's configured timezone — no re-localisation needed."""
+    if dt is None:
+        return "—"
+    return dt.strftime("%Y-%m-%d %H:%M %Z").rstrip()
+
+
+def build_missed_backup_message(
+    config: Config, missed_at: datetime, last_run_at: datetime | None, next_at: datetime | None
+) -> tuple[str, str]:
+    """``(title, body)`` for a scheduled backup that didn't run because the process was down
+    over its window (BE-R1), in the configured language."""
+    pack = _pack(config.app.language)
+    labels = pack["_labels"]
+    lines = [
+        pack["missed"]["intro"],
+        "",
+        f"{labels['missed_run']}: {_format_dt(missed_at)}",
+        f"{labels['last_run']}: {_format_dt(last_run_at)}",
+        f"{labels['next_run']}: {_format_dt(next_at)}",
+    ]
+    return pack["missed"]["title"], "\n".join(lines)
+
+
+def build_interrupted_message(config: Config, run: Run) -> tuple[str, str]:
+    """``(title, body)`` for a run that a restart interrupted (swept to FAILURE at startup,
+    BE-R2), in the configured language.
+
+    Adds the "PBS left powered on" warning when the box had actually woken before the crash
+    (WAIT succeeded, no POWEROFF) — the whole point of the alert: a normally-off box that a
+    crash left awake and burning power."""
+    pack = _pack(config.app.language)
+    lines = [pack["interrupted"]["intro"]]
+    if run.error:
+        lines.append(f"{pack['_labels']['error']}: {run.error}")
+    if _pbs_left_on(run):
+        lines.append(pack["_labels"]["pbs_left_on"])
+    return pack["interrupted"]["title"], "\n".join(lines)
 
 
 def build_test_message(config: Config) -> tuple[str, str]:

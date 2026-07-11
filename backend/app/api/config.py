@@ -21,6 +21,8 @@ from ..config import (
     redacted_dict,
     restore_secrets,
 )
+from ..connectors.errors import WolError
+from ..connectors.wol import normalize_mac
 from ..core.config_store import ConfigStore
 from ..core.scheduler import validate_cron
 from .deps import Scheduler, get_config_store, get_scheduler, require_auth
@@ -76,6 +78,20 @@ def put_config(
                 raise HTTPException(
                     status_code=422, detail=f"Invalid {label} {new_val!r}: {exc}"
                 ) from exc
+
+    # Reject a newly-set malformed WoL MAC before persisting (BE-C2), reusing the exact
+    # WoL parser so "fails at save" == "fails at wake time". Changed-only + non-empty, same
+    # as the cron block: an empty MAC is the wizard's unconfigured state, and a legacy bad
+    # MAC on disk carried through an unrelated edit stays saveable (fails later at wake, as
+    # today) rather than locking the user out of Settings. Not a pydantic validator, so it
+    # never runs at load time and can't brick startup (the BE-B1 lesson).
+    if new_config.pbs.mac and new_config.pbs.mac != old.pbs.mac:
+        try:
+            normalize_mac(new_config.pbs.mac)
+        except WolError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"Invalid pbs.mac {new_config.pbs.mac!r}: {exc}"
+            ) from exc
 
     try:
         store.replace(new_config)

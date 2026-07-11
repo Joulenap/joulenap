@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__
 from .api import api_router
+from .config import Config
 from .core.config_store import ConfigStore
 from .core.ratelimit import LoginRateLimiter
 from .core.scheduler import Scheduler
@@ -26,6 +28,7 @@ from .db import init_db, session_scope
 from .db.startup import sweep_orphaned_runs
 from .jobs import JobService
 from .notify import NotificationService
+from .notify.messages import build_interrupted_message
 
 log = logging.getLogger("joulenap.main")
 
@@ -48,13 +51,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Create the SQLite schema before serving requests, then start the in-process
     # scheduler and arm the backup job from config.
     init_db()
+    store: ConfigStore = app.state.config_store
     # A previous process may have died mid-cycle, leaving runs stuck RUNNING; fail them
-    # so the dashboard doesn't show a run that never finishes.
+    # so the dashboard doesn't show a run that never finishes. Build the alert text while the
+    # swept runs are still session-attached (build_interrupted_message reads run.steps).
     with session_scope() as session:
         swept = sweep_orphaned_runs(session)
+        interrupted_alerts = [build_interrupted_message(store.config, run) for run in swept]
     if swept:
-        log.warning("Marked %d interrupted run(s) as failed at startup", swept)
-    store: ConfigStore = app.state.config_store
+        log.warning("Marked %d interrupted run(s) as failed at startup", len(swept))
     service = JobService(store)
     scheduler = Scheduler(
         service.submit_backup,
@@ -68,10 +73,48 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.job_service = service
     app.state.scheduler = scheduler
     app.state.notifier = NotificationService()
+    # Detect a scheduled backup missed while the process was down (BE-R1). Off the startup
+    # path on a daemon thread so a slow/black-holing notification channel can't delay the app
+    # becoming ready, and wrapped so it can never crash boot.
+    threading.Thread(
+        target=_startup_missed_backup_check,
+        args=(store.config, scheduler, app.state.notifier),
+        daemon=True,
+        name="missed-backup-check",
+    ).start()
+    # Alert on any run a restart interrupted (BE-R2) — same off-thread, boot-safe pattern.
+    if interrupted_alerts:
+        threading.Thread(
+            target=_send_startup_alerts,
+            args=(store.config, app.state.notifier, interrupted_alerts),
+            daemon=True,
+            name="interrupted-run-alert",
+        ).start()
     try:
         yield
     finally:
         scheduler.shutdown()
+
+
+def _startup_missed_backup_check(
+    config: Config, scheduler: Scheduler, notifier: NotificationService
+) -> None:
+    from .core.catchup import check_missed_backup
+
+    try:
+        check_missed_backup(config, scheduler, notifier)
+    except Exception:  # noqa: BLE001 - a startup safety net must never take the app down
+        log.exception("missed-backup startup check failed")
+
+
+def _send_startup_alerts(
+    config: Config, notifier: NotificationService, alerts: list[tuple[str, str]]
+) -> None:
+    for title, body in alerts:
+        try:
+            notifier.send_alert(config, title, body)
+        except Exception:  # noqa: BLE001 - a startup safety net must never take the app down
+            log.exception("startup alert notification failed")
 
 
 def create_app() -> FastAPI:

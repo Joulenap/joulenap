@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -246,3 +246,21 @@ class Scheduler:
         job = self.backup_job
         # A pending job (scheduler not yet started) has no next_run_time computed.
         return getattr(job, "next_run_time", None) if job else None
+
+    def missed_backup_since(self, anchor: datetime, now: datetime) -> datetime | None:
+        """The first scheduled backup fire in ``(anchor, now]``, or None if none was due.
+
+        Used at startup to detect a backup that was due while the process was down (the
+        in-memory jobstore has no memory of fires missed across a restart; ``coalesce`` only
+        helps while alive — BE-R1). ``anchor`` is the last finished cycle's start; we ask the
+        *armed job's own trigger* (so the timezone + DOW translation match the real schedule)
+        for the next fire strictly after it, and report it only if it's already in the past.
+
+        Returns None when no backup job is armed (backups disabled / empty schedule)."""
+        job = self.backup_job
+        if job is None:
+            return None
+        # +1s so the fire that the anchor run itself served isn't re-reported as missed
+        # (cron fires land on whole seconds; anchor is that run's start ~at fire time).
+        fire = job.trigger.get_next_fire_time(None, anchor + timedelta(seconds=1))
+        return fire if fire is not None and fire <= now else None
