@@ -133,6 +133,24 @@ def test_config_put_rejects_invalid_backup_schedule(app_ctx, temp_config):
     assert load_config(temp_config).backup.schedule == before
 
 
+def test_config_put_rejects_invalid_mac(app_ctx, temp_config):
+    # A newly-set malformed WoL MAC must 422 before persisting, not fail silently at wake
+    # time (BE-C2). "00:11:22:33:44" is only 5 octets.
+    client, _app = app_ctx
+    before = load_config(temp_config).pbs.mac
+    r = client.put("/api/config", json={"pbs": {"mac": "00:11:22:33:44"}})
+    assert r.status_code == 422
+    assert "pbs.mac" in str(r.json()["detail"])
+    assert load_config(temp_config).pbs.mac == before  # nothing written
+
+
+def test_config_put_accepts_valid_mac(app_ctx, temp_config):
+    client, _app = app_ctx
+    r = client.put("/api/config", json={"pbs": {"mac": "aa-bb-cc-dd-ee-ff"}})
+    assert r.status_code == 200
+    assert load_config(temp_config).pbs.mac == "aa-bb-cc-dd-ee-ff"
+
+
 def test_config_put_partial_body_preserves_secrets(app_ctx, temp_config):
     client, _app = app_ctx
     before = load_config(temp_config)

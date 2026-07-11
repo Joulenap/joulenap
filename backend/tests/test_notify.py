@@ -16,7 +16,12 @@ from app.jobs.recorder import RunRecorder
 from app.main import create_app
 from app.notify import NotificationService
 from app.notify.apprise_urls import Channel, build_channels
-from app.notify.messages import build_run_message, build_test_message
+from app.notify.messages import (
+    build_interrupted_message,
+    build_missed_backup_message,
+    build_run_message,
+    build_test_message,
+)
 
 # --- fake Apprise engine -----------------------------------------------------
 
@@ -197,33 +202,158 @@ def test_run_message_failure_includes_error_and_locale():
     assert "vzdump failed" in body
 
 
+def _woke() -> RunStep:
+    """A completed WAIT step — the PBS came up, so 'left on' hinges only on power-off."""
+    return RunStep(name=StepName.WAIT, status=StepStatus.SUCCESS)
+
+
 def test_run_message_flags_pbs_left_on_when_poweroff_failed():
     run = _run(RunStatus.SUCCESS)
-    run.steps = [RunStep(name=StepName.POWEROFF, status=StepStatus.FAILURE)]
+    run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.FAILURE)]
     _title, body = build_run_message(Config(), run)
     assert "left powered on" in body
 
 
 def test_run_message_flags_pbs_left_on_when_poweroff_skipped():
     run = _run(RunStatus.SUCCESS)
-    run.steps = [RunStep(name=StepName.POWEROFF, status=StepStatus.SKIPPED)]
+    run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.SKIPPED)]
     _title, body = build_run_message(Config(), run)
     assert "left powered on" in body
 
 
 def test_run_message_no_pbs_line_when_poweroff_succeeded():
     run = _run(RunStatus.SUCCESS)
-    run.steps = [RunStep(name=StepName.POWEROFF, status=StepStatus.SUCCESS)]
+    run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.SUCCESS)]
     _title, body = build_run_message(Config(), run)
     assert "left powered on" not in body
 
 
-def test_run_message_no_pbs_line_on_failure():
-    # A failure notification never gets the success-only "left on" line.
-    run = _run(RunStatus.FAILURE, error="boom")
-    run.steps = [RunStep(name=StepName.POWEROFF, status=StepStatus.FAILURE)]
+def test_run_message_flags_pbs_left_on_when_backup_fails_after_wake():
+    # Failure after the PBS woke: no POWEROFF step at all, box is left on for inspection.
+    run = _run(RunStatus.FAILURE, error="vzdump failed")
+    run.steps = [_woke(), RunStep(name=StepName.BACKUP, status=StepStatus.FAILURE)]
+    _title, body = build_run_message(Config(), run)
+    assert "left powered on" in body
+
+
+def test_run_message_flags_pbs_left_on_when_aborted_after_wake():
+    # An abort after wake (e.g. free-space preflight) also leaves the box on.
+    run = _run(RunStatus.ABORTED, error="datastore too full")
+    run.steps = [_woke(), RunStep(name=StepName.PRECHECK, status=StepStatus.FAILURE)]
+    _title, body = build_run_message(Config(), run)
+    assert "left powered on" in body
+
+
+def test_run_message_no_pbs_line_when_wait_timed_out():
+    # Aborted before the PBS came up (WAIT failed): the box never turned on, so no warning.
+    run = _run(RunStatus.ABORTED, error="PBS not reachable")
+    run.steps = [
+        RunStep(name=StepName.WAKE, status=StepStatus.SUCCESS),
+        RunStep(name=StepName.WAIT, status=StepStatus.FAILURE),
+    ]
     _title, body = build_run_message(Config(), run)
     assert "left powered on" not in body
+
+
+def test_missed_backup_message_english():
+    missed = datetime(2026, 7, 9, 4, 0, tzinfo=UTC)
+    last = datetime(2026, 7, 8, 4, 0, tzinfo=UTC)
+    nxt = datetime(2026, 7, 12, 4, 0, tzinfo=UTC)
+    title, body = build_missed_backup_message(Config(), missed, last, nxt)
+    assert "missed scheduled backup" in title
+    assert "was offline" in body
+    assert "Missed run: 2026-07-09 04:00" in body
+    assert "Last backup run: 2026-07-08 04:00" in body
+    assert "Next scheduled run: 2026-07-12 04:00" in body
+
+
+def test_missed_backup_message_localized_italian():
+    cfg = Config()
+    cfg.app.language = "it"
+    title, body = build_missed_backup_message(
+        cfg, datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, None
+    )
+    assert "mancato" in title
+    assert "offline" in body
+    # A missing last/next time renders as an em dash rather than crashing.
+    assert "Esecuzione mancata: 2026-07-09 04:00" in body
+
+
+def test_send_missed_backup_dispatches_when_on_failure_enabled():
+    cfg = _notifications_config()
+    cfg.notifications.on_failure = True
+    fake = FakeApprise()
+    svc = NotificationService(apprise_factory=lambda: fake)
+    report = svc.send_missed_backup(
+        cfg, datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, datetime(2026, 7, 12, 4, 0, tzinfo=UTC)
+    )
+    assert report.sent is True
+    assert report.channels == 5
+    assert fake.payload is not None and "missed scheduled backup" in fake.payload[0]
+
+
+def test_send_missed_backup_skipped_when_on_failure_disabled():
+    cfg = _notifications_config()
+    cfg.notifications.on_failure = False
+    svc = NotificationService(apprise_factory=FakeApprise)
+    report = svc.send_missed_backup(cfg, datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, None)
+    assert report.sent is False
+    assert report.skipped is True
+    assert report.reason == "on_failure disabled"
+
+
+def test_interrupted_message_flags_pbs_left_on_when_it_had_woken():
+    # Crashed during backup after the PBS woke: WAIT succeeded, no POWEROFF -> warn.
+    run = _run(RunStatus.FAILURE, error="Interrupted — Joulenap restarted")
+    run.steps = [
+        RunStep(name=StepName.WAIT, status=StepStatus.SUCCESS),
+        RunStep(name=StepName.BACKUP, status=StepStatus.FAILURE),
+    ]
+    title, body = build_interrupted_message(Config(), run)
+    assert "interrupted by a restart" in title
+    assert "Interrupted — Joulenap restarted" in body
+    assert "left powered on" in body
+
+
+def test_interrupted_message_no_pbs_line_when_it_never_woke():
+    # Crashed during WAIT (PBS never came up): no "left on" warning.
+    run = _run(RunStatus.FAILURE, error="Interrupted")
+    run.steps = [
+        RunStep(name=StepName.WAKE, status=StepStatus.SUCCESS),
+        RunStep(name=StepName.WAIT, status=StepStatus.FAILURE),
+    ]
+    _title, body = build_interrupted_message(Config(), run)
+    assert "left powered on" not in body
+
+
+def test_interrupted_message_localized_italian():
+    cfg = Config()
+    cfg.app.language = "it"
+    run = _run(RunStatus.FAILURE)
+    run.steps = []
+    title, _body = build_interrupted_message(cfg, run)
+    assert "interrotta da un riavvio" in title
+
+
+def test_send_alert_dispatches_when_on_failure_enabled():
+    cfg = _notifications_config()
+    cfg.notifications.on_failure = True
+    fake = FakeApprise()
+    svc = NotificationService(apprise_factory=lambda: fake)
+    report = svc.send_alert(cfg, "a title", "a body")
+    assert report.sent is True
+    assert report.channels == 5
+    assert fake.payload == ("a title", "a body")
+
+
+def test_send_alert_skipped_when_on_failure_disabled():
+    cfg = _notifications_config()
+    cfg.notifications.on_failure = False
+    svc = NotificationService(apprise_factory=FakeApprise)
+    report = svc.send_alert(cfg, "t", "b")
+    assert report.sent is False
+    assert report.skipped is True
+    assert report.reason == "on_failure disabled"
 
 
 def test_test_message_falls_back_to_english_for_unknown_language():

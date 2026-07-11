@@ -8,7 +8,7 @@ import { Localization } from './settings/Localization'
 import { Notifications } from './settings/Notifications'
 import { SetupWizard } from './settings/SetupWizard'
 
-type Tab = 'localization' | 'account' | 'notifications' | 'setup' | 'safety' | 'integrations'
+export type Tab = 'localization' | 'account' | 'notifications' | 'setup' | 'safety' | 'integrations'
 
 const NAV: { key: Tab }[] = [
   { key: 'localization' },
@@ -19,9 +19,12 @@ const NAV: { key: Tab }[] = [
   { key: 'integrations' },
 ]
 
-export function Settings(_props: { onClose: () => void }) {
+export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<Tab>('localization')
+  // Settings is remounted each time the shell switches to it (unmounted on the main view), so
+  // this initial value applies afresh every open — the dashboard's "Run setup wizard" CTA
+  // opens straight on the setup tab, while the gear opens Localization as before.
+  const [tab, setTab] = useState<Tab>(_props.initialTab ?? 'localization')
 
   return (
     <div className="jn-settings">

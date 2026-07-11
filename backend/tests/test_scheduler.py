@@ -319,3 +319,32 @@ def test_schedule_fires_at_configured_local_time():
     nxt = sched.backup_job.trigger.get_next_fire_time(None, ref)
     assert nxt.hour == 2  # 02:00 Rome local
     assert nxt.astimezone(UTC).hour == 0  # == 00:00 UTC
+
+
+def test_missed_backup_since_detects_a_fire_during_downtime():
+    # Last cycle served the 8th 04:00; we're back up on the 11th at 10:00 having been down
+    # over the 9th/10th/11th 04:00 slots -> the first missed fire (9th 04:00) is reported.
+    sched = Scheduler(lambda _t: None, timezone="UTC")
+    sched.rearm(_config(schedule="0 4 * * *"))
+    anchor = datetime(2026, 7, 8, 4, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
+    missed = sched.missed_backup_since(anchor, now)
+    assert missed == datetime(2026, 7, 9, 4, 0, 0, tzinfo=UTC)
+
+
+def test_missed_backup_since_none_when_no_slot_elapsed():
+    # Restarted seconds after a run completed: the served slot is not re-reported and the
+    # next slot is still in the future.
+    sched = Scheduler(lambda _t: None, timezone="UTC")
+    sched.rearm(_config(schedule="0 4 * * *"))
+    anchor = datetime(2026, 7, 11, 4, 0, 5, tzinfo=UTC)
+    now = datetime(2026, 7, 11, 4, 0, 20, tzinfo=UTC)
+    assert sched.missed_backup_since(anchor, now) is None
+
+
+def test_missed_backup_since_none_when_no_job_armed():
+    sched = Scheduler(lambda _t: None, timezone="UTC")
+    sched.rearm(_config(enabled=False))
+    anchor = datetime(2026, 7, 8, 4, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
+    assert sched.missed_backup_since(anchor, now) is None

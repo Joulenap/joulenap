@@ -17,14 +17,27 @@ import type {
 } from './types'
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
+  status: number
+  // A plain field assignment, not a `public status` parameter property: the frontend test
+  // harness runs `node --test` in strip-only TS mode, which rejects parameter properties.
+  constructor(status: number, message: string) {
     super(message)
     this.name = 'ApiError'
+    this.status = status
   }
 }
+
+// A 401 on a session-protected endpoint means the cookie has expired; a central handler
+// (registered by AuthProvider) flips the whole app back to the login screen, so every
+// polling loop and page recovers at once instead of rendering stale data forever (FE-H3).
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn
+}
+
+// Endpoints that use 401 for their *own* logic — a wrong password on /login or the wrong
+// current password on /account (BE-S9) — must NOT eject the user; only a dead session does.
+const AUTH_SELF_HANDLED = new Set(['/login', '/account'])
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch('/api' + path, {
@@ -34,6 +47,9 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
+    if (res.status === 401 && !AUTH_SELF_HANDLED.has(path.split('?')[0])) {
+      onUnauthorized?.()
+    }
     let detail: string = res.statusText
     try {
       const j = await res.json()

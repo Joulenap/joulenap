@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '../api/client'
+import { ApiError, api } from '../api/client'
 import type { Config, GuestInfo, LogLine, StatusResponse } from '../api/types'
 import { ConfirmModal, type ConfirmState } from '../components/ConfirmModal'
 import { useConfig } from '../config/ConfigContext'
@@ -60,6 +60,11 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [logs, setLogs] = useState<LogLine[]>([])
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  // Scheduler "Apply changes" feedback, mirroring the settings tabs (FE-H2): busy disables
+  // the button (no double-PUT), savedNote shows success, err surfaces a failed save.
+  const [busy, setBusy] = useState(false)
+  const [savedNote, setSavedNote] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
   // "Keep PBS on after the job" choice for the backup/GC confirm dialog. A ref mirrors it so
   // the confirm's onConfirm (captured at setConfirm time) reads the latest value.
   const [keepOn, setKeepOn] = useState(false)
@@ -130,7 +135,11 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
 
   if (!config || !draft) return null
 
-  const patch = (p: Partial<Draft>) => setDraft((d) => (d ? { ...d, ...p } : d))
+  const patch = (p: Partial<Draft>) => {
+    setDraft((d) => (d ? { ...d, ...p } : d))
+    setSavedNote(false)
+    setErr(null)
+  }
 
   const toggleEnabled = async () => {
     const next = !enabled
@@ -174,8 +183,17 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
       next.backup.guests.mode = 'include'
       next.backup.guests.list = [...draft.selected].sort((a, b) => a - b)
     }
-    await save(next)
-    loadLogs()
+    setBusy(true)
+    setErr(null)
+    try {
+      await save(next)
+      setSavedNote(true)
+      loadLogs()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const runAction = (
@@ -209,13 +227,16 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     })
   }
 
-  const toggleGuest = (vmid: number) =>
+  const toggleGuest = (vmid: number) => {
+    setSavedNote(false)
+    setErr(null)
     setDraft((d) => {
       if (!d) return d
       const sel = new Set(d.selected)
       sel.has(vmid) ? sel.delete(vmid) : sel.add(vmid)
       return { ...d, selected: [...sel] }
     })
+  }
 
   return (
     <>
@@ -237,6 +258,9 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
         patch={patch}
         dirty={dirty}
         onApply={apply}
+        busy={busy}
+        saved={savedNote}
+        error={err}
       />
 
       <div className="jn-row-guests">

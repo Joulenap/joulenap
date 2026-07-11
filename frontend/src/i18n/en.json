@@ -6,10 +6,14 @@
     "confirm": "Confirm",
     "loading": "Loading…",
     "never": "never",
-    "saveFailed": "Couldn't save changes"
+    "saveFailed": "Couldn't save changes",
+    "backendUnreachable": "Can't reach Joulenap — showing last known data.",
+    "notConfigured": "Joulenap isn't set up yet — connect your Proxmox VE and PBS to start backing up.",
+    "runSetup": "Run setup wizard →"
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
+    "sessionExpired": "Your session expired. Please sign in again.",
     "username": "Username",
     "password": "Password",
     "confirmPassword": "Confirm password",
@@ -79,6 +83,7 @@
     "backupDays": "Backup days",
     "scheduleCustom": "Custom schedule set in config.yaml ({{cron}}) — edit it there to change.",
     "apply": "Apply changes",
+    "saved": "✓ Schedule saved",
     "guests": "Guests",
     "refresh": "Refresh",
     "general": "General backup",

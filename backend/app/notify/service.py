@@ -24,9 +24,11 @@ import apprise
 from ..config import Config, NotificationsConfig
 from ..db.models import Run, RunStatus
 from .apprise_urls import Channel, build_channels
-from .messages import build_run_message, build_test_message
+from .messages import build_missed_backup_message, build_run_message, build_test_message
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from ..connectors.pbs import DatastoreStatus
 
 logger = logging.getLogger(__name__)
@@ -152,6 +154,36 @@ class NotificationService:
                     result.error or "no reason reported",
                 )
         return report
+
+    def send_alert(self, config: Config, title: str, body: str) -> NotifyReport:
+        """Dispatch a pre-built ``(title, body)`` through the ``on_failure`` routing toggle.
+
+        For failure-class startup alerts not tied to a completed Run — a scheduled backup
+        missed while the process was down (BE-R1) or a run a restart interrupted (BE-R2). A
+        user who muted failure alerts shouldn't be woken by these either."""
+        n = config.notifications
+        if not n.on_failure:
+            return NotifyReport(sent=False, channels=0, skipped=True, reason="on_failure disabled")
+        report = self._dispatch(build_channels(n), title, body, n)
+        for result in report.results:
+            if not result.ok:
+                logger.warning(
+                    "alert channel %s failed: %s",
+                    result.channel,
+                    result.error or "no reason reported",
+                )
+        return report
+
+    def send_missed_backup(
+        self,
+        config: Config,
+        missed_at: datetime,
+        last_run_at: datetime | None,
+        next_at: datetime | None,
+    ) -> NotifyReport:
+        """Alert that a scheduled backup was skipped while the process was down (BE-R1)."""
+        title, body = build_missed_backup_message(config, missed_at, last_run_at, next_at)
+        return self.send_alert(config, title, body)
 
     def send_test(self, config: Config) -> NotifyReport:
         """Send a test message to every configured channel, ignoring the routing toggles."""

@@ -65,6 +65,9 @@ def get_dashboard(
     ds = _probe.resolve_datastore(config.pbs.datastore, live_ds)
 
     if job_service.is_running:
+        # "backing_up" is reported for *any* active run — a GC-only or verify cycle included,
+        # not just a backup. It's a coarse "the box is awake and working" signal; the value is
+        # a frozen public-contract enum (see module docstring), so we don't split it per kind.
         pbs_state = "backing_up"
     elif pbs_online:
         pbs_state = "online"

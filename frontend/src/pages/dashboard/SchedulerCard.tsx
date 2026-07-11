@@ -24,6 +24,9 @@ interface Props {
   patch: (p: Partial<SchedulerDraft>) => void
   dirty: boolean
   onApply: () => void
+  busy: boolean
+  saved: boolean
+  error: string | null
 }
 
 const label: React.CSSProperties = {
@@ -51,7 +54,7 @@ const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 
 const toInt = (v: string) => (v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0))
 
-export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, onApply }: Props) {
+export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, onApply, busy, saved, error }: Props) {
   const { t } = useTranslation()
   const advanced = isAdvancedSchedule({ time: draft.time, days: draft.days, dom: draft.dom, month: draft.month })
 
@@ -227,10 +230,10 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
       )}
 
       <div style={{ height: 1, background: c.border, margin: '18px 0 14px' }} />
-      <div style={{ display: 'flex', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12 }}>
         <button
           onClick={onApply}
-          disabled={!dirty}
+          disabled={!dirty || busy}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -242,11 +245,13 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
             padding: '11px 28px',
             fontSize: 13,
             fontWeight: 600,
-            cursor: dirty ? 'pointer' : 'not-allowed',
+            cursor: !dirty || busy ? 'not-allowed' : 'pointer',
           }}
         >
           ✓ {t('dashboard.apply')}
         </button>
+        {saved && !dirty && <span style={{ fontSize: 12, color: c.green }}>{t('dashboard.saved')}</span>}
+        {error && <span style={{ fontSize: 12, color: c.red }}>{error}</span>}
       </div>
     </div>
   )

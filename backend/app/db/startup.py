@@ -20,11 +20,12 @@ _INTERRUPTED_RUN = "Interrupted — Joulenap restarted while the run was in prog
 _INTERRUPTED_STEP = "Interrupted at startup"
 
 
-def sweep_orphaned_runs(session: Session, *, now: datetime | None = None) -> int:
+def sweep_orphaned_runs(session: Session, *, now: datetime | None = None) -> list[Run]:
     """Mark every ``RUNNING`` run (and its ``RUNNING`` steps) as ``FAILURE``.
 
-    Returns the number of runs swept. The caller owns the transaction — wrap in
-    ``session_scope()`` (or commit) to persist.
+    Returns the swept runs (``len()`` for the count) so the caller can alert on them — a
+    crash after wake leaves the PBS on with no notification otherwise (BE-R2). The caller
+    owns the transaction — wrap in ``session_scope()`` (or commit) to persist.
     """
     ts = now or datetime.now(UTC)
     orphaned = session.scalars(select(Run).where(Run.status == RunStatus.RUNNING)).all()
@@ -39,7 +40,7 @@ def sweep_orphaned_runs(session: Session, *, now: datetime | None = None) -> int
                 step.finished_at = ts
                 if not step.detail:
                     step.detail = _INTERRUPTED_STEP
-    return len(orphaned)
+    return list(orphaned)
 
 
 __all__ = ["sweep_orphaned_runs"]

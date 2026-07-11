@@ -7,6 +7,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2]
+
+### Added
+
+- **Missed-backup alert** — if a scheduled backup was due while Joulenap was down (for example
+  the container was stopped over the backup window), it is detected at the next startup and a
+  notification is sent. The backup itself is not run automatically — use "Run backup" if you
+  want it immediately.
+- **Interrupted-run alert** — a run left unfinished by a restart is reported at startup, warning
+  you when the PBS was left powered on so you can check on it.
+- **Setup prompt on the dashboard** — when Proxmox VE and PBS aren't configured yet (a fresh
+  install), the dashboard shows a banner that links straight to the setup wizard.
+
+### Changed
+
+- **Backup notifications now warn when the PBS was left powered on for failed and aborted runs**,
+  not only for successful ones — so an energy-costing "still awake" box is never silent.
+- **The Scheduler "Apply changes" action now shows saving / saved / error feedback** and can't be
+  double-submitted, matching the settings tabs; a failed save surfaces the reason instead of
+  doing nothing.
+
+### Fixed
+
+- **Session expiry no longer leaves the UI showing stale data.** When the session expires (or the
+  backend restarts), the app returns to the login screen with a notice instead of rendering a
+  frozen last-known status indefinitely; a "can't reach Joulenap" banner appears while the backend
+  is unreachable and clears on recovery.
+- **An invalid Wake-on-LAN MAC address is now rejected when you save the configuration** (with a
+  clear error) instead of being accepted and only failing later at backup time.
+
 ## [0.4.1]
 
 ### Fixed
@@ -157,7 +187,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/Joulenap/joulenap/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Joulenap/joulenap/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Joulenap/joulenap/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Joulenap/joulenap/compare/v0.3.0...v0.3.1
