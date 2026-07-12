@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { afterEach, test } from 'node:test'
-import { ApiError, api, setUnauthorizedHandler } from './client.ts'
+import { afterEach, mock, test } from 'node:test'
+import { ApiError, api, setTimeoutMessage, setUnauthorizedHandler } from './client.ts'
 
 // Make every request resolve to the given status, ignoring the URL (req() uses the global
 // fetch). Returns a restore function.
@@ -57,4 +57,27 @@ test('a 401 on /login does NOT trigger the handler (wrong credentials)', async (
   )
   assert.equal(fired, false)
   restore()
+})
+
+test('the backstop timeout aborts a hung request and surfaces a 408 ApiError (FE-M1)', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  const orig = globalThis.fetch
+  // A backend that never responds on its own — only the abort signal ends the fetch, exactly
+  // as the browser behaves when our AbortController fires.
+  globalThis.fetch = ((_url: string, init: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () =>
+        reject(new DOMException('The operation was aborted.', 'AbortError')),
+      )
+    })) as typeof fetch
+  setTimeoutMessage('timed out!')
+  const pending = api.status()
+  mock.timers.tick(45000) // advance past DEFAULT_TIMEOUT_MS so the backstop fires
+  await assert.rejects(
+    pending,
+    (e) => e instanceof ApiError && e.status === 408 && e.message === 'timed out!',
+  )
+  globalThis.fetch = orig
+  mock.timers.reset()
+  setTimeoutMessage('The request timed out.')
 })

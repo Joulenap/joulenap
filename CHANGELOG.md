@@ -7,6 +7,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3]
+
+### Added
+
+- **Unsaved-changes guard** — editing a settings tab (Localization, Notifications, Backup safety)
+  or the scheduler and then navigating away now asks before discarding the edits, instead of
+  losing them silently. Also warns on a browser tab close or refresh while there are unsaved
+  changes.
+- **Request timeout** — the UI now shows a clear "timed out" message instead of hanging
+  indefinitely if the backend stops responding.
+
+### Fixed
+
+- **Setup wizard validation** — a step no longer completes, and Save no longer unlocks, when a
+  check fails: an unreachable PBS, a missing PBS API token, or an empty Wake-on-LAN MAC now
+  block completion instead of saving a broken configuration.
+- **Setup wizard re-save** — no longer reverts a hand-configured Proxmox VE port or TLS setting.
+- **Manual actions** — Run backup, Run GC, and Power on/off now show the error when they fail to
+  start, instead of appearing to do nothing.
+- **Scheduler toggle** — the Enabled switch now explains why it reverted when the change fails,
+  instead of silently flipping back.
+- **Live task log** — no longer occasionally shows duplicated lines.
+- **Guest list** — keeps the last-known guests (with an error note) when a refresh fails, rather
+  than blanking to an empty panel. What gets backed up is unaffected: the guest set is resolved
+  live at backup time.
+- **Localization tab** — no longer shows a "Saved" note before anything was saved, and its
+  fields resync if the configuration changes underneath.
+- **Integrations copy** — corrected contradictory text about regenerating the API key.
+  Regenerating replaces the key and the old one stops working immediately.
+
 ## [0.4.2]
 
 ### Added

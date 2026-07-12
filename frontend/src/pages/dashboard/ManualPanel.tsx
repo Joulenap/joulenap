@@ -4,6 +4,7 @@ import { c, panelStyle } from '../../theme'
 
 interface Props {
   status: StatusResponse | null
+  error: string | null
   onBackup: () => void
   onGc: () => void
   onPowerOn: () => void
@@ -43,7 +44,7 @@ function actionBtn(variant: 'primary' | 'ghost' | 'green' | 'red', enabled: bool
   return { ...base, background: 'transparent', color: c.text, border: '1px solid #3a434d' }
 }
 
-export function ManualPanel({ status, onBackup, onGc, onPowerOn, onPowerOff }: Props) {
+export function ManualPanel({ status, error, onBackup, onGc, onPowerOn, onPowerOff }: Props) {
   const { t } = useTranslation()
   const online = !!status?.pbs_online
   const busy = !!status?.job_running
@@ -78,6 +79,24 @@ export function ManualPanel({ status, onBackup, onGc, onPowerOn, onPowerOff }: P
           </div>
         </div>
       </div>
+      {error && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 14,
+            background: 'rgba(229,103,91,.1)',
+            border: '1px solid rgba(229,103,91,.32)',
+            borderRadius: 8,
+            color: c.red,
+            fontSize: 12.5,
+            lineHeight: 1.5,
+            padding: '9px 12px',
+            wordBreak: 'break-word',
+          }}
+        >
+          {error}
+        </div>
+      )}
     </div>
   )
 }

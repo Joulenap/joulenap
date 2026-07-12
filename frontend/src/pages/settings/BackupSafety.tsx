@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ApiError } from '../../api/client'
 import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
+import { useRegisterDirty } from '../../shell/UnsavedGuard'
 import { c, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
 
 // Backup-safety guardrails. These map to existing backend fields wired into the cycle:
@@ -63,6 +64,7 @@ export function BackupSafety() {
       draft.verify_reverify_days !== v.reverify_days
     )
   }, [config, draft])
+  useRegisterDirty(dirty)
 
   if (!config || !draft) return null
 

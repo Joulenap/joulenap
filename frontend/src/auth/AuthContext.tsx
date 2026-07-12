@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { api, setUnauthorizedHandler } from '../api/client'
+import { useTranslation } from 'react-i18next'
+import { api, setTimeoutMessage, setUnauthorizedHandler } from '../api/client'
 
 interface AuthState {
   loading: boolean
@@ -22,6 +23,7 @@ interface AuthContextValue extends AuthState {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { t, i18n } = useTranslation()
   const [state, setState] = useState<AuthState>({
     loading: true,
     authenticated: false,
@@ -54,6 +56,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     )
     return () => setUnauthorizedHandler(null)
   }, [])
+
+  // Hand the API client the localized backstop-timeout message (it lives outside React), and
+  // refresh it whenever the language changes (FE-M1).
+  useEffect(() => {
+    setTimeoutMessage(t('common.requestTimeout'))
+  }, [t, i18n.language])
 
   const login = useCallback(async (username: string, password: string) => {
     const u = await api.login(username, password)

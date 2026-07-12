@@ -4,6 +4,7 @@ import { api, ApiError } from '../../api/client'
 import type { ChannelOutcome, NotificationsConfig } from '../../api/types'
 import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
+import { useRegisterDirty } from '../../shell/UnsavedGuard'
 import { c, ghostBtn, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
 import { channelLabel } from '../../utils/notifyChannels'
 
@@ -38,6 +39,7 @@ export function Notifications() {
     () => !!config && !!draft && JSON.stringify(draft) !== JSON.stringify(config.notifications),
     [config, draft],
   )
+  useRegisterDirty(dirty)
 
   if (!config || !draft) return null
 

@@ -39,13 +39,46 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
 // current password on /account (BE-S9) — must NOT eject the user; only a dead session does.
 const AUTH_SELF_HANDLED = new Set(['/login', '/account'])
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch('/api' + path, {
-    method,
-    credentials: 'same-origin',
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+// Client-side backstop timeout (ms). Sits *above* the backend's own probe ceilings (the
+// slowest is the 30s httpx connect on wizard PVE/PBS), so it never pre-empts an informative
+// backend error — it only fires when the backend itself stops responding (wedged process, a
+// proxy black-holing the response), turning an indefinite fetch hang into a clean error
+// (FE-M1). Every call is bounded: the long-running backup/GC jobs return a run_id immediately
+// and are polled separately, so no request legitimately runs this long.
+const DEFAULT_TIMEOUT_MS = 45000
+
+// The timeout error text is localized, but this module lives outside React and can't call
+// t() itself, so the app registers the translated string here (mirroring the 401 handler) and
+// re-registers it on a language switch. A plain-English fallback covers the pre-registration
+// window and keeps client.ts usable in tests.
+let timeoutMessage = 'The request timed out.'
+export function setTimeoutMessage(msg: string): void {
+  timeoutMessage = msg
+}
+
+async function req<T>(method: string, path: string, body?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let res: Response
+  try {
+    res = await fetch('/api' + path, {
+      method,
+      credentials: 'same-origin',
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+  } catch (e) {
+    // Our own timeout aborts with an AbortError; surface it as an ApiError so callers show it
+    // like any other failure. A caller-initiated abort would look identical, but we don't pass
+    // external signals in yet, so every abort here is the timeout.
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new ApiError(408, timeoutMessage)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
   if (!res.ok) {
     if (res.status === 401 && !AUTH_SELF_HANDLED.has(path.split('?')[0])) {
       onUnauthorized?.()
