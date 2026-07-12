@@ -7,6 +7,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.4]
+
+### Changed
+
+- **Accessible confirmation dialog** — the dialog shown before every backup, GC, power-off, and
+  reset is now fully keyboard- and screen-reader-accessible: it identifies itself as a dialog,
+  keeps focus inside while open, closes on Escape, and returns focus to the button that opened it.
+- **Self-hosted fonts** — the interface fonts (IBM Plex) are now bundled with the app instead of
+  being fetched from Google Fonts, so the UI makes no third-party request on load and renders
+  correctly fully offline or air-gapped.
+- **Sign-in screens** — the login and first-account screens are now proper forms with correct
+  autocomplete hints, so password managers fill and save credentials reliably; the button shows
+  progress while signing in.
+
+### Fixed
+
+- **Header status label** — the header now reads "GC running" or "Verify running" during those
+  jobs, instead of always saying "Backup running".
+- **Selective backup with no guests** — choosing Selective mode with no guests selected is now
+  blocked with an explanation, instead of silently saving a schedule that wakes the PBS and backs
+  up nothing.
+- **Setup wizard error visibility** — an error on a lower wizard step now scrolls into view (and is
+  announced to screen readers) instead of appearing off-screen, and "Detect MAC" now tells you when
+  auto-detection found nothing instead of doing nothing.
+- **Empty guest list** — the guest panel now shows a "No guests found" message when a node has no
+  guests, instead of a blank area.
+
 ## [0.4.3]
 
 ### Added
@@ -217,7 +244,9 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/Joulenap/joulenap/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/Joulenap/joulenap/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Joulenap/joulenap/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Joulenap/joulenap/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Joulenap/joulenap/compare/v0.3.1...v0.4.0

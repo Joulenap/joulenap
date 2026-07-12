@@ -21,6 +21,7 @@ export function Dropdown({ value, options, onChange, width = '100%', mono: useMo
   return (
     <div style={{ position: 'relative', width }}>
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
         style={{
           display: 'flex',
@@ -63,6 +64,7 @@ export function Dropdown({ value, options, onChange, width = '100%', mono: useMo
             {options.map((o) => (
               <button
                 key={o.value}
+                type="button"
                 onClick={() => {
                   onChange(o.value)
                   setOpen(false)

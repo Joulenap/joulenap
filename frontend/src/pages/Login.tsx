@@ -45,8 +45,9 @@ export function Login() {
     }
   }
 
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') submit()
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    submit()
   }
 
   return (
@@ -99,116 +100,121 @@ export function Login() {
             {register ? t('auth.registerSubtitle') : t('auth.signInSubtitle')}
           </span>
 
-          {expired && !register && !error && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'rgba(232,131,15,.1)',
-                border: '1px solid rgba(232,131,15,.4)',
-                borderRadius: 7,
-                padding: '9px 12px',
-                marginBottom: 14,
-                fontSize: 12,
-                color: c.textMid,
-              }}
-            >
-              ⚠ {t('auth.sessionExpired')}
-            </div>
-          )}
+          <form onSubmit={onSubmit} style={{ display: 'contents' }}>
+            {expired && !register && !error && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: 'rgba(232,131,15,.1)',
+                  border: '1px solid rgba(232,131,15,.4)',
+                  borderRadius: 7,
+                  padding: '9px 12px',
+                  marginBottom: 14,
+                  fontSize: 12,
+                  color: c.textMid,
+                }}
+              >
+                ⚠ {t('auth.sessionExpired')}
+              </div>
+            )}
 
-          <label style={{ display: 'block', marginBottom: 14 }}>
-            <span style={labelStyle}>{t('auth.username')}</span>
-            <input
-              value={user}
-              onChange={(e) => {
-                setUser(e.target.value)
-                setError('')
-              }}
-              onKeyDown={onKey}
-              autoComplete="off"
-              placeholder="admin"
-              style={inputStyle}
-            />
-          </label>
-
-          <label style={{ display: 'block', marginBottom: 14 }}>
-            <span style={labelStyle}>{t('auth.password')}</span>
-            <input
-              type="password"
-              value={pass}
-              onChange={(e) => {
-                setPass(e.target.value)
-                setError('')
-              }}
-              onKeyDown={onKey}
-              placeholder="••••••••"
-              style={inputStyle}
-            />
-          </label>
-
-          {register && (
             <label style={{ display: 'block', marginBottom: 14 }}>
-              <span style={labelStyle}>{t('auth.confirmPassword')}</span>
+              <span style={labelStyle}>{t('auth.username')}</span>
               <input
-                type="password"
-                value={pass2}
+                value={user}
                 onChange={(e) => {
-                  setPass2(e.target.value)
+                  setUser(e.target.value)
                   setError('')
                 }}
-                onKeyDown={onKey}
+                autoComplete="username"
+                placeholder="admin"
+                style={inputStyle}
+              />
+            </label>
+
+            <label style={{ display: 'block', marginBottom: 14 }}>
+              <span style={labelStyle}>{t('auth.password')}</span>
+              <input
+                type="password"
+                value={pass}
+                onChange={(e) => {
+                  setPass(e.target.value)
+                  setError('')
+                }}
+                autoComplete={register ? 'new-password' : 'current-password'}
                 placeholder="••••••••"
                 style={inputStyle}
               />
             </label>
-          )}
 
-          {register && (
-            <div style={{ marginBottom: 14 }}>
-              <span style={labelStyle}>{t('auth.timezone')}</span>
-              <Dropdown value={tz} options={tzOptions} onChange={setTz} mono />
-              <span
+            {register && (
+              <label style={{ display: 'block', marginBottom: 14 }}>
+                <span style={labelStyle}>{t('auth.confirmPassword')}</span>
+                <input
+                  type="password"
+                  value={pass2}
+                  onChange={(e) => {
+                    setPass2(e.target.value)
+                    setError('')
+                  }}
+                  autoComplete="new-password"
+                  placeholder="••••••••"
+                  style={inputStyle}
+                />
+              </label>
+            )}
+
+            {register && (
+              <div style={{ marginBottom: 14 }}>
+                <span style={labelStyle}>{t('auth.timezone')}</span>
+                <Dropdown value={tz} options={tzOptions} onChange={setTz} mono />
+                <span
+                  style={{
+                    display: 'block',
+                    fontSize: 11,
+                    color: c.textDim,
+                    lineHeight: 1.5,
+                    marginTop: 6,
+                  }}
+                >
+                  {t('auth.timezoneHint')}
+                </span>
+              </div>
+            )}
+
+            {error && (
+              <div
                 style={{
-                  display: 'block',
-                  fontSize: 11,
-                  color: c.textDim,
-                  lineHeight: 1.5,
-                  marginTop: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: 'rgba(229,103,91,.12)',
+                  border: '1px solid #5e3330',
+                  borderRadius: 7,
+                  padding: '9px 12px',
+                  marginBottom: 14,
+                  fontSize: 12,
+                  color: c.red,
                 }}
               >
-                {t('auth.timezoneHint')}
-              </span>
-            </div>
-          )}
+                ⚠ {error}
+              </div>
+            )}
 
-          {error && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'rgba(229,103,91,.12)',
-                border: '1px solid #5e3330',
-                borderRadius: 7,
-                padding: '9px 12px',
-                marginBottom: 14,
-                fontSize: 12,
-                color: c.red,
-              }}
+            <button
+              type="submit"
+              disabled={busy}
+              style={{ ...primaryBtn, width: '100%', padding: 12, marginTop: 6, fontSize: 14 }}
             >
-              ⚠ {error}
-            </div>
-          )}
-
-          <button
-            onClick={submit}
-            disabled={busy}
-            style={{ ...primaryBtn, width: '100%', padding: 12, marginTop: 6, fontSize: 14 }}
-          >
-            {register ? t('auth.registerButton') : t('auth.signInButton')}
-          </button>
+              {busy
+                ? t('common.loading')
+                : register
+                  ? t('auth.registerButton')
+                  : t('auth.signInButton')}
+            </button>
+          </form>
         </div>
         <div
           style={{

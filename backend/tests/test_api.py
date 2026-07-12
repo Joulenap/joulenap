@@ -76,9 +76,22 @@ def test_status_shape(app_ctx):
     body = client.get("/api/status").json()
     assert body["scheduler_enabled"] is True  # example config enables backups
     assert body["job_running"] is False
+    assert body["running_kind"] is None  # nothing in flight
     assert body["pbs_online"] is False
     assert body["last_run"] is None
     assert "next_run" in body and "schedule" in body
+
+
+def test_status_running_kind_reflects_in_progress_run(app_ctx):
+    """A RUNNING run surfaces its kind so the header pill can label GC/verify
+    correctly instead of always saying 'Backup running' (UX-6)."""
+    client, _app = app_ctx
+    with session_scope() as s:
+        s.add(Run(kind=RunKind.GC, trigger=RunTrigger.MANUAL, status=RunStatus.RUNNING,
+                  started_at=datetime.now(UTC)))
+
+    body = client.get("/api/status").json()
+    assert body["running_kind"] == "gc"
 
 
 # --- config ------------------------------------------------------------------

@@ -114,6 +114,14 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
       </div>
 
       <div style={{ maxHeight: 250, overflowY: 'auto', overflowX: 'hidden' }}>
+        {guests.length === 0 && !refreshing && !error && (
+          // Genuinely-zero guests (a successful empty response) — distinct from the error state
+          // above, which keeps the last known list (FE-M8). Gated on !refreshing to avoid a flash
+          // during the initial load (UX-7).
+          <div style={{ padding: '18px', textAlign: 'center', fontSize: 12, color: c.textMuted, lineHeight: 1.5 }}>
+            {t('dashboard.noGuests')}
+          </div>
+        )}
         {guests.map((g) => {
           const isCt = g.type === 'lxc'
           const on = selected.has(g.vmid)

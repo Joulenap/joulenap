@@ -109,6 +109,7 @@ const STATUS: StatusResponse = {
   schedule: '30 2 * * 1,3,5',
   next_run: '2026-07-10T02:30:00Z',
   job_running: false,
+  running_kind: null,
   pbs_online: true,
   last_run: {
     id: 42,
@@ -218,7 +219,7 @@ const WIZARD_SSH_TRUST: { trusted: boolean } = { trusted: true }
 const WIZARD_RESET: { ok: boolean } = { ok: true }
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '0.4.3-stub' },
+  'GET /health': { status: 'ok', version: '0.4.4-stub' },
   'GET /auth/status': AUTH_STATUS,
   'GET /auth/me': ME,
   'GET /status': STATUS,

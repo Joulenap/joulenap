@@ -7,6 +7,7 @@ import { useConfig } from '../config/ConfigContext'
 import { useRegisterDirty } from '../shell/UnsavedGuard'
 import { useTaskLog } from '../hooks/useTaskLog'
 import { buildCron, isAdvancedSchedule, parseCron } from '../utils/cron'
+import { guestsSelectionError } from '../utils/guests'
 import { ActivityLog } from './dashboard/ActivityLog'
 import { GuestsPanel } from './dashboard/GuestsPanel'
 import { ManualPanel } from './dashboard/ManualPanel'
@@ -170,6 +171,14 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   }
 
   const apply = async () => {
+    // Block Selective mode with no guests: it would save a schedule that wakes the PBS
+    // and aborts every run without backing anything up (UX-8). Cleared on the next
+    // guest toggle / mode change (patch + toggleGuest reset err).
+    const guestErr = guestsSelectionError(draft.guestsMode, draft.selected.length)
+    if (guestErr) {
+      setErr(t(guestErr))
+      return
+    }
     const next: Config = structuredClone(config)
     next.backup.enabled = enabled
     next.backup.schedule = isAdvancedSchedule({

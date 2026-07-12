@@ -71,6 +71,7 @@ export interface StatusResponse {
   schedule: string
   next_run: string | null
   job_running: boolean
+  running_kind?: 'cycle' | 'gc' | 'verify' | null
   pbs_online: boolean
   last_run: RunSummary | null
   datastore: DatastoreInfo | null

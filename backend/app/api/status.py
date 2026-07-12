@@ -41,6 +41,7 @@ class StatusResponse(BaseModel):
     schedule: str
     next_run: datetime | None
     job_running: bool
+    running_kind: str | None = None  # "cycle" | "gc" | "verify" while a run is in flight
     pbs_online: bool
     last_run: RunSummary | None
     datastore: DatastoreInfo | None = None
@@ -56,6 +57,7 @@ def get_status(
 ) -> StatusResponse:
     config = store.config
     last = _probe.latest_cycle_run(session)
+    running = _probe.running_run(session)
     pbs_online, live_ds, nl = _probe.probe_pbs(config, job_service.deps.build_pbs)
     ds = _probe.resolve_datastore(config.pbs.datastore, live_ds)
 
@@ -69,6 +71,7 @@ def get_status(
         schedule=config.backup.schedule,
         next_run=scheduler.next_run_time,
         job_running=job_service.is_running,
+        running_kind=running.kind if running else None,
         pbs_online=pbs_online,
         last_run=RunSummary.of(last) if last else None,
         datastore=datastore,

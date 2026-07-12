@@ -48,6 +48,7 @@
     "off": "Spento",
     "running": "Backup in corso",
     "gcRunning": "GC in corso",
+    "verifyRunning": "Verifica in corso",
     "idle": "inattivo",
     "timerDisabled": "timer disattivato"
   },
@@ -94,9 +95,11 @@
     "guests": "Guest",
     "refresh": "Aggiorna",
     "guestsError": "Impossibile aggiornare l'elenco dei guest — mostro gli ultimi guest noti.",
+    "noGuests": "Nessun guest trovato su questo nodo.",
     "general": "Backup generale",
     "selective": "Backup selettivo",
     "selectedCount": "{{n}} sel.",
+    "noGuestsSelected": "Seleziona almeno un guest, oppure passa a Backup generale — la modalità Selettiva senza guest non salva nulla.",
     "excludeMode": "Modalità esclusione (config.yaml)",
     "excludeNote": "La modalità esclusione è impostata in config.yaml — vengono salvati tutti i guest tranne quelli contrassegnati con ✕. Modifica config.yaml per cambiare l'elenco.",
     "excludedCount": "{{n}} escl.",
@@ -344,7 +347,8 @@
       },
       "errors": {
         "pbsUnreachable": "Il PBS non è raggiungibile a quell'host e porta. Verifica che sia acceso e che l'indirizzo sia corretto, poi riprova.",
-        "pbsTokenMissing": "È richiesto un token API del PBS. Inserisci l'ID del token e il segreto prima di continuare."
+        "pbsTokenMissing": "È richiesto un token API del PBS. Inserisci l'ID del token e il segreto prima di continuare.",
+        "macNotDetected": "Impossibile rilevare automaticamente l'indirizzo MAC — inseriscilo manualmente."
       }
     },
     "integrations": {
