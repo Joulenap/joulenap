@@ -20,6 +20,7 @@ export interface SchedulerDraft {
 interface Props {
   enabled: boolean
   onToggleEnabled: () => void
+  toggleError: string | null
   draft: SchedulerDraft
   patch: (p: Partial<SchedulerDraft>) => void
   dirty: boolean
@@ -54,7 +55,7 @@ const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 
 const toInt = (v: string) => (v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0))
 
-export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, onApply, busy, saved, error }: Props) {
+export function SchedulerCard({ enabled, onToggleEnabled, toggleError, draft, patch, dirty, onApply, busy, saved, error }: Props) {
   const { t } = useTranslation()
   const advanced = isAdvancedSchedule({ time: draft.time, days: draft.days, dom: draft.dom, month: draft.month })
 
@@ -69,6 +70,12 @@ export function SchedulerCard({ enabled, onToggleEnabled, draft, patch, dirty, o
           <Toggle on={enabled} onClick={onToggleEnabled} />
         </div>
       </div>
+
+      {toggleError && (
+        <div role="alert" style={{ marginTop: -6, marginBottom: 16, fontSize: 12, color: c.red, textAlign: 'right' }}>
+          {toggleError}
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 26, alignItems: 'flex-end', marginBottom: 18 }}>
         <label style={{ display: 'block', width: 148 }}>

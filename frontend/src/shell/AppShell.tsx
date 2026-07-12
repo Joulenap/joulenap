@@ -11,6 +11,7 @@ import { useStatus } from '../hooks/useStatus'
 import { c } from '../theme'
 import { WizardProvider } from '../wizard/WizardContext'
 import { Header } from './Header'
+import { UnsavedGuardProvider, useUnsavedGuard } from './UnsavedGuard'
 
 type View = 'main' | 'settings'
 
@@ -19,6 +20,7 @@ function ShellInner() {
   const { logout } = useAuth()
   const { config, loading } = useConfig()
   const { status, refresh, stale } = useStatus()
+  const { guard } = useUnsavedGuard()
   const [view, setView] = useState<View>('main')
   const [settingsTab, setSettingsTab] = useState<Tab>('localization')
   const [version, setVersion] = useState('')
@@ -83,7 +85,7 @@ function ShellInner() {
               ⚙ {t('common.notConfigured')}
             </span>
             <button
-              onClick={() => openSettings('setup')}
+              onClick={() => guard(() => openSettings('setup'))}
               style={{
                 background: c.accent,
                 color: c.accentInk,
@@ -104,7 +106,7 @@ function ShellInner() {
           host={config?.pbs.host ?? ''}
           status={status}
           view={view}
-          onToggleView={() => (view === 'main' ? openSettings('localization') : setView('main'))}
+          onToggleView={() => guard(() => (view === 'main' ? openSettings('localization') : setView('main')))}
           onLogout={logout}
         />
         {loading ? (
@@ -137,7 +139,9 @@ export function AppShell() {
   return (
     <ConfigProvider>
       <WizardProvider>
-        <ShellInner />
+        <UnsavedGuardProvider>
+          <ShellInner />
+        </UnsavedGuardProvider>
       </WizardProvider>
     </ConfigProvider>
   )

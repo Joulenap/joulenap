@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useUnsavedGuard } from '../shell/UnsavedGuard'
 import { c } from '../theme'
 import { Account } from './settings/Account'
 import { BackupSafety } from './settings/BackupSafety'
@@ -21,6 +22,7 @@ const NAV: { key: Tab }[] = [
 
 export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
   const { t } = useTranslation()
+  const { guard } = useUnsavedGuard()
   // Settings is remounted each time the shell switches to it (unmounted on the main view), so
   // this initial value applies afresh every open — the dashboard's "Run setup wizard" CTA
   // opens straight on the setup tab, while the gear opens Localization as before.
@@ -43,7 +45,7 @@ export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
             <button
               key={key}
               className="jn-settings-navbtn"
-              onClick={() => setTab(key)}
+              onClick={() => guard(() => setTab(key))}
               style={{
                 background: active ? 'rgba(232,131,15,.1)' : 'transparent',
                 border: `1px solid ${active ? 'rgba(232,131,15,.32)' : 'transparent'}`,

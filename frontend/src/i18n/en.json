@@ -7,9 +7,15 @@
     "loading": "Loading…",
     "never": "never",
     "saveFailed": "Couldn't save changes",
+    "requestTimeout": "The request timed out — Joulenap didn't respond in time. Check it is running and try again.",
     "backendUnreachable": "Can't reach Joulenap — showing last known data.",
     "notConfigured": "Joulenap isn't set up yet — connect your Proxmox VE and PBS to start backing up.",
-    "runSetup": "Run setup wizard →"
+    "runSetup": "Run setup wizard →",
+    "unsaved": {
+      "title": "Discard unsaved changes?",
+      "body": "You have edits here that haven't been saved. Leaving now discards them.",
+      "confirm": "Discard changes"
+    }
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
@@ -84,8 +90,10 @@
     "scheduleCustom": "Custom schedule set in config.yaml ({{cron}}) — edit it there to change.",
     "apply": "Apply changes",
     "saved": "✓ Schedule saved",
+    "actionFailed": "Couldn't start the action. Check the PBS and try again.",
     "guests": "Guests",
     "refresh": "Refresh",
+    "guestsError": "Couldn't refresh the guest list — showing the last known guests.",
     "general": "General backup",
     "selective": "Selective backup",
     "selectedCount": "{{n}} sel.",
@@ -333,6 +341,10 @@
         "pbsRoot": "Used once to create the PBS API token and install the shutdown SSH key, then discarded.",
         "sshManual": "Add the line below to /root/.ssh/authorized_keys on the PBS, then mark as installed.",
         "fingerprintPinned": "This fingerprint is pinned — connections are rejected if it changes."
+      },
+      "errors": {
+        "pbsUnreachable": "PBS is not reachable at that host and port. Check it is powered on and the address is correct, then try again.",
+        "pbsTokenMissing": "A PBS API token is required. Enter the token ID and secret before continuing."
       }
     },
     "integrations": {
@@ -349,7 +361,7 @@
       "copyFailed": "Couldn't copy automatically — select the text and copy it manually.",
       "copySnippet": "Copy snippet",
       "snippetHint": "Paste this under a group in your dashboard's config and keep the indentation intact.",
-      "keyHiddenNote": "A key is configured. Regenerate to see a new one; the current key stays valid.",
+      "keyHiddenNote": "A key is configured. Regenerating replaces it — the current key stops working immediately.",
       "dashboardLabel": "Dashboard",
       "snippetLabel": "Configuration snippet",
       "regenerateConfirmTitle": "Regenerate API key?",

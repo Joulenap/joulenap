@@ -4,6 +4,7 @@ import { ApiError, api } from '../api/client'
 import type { Config, GuestInfo, LogLine, StatusResponse } from '../api/types'
 import { ConfirmModal, type ConfirmState } from '../components/ConfirmModal'
 import { useConfig } from '../config/ConfigContext'
+import { useRegisterDirty } from '../shell/UnsavedGuard'
 import { useTaskLog } from '../hooks/useTaskLog'
 import { buildCron, isAdvancedSchedule, parseCron } from '../utils/cron'
 import { ActivityLog } from './dashboard/ActivityLog'
@@ -57,6 +58,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [enabled, setEnabled] = useState(false)
   const [guests, setGuests] = useState<GuestInfo[]>([])
+  const [guestsErr, setGuestsErr] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [logs, setLogs] = useState<LogLine[]>([])
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
@@ -65,6 +67,14 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const [busy, setBusy] = useState(false)
   const [savedNote, setSavedNote] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // Failure of a manual action's *start* (Run backup/GC, Power on/off) — surfaced inline in the
+  // ManualPanel rather than swallowed, since the activity log may not carry a start-time error
+  // (FE-M4). Kept separate from the scheduler `err` so a "Power on failed" isn't shown on the
+  // schedule card.
+  const [actionErr, setActionErr] = useState<string | null>(null)
+  // Failure of the instant "Enabled" scheduler toggle — shown next to the toggle so its silent
+  // revert is explained (FE-M5). Separate from the Apply `err` slot at the bottom of the card.
+  const [toggleErr, setToggleErr] = useState<string | null>(null)
   // "Keep PBS on after the job" choice for the backup/GC confirm dialog. A ref mirrors it so
   // the confirm's onConfirm (captured at setConfirm time) reads the latest value.
   const [keepOn, setKeepOn] = useState(false)
@@ -86,12 +96,16 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     setRefreshing(true)
     try {
       setGuests(await api.guests())
-    } catch {
-      setGuests([])
+      setGuestsErr(null)
+    } catch (e) {
+      // Keep the last-known list (like loadLogs) instead of blanking to an empty "0" panel;
+      // surface the failure too, since guests have no auto-retry timer (FE-M8). The backup
+      // itself never depends on this list — it's resolved live server-side at run time.
+      setGuestsErr(e instanceof ApiError ? e.message : t('dashboard.guestsError'))
     } finally {
       setRefreshing(false)
     }
-  }, [])
+  }, [t])
 
   const loadLogs = useCallback(async () => {
     try {
@@ -132,6 +146,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     const norm = (d: Draft) => ({ ...d, selected: [...d.selected].sort((a, b) => a - b) })
     return JSON.stringify(norm(draft)) !== JSON.stringify(norm(original))
   }, [draft, original])
+  useRegisterDirty(dirty)
 
   if (!config || !draft) return null
 
@@ -144,11 +159,13 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const toggleEnabled = async () => {
     const next = !enabled
     setEnabled(next)
+    setToggleErr(null)
     try {
       await api.toggleScheduler(next)
       refreshStatus()
-    } catch {
+    } catch (e) {
       setEnabled(!next) // revert on failure
+      setToggleErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     }
   }
 
@@ -217,10 +234,13 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
         ? { toggle: { label: t('dashboard.confirm.keepOn'), value: initialKeepOn, onChange: setKeepOn } }
         : {}),
       onConfirm: async () => {
+        setActionErr(null)
         try {
           await fn(keepOnRef.current)
-        } catch {
-          /* surfaced in the activity log / status */
+        } catch (e) {
+          // Start-time failure (e.g. 502 WoL send failed, 409 already running, 500): show it —
+          // the activity log can't be relied on to carry it.
+          setActionErr(e instanceof ApiError ? e.message : t('dashboard.actionFailed'))
         }
         pollAfterAction()
       },
@@ -243,6 +263,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
       <div className="jn-row-actions">
         <ManualPanel
           status={status}
+          error={actionErr}
           onBackup={() => runAction('backup', (k) => api.runBackup(k), false, '▶')}
           onGc={() => runAction('gc', (k) => api.runGc(k), false, '⟳')}
           onPowerOn={() => runAction('on', () => api.powerOn(), false, '⏻')}
@@ -254,6 +275,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
       <SchedulerCard
         enabled={enabled}
         onToggleEnabled={toggleEnabled}
+        toggleError={toggleErr}
         draft={draft}
         patch={patch}
         dirty={dirty}
@@ -272,6 +294,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
           onToggleGuest={toggleGuest}
           onRefresh={loadGuests}
           refreshing={refreshing}
+          error={guestsErr}
         />
         <ActivityLog logs={logs} />
       </div>

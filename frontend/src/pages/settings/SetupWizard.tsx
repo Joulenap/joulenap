@@ -267,6 +267,9 @@ export function SetupWizard() {
   const rapido = w.mode === 'rapido'
   const doneCount = w.status.filter((s) => s === 'done').length
   const allDone = doneCount === 5
+  // Backstop for FE-H4: never enable Save while any connection check is red, even if every
+  // card is marked done (a red status dot must never coexist with an enabled Save).
+  const canSave = allDone && Object.values(w.checks).every(Boolean)
 
   async function run(key: string, fn: () => Promise<void>) {
     setBusy(key)
@@ -317,7 +320,10 @@ export function SetupWizard() {
     run('pve', async () => {
       const r = await api.wizardPveConnect({
         host: w.pveHost,
-        port: 8006,
+        // Respect a hand-configured PVE port so a custom-port install can re-Connect; the
+        // wizard has no port field yet. TLS stays unverified for the connect test — enabling
+        // verification needs fingerprint pinning, which is BE-S1.
+        port: config?.pve.port ?? 8006,
         verify_tls: false,
         mode: rapido ? 'root' : 'token',
         username: w.pveUser,
@@ -351,6 +357,14 @@ export function SetupWizard() {
     run('pbs', async () => {
       const port = Number(w.pbsPort) || 8007
       const r = await api.wizardPbsCheck(w.pbsHost, port)
+      // wizardPbsCheck returns { reachable:false } rather than throwing, so guard it
+      // explicitly — otherwise the card would complete with the PBS status dot red (FE-H4).
+      // Pin the fingerprint (if newly learned) either way, but bail before provisioning: no
+      // point minting a token against an unreachable PBS.
+      if (!r.reachable) {
+        patch({ pbsFp: w.pbsFp || r.fingerprint || '', checks: { ...w.checks, pbs: false } })
+        throw new Error(t('settings.setup.errors.pbsUnreachable'))
+      }
       // Quick setup: mint a scoped PBS token from the root creds (same ones used to install
       // the SSH key), so the user never pastes a token. Manual mode keeps the typed token.
       let { pbsTokenId, pbsTokenSecret } = w
@@ -366,11 +380,17 @@ export function SetupWizard() {
         pbsTokenId = tok.id
         pbsTokenSecret = tok.secret
       }
+      // Manual mode with an empty token would otherwise complete the card with the token dot
+      // red — require it before advancing.
+      if (!(pbsTokenId && pbsTokenSecret)) {
+        patch({ pbsFp: w.pbsFp || r.fingerprint || '', checks: { ...w.checks, pbs: true, token: false } })
+        throw new Error(t('settings.setup.errors.pbsTokenMissing'))
+      }
       advance(2, {
         pbsFp: w.pbsFp || r.fingerprint || '',
         pbsTokenId,
         pbsTokenSecret,
-        checks: { ...w.checks, pbs: r.reachable, token: !!(pbsTokenId && pbsTokenSecret) },
+        checks: { ...w.checks, pbs: true, token: true },
       })
     })
 
@@ -380,7 +400,12 @@ export function SetupWizard() {
       if (r.mac) patch({ wolMac: r.mac })
     })
 
-  const confirmWol = () => advance(3, { checks: { ...w.checks, wol: true } })
+  // A MAC is required to wake the PBS; without it the WoL step must not complete (FE-H4).
+  // Format is validated backend-side on save (BE-C2), so a non-empty check suffices here.
+  const confirmWol = () => {
+    if (!w.wolMac.trim()) return
+    advance(3, { checks: { ...w.checks, wol: true } })
+  }
 
   const genKey = () =>
     run('key', async () => {
@@ -435,9 +460,10 @@ export function SetupWizard() {
     next.pve = {
       ...next.pve,
       host: w.pveHost,
-      port: 8006,
+      // Deliberately don't set port/verify_tls here: the wizard has no field for them, so the
+      // `...next.pve` spread must preserve whatever's saved (defaults 8006/false on a fresh
+      // install) rather than silently reverting a hand-configured PVE port or TLS (FE-M9).
       node: w.node,
-      verify_tls: false,
       api_token_id: w.tokenId,
       // Mirror the PBS guard below: after a reload the secret isn't rehydrated (w.tokenSecret
       // is ''), and next.pve.api_token_secret is the ***REDACTED*** sentinel from GET /config,
@@ -595,7 +621,7 @@ export function SetupWizard() {
             <button style={ghost} onClick={detectMac}>
               {busy === 'mac' ? t('settings.setup.buttons.detecting') : t('settings.setup.buttons.detectMac')}
             </button>
-            <button style={orangeBtn(true)} onClick={confirmWol}>
+            <button style={orangeBtn(!!w.wolMac.trim())} disabled={!w.wolMac.trim()} onClick={confirmWol}>
               {t('settings.setup.buttons.confirm')}
             </button>
           </div>
@@ -861,7 +887,7 @@ export function SetupWizard() {
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             {saved && <span style={{ fontSize: 12, color: c.green }}>{t('settings.setup.saved')}</span>}
-            <button onClick={onSave} disabled={!allDone || busy === 'save'} style={{ ...primaryBtn, padding: '9px 22px', background: allDone ? c.accent : '#1d232b', color: allDone ? c.accentInk : c.textMuted, border: allDone ? 'none' : '1px solid #262d35', cursor: allDone ? 'pointer' : 'not-allowed' }}>
+            <button onClick={onSave} disabled={!canSave || busy === 'save'} style={{ ...primaryBtn, padding: '9px 22px', background: canSave ? c.accent : '#1d232b', color: canSave ? c.accentInk : c.textMuted, border: canSave ? 'none' : '1px solid #262d35', cursor: canSave ? 'pointer' : 'not-allowed' }}>
               {t('settings.setup.save')}
             </button>
           </div>

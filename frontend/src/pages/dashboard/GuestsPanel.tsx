@@ -13,6 +13,7 @@ interface Props {
   onToggleGuest: (vmid: number) => void
   onRefresh: () => void
   refreshing: boolean
+  error: string | null
 }
 
 function modeBtn(active: boolean): React.CSSProperties {
@@ -30,7 +31,7 @@ function modeBtn(active: boolean): React.CSSProperties {
   }
 }
 
-export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGuest, onRefresh, refreshing }: Props) {
+export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGuest, onRefresh, refreshing, error }: Props) {
   const { t } = useTranslation()
   const selective = mode === 'selective'
   // Exclude mode is set in config.yaml and can't be represented by the general/selective
@@ -70,6 +71,12 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
           <span style={{ display: 'inline-block', animation: refreshing ? 'spin .9s linear infinite' : 'none' }}>⟳</span>
         </button>
       </div>
+
+      {error && (
+        <div role="alert" style={{ padding: '0 18px 12px', fontSize: 11.5, color: c.red, lineHeight: 1.4 }}>
+          {error}
+        </div>
+      )}
 
       <div style={{ padding: '0 18px 12px' }}>
         {excludeMode ? (

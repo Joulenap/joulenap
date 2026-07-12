@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { ConfirmModal, type ConfirmState } from '../../components/ConfirmModal'
+import { useConfig } from '../../config/ConfigContext'
 import { c, ghostBtn, labelStyle, panelStyle, primaryBtn } from '../../theme'
 import { copyToClipboard } from '../../utils/clipboard'
 
@@ -84,7 +85,7 @@ Fields available: pbs_state, next_run, last_run_status, last_run_time,
 
 export function Integrations() {
   const { t } = useTranslation()
-  const [enabled, setEnabled] = useState(false)
+  const { config, reload } = useConfig()
   const [freshKey, setFreshKey] = useState<string | null>(null)
   const [dash, setDash] = useState<Dashboard>('homepage')
   const [busy, setBusy] = useState(false)
@@ -93,12 +94,10 @@ export function Integrations() {
   const [err, setErr] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
 
-  useEffect(() => {
-    api
-      .getConfig()
-      .then((cfg) => setEnabled(Boolean(cfg.app.api_key)))
-      .catch(() => setEnabled(false))
-  }, [])
+  // Derive "a key is configured" from the shared config (api_key is redacted to a non-empty
+  // sentinel when set) instead of a standalone fetch, and reload() after mutating it so the
+  // shared cache never goes stale (FE-M10).
+  const enabled = Boolean(config?.app.api_key)
 
   async function doGenerate() {
     setBusy(true)
@@ -106,7 +105,7 @@ export function Integrations() {
     try {
       const { api_key } = await api.generateApiKey()
       setFreshKey(api_key)
-      setEnabled(true)
+      await reload()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {
@@ -120,7 +119,7 @@ export function Integrations() {
     try {
       await api.deleteApiKey()
       setFreshKey(null)
-      setEnabled(false)
+      await reload()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {

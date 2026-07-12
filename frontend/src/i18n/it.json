@@ -7,9 +7,15 @@
     "loading": "Caricamento…",
     "never": "mai",
     "saveFailed": "Impossibile salvare le modifiche",
+    "requestTimeout": "Richiesta scaduta — Joulenap non ha risposto in tempo. Verifica che sia in esecuzione e riprova.",
     "backendUnreachable": "Impossibile raggiungere Joulenap — mostro gli ultimi dati noti.",
     "notConfigured": "Joulenap non è ancora configurato — collega Proxmox VE e PBS per iniziare a fare backup.",
-    "runSetup": "Avvia la configurazione →"
+    "runSetup": "Avvia la configurazione →",
+    "unsaved": {
+      "title": "Ignorare le modifiche non salvate?",
+      "body": "Hai modifiche non ancora salvate qui. Uscendo ora andranno perse.",
+      "confirm": "Ignora le modifiche"
+    }
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
@@ -84,8 +90,10 @@
     "scheduleCustom": "Pianificazione personalizzata impostata in config.yaml ({{cron}}) — modificala lì per cambiarla.",
     "apply": "Applica modifiche",
     "saved": "✓ Pianificazione salvata",
+    "actionFailed": "Impossibile avviare l'azione. Controlla il PBS e riprova.",
     "guests": "Guest",
     "refresh": "Aggiorna",
+    "guestsError": "Impossibile aggiornare l'elenco dei guest — mostro gli ultimi guest noti.",
     "general": "Backup generale",
     "selective": "Backup selettivo",
     "selectedCount": "{{n}} sel.",
@@ -333,6 +341,10 @@
         "pbsRoot": "Usata una sola volta per creare il token API del PBS e installare la chiave SSH di spegnimento, poi scartata.",
         "sshManual": "Aggiungi la riga qui sotto a /root/.ssh/authorized_keys sul PBS, poi segna come installata.",
         "fingerprintPinned": "Questa impronta è bloccata — le connessioni vengono rifiutate se cambia."
+      },
+      "errors": {
+        "pbsUnreachable": "Il PBS non è raggiungibile a quell'host e porta. Verifica che sia acceso e che l'indirizzo sia corretto, poi riprova.",
+        "pbsTokenMissing": "È richiesto un token API del PBS. Inserisci l'ID del token e il segreto prima di continuare."
       }
     },
     "integrations": {
@@ -349,7 +361,7 @@
       "copyFailed": "Copia automatica non riuscita — seleziona il testo e copialo manualmente.",
       "copySnippet": "Copia snippet",
       "snippetHint": "Incolla questo sotto un gruppo nella configurazione della tua dashboard e mantieni l'indentazione intatta.",
-      "keyHiddenNote": "Una chiave è configurata. Rigenerala per vederne una nuova; quella attuale resta valida.",
+      "keyHiddenNote": "Una chiave è configurata. Rigenerandola viene sostituita — quella attuale smette di funzionare immediatamente.",
       "dashboardLabel": "Dashboard",
       "snippetLabel": "Snippet di configurazione",
       "regenerateConfirmTitle": "Rigenerare la chiave API?",
