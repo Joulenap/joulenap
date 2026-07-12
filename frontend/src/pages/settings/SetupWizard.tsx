@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, ApiError } from '../../api/client'
+import { api } from '../../api/client'
 import type { Config, NetInterface } from '../../api/types'
 import { ConfirmModal, type ConfirmState } from '../../components/ConfirmModal'
 import { Dropdown } from '../../components/Dropdown'
@@ -234,6 +234,12 @@ export function SetupWizard() {
   const [error, setError] = useState<string | null>(null)
   const [ifaces, setIfaces] = useState<NetInterface[]>([])
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  // Scroll the top-anchored error banner into view whenever a step fails: a check on a lower
+  // card (SSH/Install) would otherwise update a banner off-screen -> "clicked, nothing happened"
+  // (UX-1). The nonce forces the scroll even when the same message re-fires (setError(null) then
+  // the identical string batches to no net change, so keying on `error` alone wouldn't re-run).
+  const errorRef = useRef<HTMLDivElement>(null)
+  const [errorNonce, setErrorNonce] = useState(0)
 
   // If the saved config is already set up, show the wizard as completed on (re)mount rather
   // than restarting from card 1 — but never clobber an in-progress session's own state.
@@ -263,6 +269,11 @@ export function SetupWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [errorNonce])
+
   const patch = (p: Partial<Wiz>) => setW((s) => ({ ...s, ...p }))
   const rapido = w.mode === 'rapido'
   const doneCount = w.status.filter((s) => s === 'done').length
@@ -279,7 +290,10 @@ export function SetupWizard() {
     } catch (e) {
       // Surface the backend's message (e.g. PVE auth failure, unreachable host) so a
       // failed step isn't silently a no-op; the connection-status dots stay red too.
-      setError(e instanceof ApiError ? e.message : String(e))
+      // Use `.message` for any Error (incl. our own localized throws like macNotDetected /
+      // pbsUnreachable) so the raw "Error: " prefix from String(e) never leaks to the banner.
+      setError(e instanceof Error ? e.message : String(e))
+      setErrorNonce((n) => n + 1)
     } finally {
       setBusy(null)
     }
@@ -397,7 +411,11 @@ export function SetupWizard() {
   const detectMac = () =>
     run('mac', async () => {
       const r = await api.wizardDetectMac(w.pbsHost)
-      if (r.mac) patch({ wolMac: r.mac })
+      // A 200 with no MAC is a *failed* detection, not an error the run() wrapper would catch —
+      // surface a hint (routed through the error banner, now scroll-visible via UX-1) instead of
+      // a silent no-op, so the user knows to type it in (UX-3).
+      if (!r.mac) throw new Error(t('settings.setup.errors.macNotDetected'))
+      patch({ wolMac: r.mac })
     })
 
   // A MAC is required to wake the PBS; without it the WoL step must not complete (FE-H4).
@@ -762,6 +780,8 @@ export function SetupWizard() {
 
       {error && (
         <div
+          ref={errorRef}
+          role="alert"
           style={{
             background: 'rgba(229,103,91,.1)',
             border: '1px solid rgba(229,103,91,.32)',

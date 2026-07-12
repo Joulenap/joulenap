@@ -3,6 +3,7 @@ import type { StatusResponse } from '../api/types'
 import { useClock } from '../hooks/useClock'
 import { c, mono } from '../theme'
 import { fmtClock } from '../utils/format'
+import { runningLabelKey } from '../utils/status'
 
 interface HeaderProps {
   host: string
@@ -13,7 +14,8 @@ interface HeaderProps {
 }
 
 function pill(status: StatusResponse | null, t: (k: string) => string) {
-  if (status?.job_running) return { label: t('status.running'), color: c.blue, busy: true, sub: '' }
+  if (status?.job_running)
+    return { label: t(runningLabelKey(status.running_kind)), color: c.blue, busy: true, sub: '' }
   if (status?.pbs_online) {
     return {
       label: t('status.on'),

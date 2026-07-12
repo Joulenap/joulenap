@@ -33,6 +33,9 @@ npm-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 frontend/dist/
+
+# Playwright MCP run artifacts (screenshots/snapshots from local UI verification)
+.playwright-mcp/
 frontend/.vite/
 
 # --- Local planning notes (NEVER commit) ---

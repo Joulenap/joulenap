@@ -33,6 +33,20 @@ def latest_cycle_run(session: Session) -> Run | None:
     ).first()
 
 
+def running_run(session: Session) -> Run | None:
+    """The currently in-progress run of any kind (backup cycle / GC / verify), or None.
+
+    Used to label the header pill with what is actually running instead of assuming
+    every job is a backup. Normally at most one row is RUNNING (the single-run lock),
+    and startup sweeps any orphan, so an ordered LIMIT 1 is exact in practice."""
+    return session.scalars(
+        select(Run)
+        .where(Run.status == RunStatus.RUNNING)
+        .order_by(Run.started_at.desc())
+        .limit(1)
+    ).first()
+
+
 def latest_finished_cycle_run(session: Session) -> Run | None:
     """Most recent backup cycle that has finished (any terminal status), ignoring an
     in-progress RUNNING cycle — so a mid-backup dashboard shows the previous result."""

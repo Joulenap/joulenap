@@ -50,7 +50,7 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 ## Status
 
-**v0.4.3.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
+**v0.4.4.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
 notifications + setup wizard, packaged as a Docker image — with transport hardening (PBS TLS
 pinning + SSH host-key verification) and auth hardening (login rate-limit, session hardening).
 Includes a read-only [dashboard integration](docs/INTEGRATIONS.md) (Homepage/Homarr/Dashy/Glance),
