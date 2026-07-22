@@ -15,6 +15,10 @@ app:
   # Read-only key for the dashboard integration endpoint (GET /api/dashboard).
   # Leave empty to disable. Generate/rotate it from Settings -> Integrations in the UI.
   api_key: ""
+  # Ask GitHub once a day whether a newer Joulenap release exists, and show a footer
+  # badge if so. Off by default: the app makes no outbound internet call unless you
+  # turn this on (Settings -> Integrations).
+  update_check: false
   session:
     https_only: false
     max_age_days: 14

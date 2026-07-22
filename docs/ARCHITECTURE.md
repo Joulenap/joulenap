@@ -43,6 +43,9 @@ Everything is served under `/api`. Auth is a signed **session cookie** started b
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | version + liveness (used by the Docker healthcheck) |
+| GET | `/api/update` | running version, plus the latest GitHub release when `app.update_check` is on (cached 24h; no outbound call when off) |
+| GET | `/api/config/yaml` | the redacted config serialised as YAML, for the Advanced tab's editor |
+| PUT | `/api/config/yaml` | apply an edited YAML document (same validation and merge as `PUT /api/config`) |
 | GET | `/api/auth/status` | whether first-run setup is still needed / already signed in |
 | POST | `/api/auth/setup` | first run: create the admin account |
 | POST | `/api/login` | authenticate, start session |

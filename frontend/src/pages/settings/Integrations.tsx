@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { ConfirmModal, type ConfirmState } from '../../components/ConfirmModal'
+import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
 import { c, ghostBtn, labelStyle, panelStyle, primaryBtn } from '../../theme'
 import { copyToClipboard } from '../../utils/clipboard'
@@ -81,6 +82,48 @@ Fields available: pbs_state, next_run, last_run_status, last_run_time,
         format: percent
 # No CORS? set useProxy: true, or fall back to ${url}?key=${key}`
   }
+}
+
+// Opt-in outbound release check. Toggling saves immediately (single boolean — no draft to
+// keep, same as the scheduler switch on the dashboard); the footer badge reacts to it.
+export function UpdateCheck() {
+  const { t } = useTranslation()
+  const { config, save } = useConfig()
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const on = Boolean(config?.app.update_check)
+
+  async function toggle() {
+    if (!config) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await save({ ...config, app: { ...config.app, update_check: !on } })
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ ...panelStyle, padding: '24px 26px', maxWidth: 640, marginTop: 18 }}>
+      <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
+        {t('settings.updates.title')}
+      </span>
+      <span style={{ display: 'block', fontSize: 13, color: c.textDim, lineHeight: 1.5, marginBottom: 18 }}>
+        {t('settings.updates.subtitle')}
+      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Toggle on={on} onClick={() => void (busy ? null : toggle())} />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.updates.toggle')}</span>
+      </div>
+      <div style={{ fontSize: 12, color: c.textDim, marginTop: 8 }}>
+        {t('settings.updates.toggleHint')}
+      </div>
+      {err && <div style={{ fontSize: 12, color: c.red, marginTop: 8 }}>{err}</div>}
+    </div>
+  )
 }
 
 export function Integrations() {

@@ -151,7 +151,9 @@ export interface AppConfig {
   timezone: string
   secret_key: string
   api_key: string
+  update_check: boolean
   auth: { username: string; password_hash: string }
+  session: { https_only: boolean; max_age_days: number }
 }
 
 export interface TelegramConfig {

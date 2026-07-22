@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0]
+
+### Added
+
+- **Update check (opt-in, off by default)** — Joulenap can ask GitHub once a day whether a newer
+  release exists and show a badge in the footer linking to the release notes. It is disabled
+  unless you turn it on in Settings -> Integrations: with it off the app makes no outbound
+  internet request at all. The check never runs as part of the container healthcheck.
+- **Advanced settings tab** — the settings that previously existed only in `config.yaml` now have a
+  home in the interface: backup mode (snapshot / suspend / stop), bandwidth limit, the keep-last and
+  keep-yearly retention buckets, how long run history is kept, and the server's port, session
+  lifetime and HTTPS-only cookie flag.
+- **Edit config.yaml from the browser** — the same tab embeds a YAML editor with syntax
+  highlighting for the whole configuration, so anything the forms don't cover is still reachable
+  without shelling into the container. Secrets are shown as `***REDACTED***` and are never sent to
+  the browser; leaving them untouched keeps the stored value. The document is validated before
+  anything is written, a key you delete keeps its current value, and a Copy button gives you a
+  secret-free copy of your configuration to attach to a bug report.
+
 ## [0.4.4]
 
 ### Changed
@@ -244,7 +263,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Joulenap/joulenap/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/Joulenap/joulenap/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/Joulenap/joulenap/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/Joulenap/joulenap/compare/v0.4.1...v0.4.2

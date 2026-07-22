@@ -3,13 +3,21 @@ import { useTranslation } from 'react-i18next'
 import { useUnsavedGuard } from '../shell/UnsavedGuard'
 import { c } from '../theme'
 import { Account } from './settings/Account'
+import { Advanced } from './settings/Advanced'
 import { BackupSafety } from './settings/BackupSafety'
-import { Integrations } from './settings/Integrations'
+import { Integrations, UpdateCheck } from './settings/Integrations'
 import { Localization } from './settings/Localization'
 import { Notifications } from './settings/Notifications'
 import { SetupWizard } from './settings/SetupWizard'
 
-export type Tab = 'localization' | 'account' | 'notifications' | 'setup' | 'safety' | 'integrations'
+export type Tab =
+  | 'localization'
+  | 'account'
+  | 'notifications'
+  | 'setup'
+  | 'safety'
+  | 'integrations'
+  | 'advanced'
 
 const NAV: { key: Tab }[] = [
   { key: 'localization' },
@@ -18,6 +26,7 @@ const NAV: { key: Tab }[] = [
   { key: 'setup' },
   { key: 'safety' },
   { key: 'integrations' },
+  { key: 'advanced' },
 ]
 
 export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
@@ -89,7 +98,13 @@ export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
         {tab === 'notifications' && <Notifications />}
         {tab === 'setup' && <SetupWizard />}
         {tab === 'safety' && <BackupSafety />}
-        {tab === 'integrations' && <Integrations />}
+        {tab === 'integrations' && (
+          <>
+            <Integrations />
+            <UpdateCheck />
+          </>
+        )}
+        {tab === 'advanced' && <Advanced />}
       </div>
     </div>
   )

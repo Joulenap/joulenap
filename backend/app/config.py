@@ -68,6 +68,9 @@ class AppConfig(_Base):
     # Read-only integration key for GET /api/dashboard (empty => integration disabled).
     # Managed only via POST/DELETE /api/config/api-key; PUT /api/config never touches it.
     api_key: str = ""
+    # Opt-in: let GET /api/update ask GitHub (once a day) whether a newer release exists.
+    # Off by default — the app makes no outbound internet call unless the user asks for it.
+    update_check: bool = False
     auth: AuthConfig = Field(default_factory=AuthConfig)
     session: SessionConfig = Field(default_factory=SessionConfig)
 
