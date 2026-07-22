@@ -9,9 +9,10 @@ from __future__ import annotations
 import secrets
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from ..config import (
     Config,
@@ -41,6 +42,17 @@ def put_config(
     store: ConfigStore = Depends(get_config_store),
     scheduler: Scheduler = Depends(get_scheduler),
 ) -> dict[str, Any]:
+    return _apply_config(incoming, store, scheduler)
+
+
+def _apply_config(
+    incoming: dict[str, Any], store: ConfigStore, scheduler: Scheduler
+) -> dict[str, Any]:
+    """Validate + persist an incoming (partial, possibly redacted) config and re-arm.
+
+    Shared by PUT /api/config and PUT /api/config/yaml so the YAML editor goes through the
+    exact same validation and secret-restoration path as the settings forms.
+    """
     # Deep-merge over the stored config so PUT means "apply these changes", not "replace
     # everything": an omitted section/field keeps its current value (a partial body can no
     # longer wipe secrets). Then resolve any ***REDACTED*** the client echoed back, and force
@@ -102,6 +114,71 @@ def put_config(
 
     scheduler.rearm(new_config)
     return redacted_dict(new_config)
+
+
+# --- raw YAML editing (Settings -> Advanced) ---------------------------------
+#
+# The editor is served the *redacted* config re-serialised with the same dumper save_config
+# uses, so the text matches the on-disk file's shape without ever sending secrets to the
+# browser. Saving goes through _apply_config, i.e. the same merge/restore/validate path as
+# the settings forms: a key the user deletes keeps its stored value rather than being wiped.
+
+
+class YamlBody(BaseModel):
+    yaml: str
+
+
+def _dump_yaml(cfg: Any) -> str:
+    return yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, default_flow_style=False)
+
+
+def _yaml_error(message: str, line: int | None = None) -> HTTPException:
+    return HTTPException(status_code=422, detail={"message": message, "line": line})
+
+
+def _flatten(detail: Any) -> str:
+    """Turn _apply_config's error detail into text the editor can show.
+
+    Pydantic's ``errors()`` list becomes one ``field.path: message`` per line; anything else
+    (the cron/MAC guards) is already a plain string.
+    ponytail: no loc -> line mapping — only YAML syntax errors carry a line number.
+    """
+    if isinstance(detail, list):
+        return "\n".join(
+            f"{'.'.join(str(p) for p in e.get('loc', ()))}: {e.get('msg', '')}".lstrip(": ")
+            for e in detail
+        )
+    return str(detail)
+
+
+@router.get("/config/yaml")
+def get_config_yaml(store: ConfigStore = Depends(get_config_store)) -> dict[str, str]:
+    return {"yaml": _dump_yaml(redacted_dict(store.config))}
+
+
+@router.put("/config/yaml")
+def put_config_yaml(
+    body: YamlBody,
+    store: ConfigStore = Depends(get_config_store),
+    scheduler: Scheduler = Depends(get_scheduler),
+) -> dict[str, Any]:
+    try:
+        incoming = yaml.safe_load(body.yaml) or {}
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        raise _yaml_error(str(exc), mark.line + 1 if mark else None) from exc
+    if not isinstance(incoming, dict):
+        raise _yaml_error(
+            f"The document must be a YAML mapping, got {type(incoming).__name__}."
+        )
+    try:
+        return _apply_config(incoming, store, scheduler)
+    except HTTPException as exc:
+        # Re-shape validation failures into the editor's {message, line} contract; PUT
+        # /api/config keeps its own. A 500 (unwritable config.yaml) passes through as-is.
+        if exc.status_code != 422:
+            raise
+        raise _yaml_error(_flatten(exc.detail)) from exc
 
 
 @router.post("/config/api-key", status_code=status.HTTP_200_OK)

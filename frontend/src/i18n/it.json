@@ -151,7 +151,9 @@
       "safety": "Sicurezza backup",
       "safetyHint": "Controlli pre-volo e spegnimento",
       "integrations": "Integrazioni",
-      "integrationsHint": "Widget dashboard (Homepage, ...)"
+      "integrationsHint": "Widget dashboard, aggiornamenti",
+      "advanced": "Avanzate",
+      "advancedHint": "Opzioni esperte & config.yaml"
     },
     "localization": {
       "title": "Localizzazione",
@@ -373,6 +375,53 @@
       "disableConfirmTitle": "Disattivare l'integrazione?",
       "disableConfirmBody": "L'endpoint restituirà 403 e ogni widget che lo usa smetterà di funzionare.",
       "keyPlaceholder": "<la-tua-chiave-api>"
+    },
+    "updates": {
+      "title": "Controllo aggiornamenti",
+      "subtitle": "Chiedi a GitHub una volta al giorno se esiste una versione più recente di Joulenap, e mostra un badge nel footer se c'è.",
+      "toggle": "Controlla gli aggiornamenti",
+      "toggleHint": "Disattivo di default: con questa opzione spenta Joulenap non contatta mai internet.",
+      "upToDate": "Aggiornato — v{{version}} è l'ultima versione.",
+      "unknown": "GitHub non raggiungibile — riproverà più tardi.",
+      "available": "La v{{version}} è disponibile."
+    },
+    "advanced": {
+      "title": "Avanzate",
+      "subtitle": "Impostazioni che non trovano posto nelle altre schermate. Se non sai cosa fa una voce, lasciala com'è.",
+      "saved": "✓ Salvato",
+      "backupSection": "Job di backup",
+      "mode": "Modalità di backup",
+      "modeSnapshot": "Snapshot (nessun fermo)",
+      "modeSuspend": "Suspend",
+      "modeStop": "Stop",
+      "modeHint": "Snapshot esegue il backup della guest mentre è in funzione. Suspend e Stop la sospendono o la spengono per tutta la durata del suo backup — più consistente, ma la guest resta non disponibile.",
+      "bwlimit": "Limite di banda (KiB/s)",
+      "bwlimitHint": "Limita la velocità di scrittura di vzdump. 0 significa nessun limite.",
+      "retentionSection": "Bucket di retention aggiuntivi",
+      "retentionHint": "Giornalieri, settimanali e mensili sono nella card Pianificazione della dashboard. Questi due sono i bucket vzdump rimanenti.",
+      "keepLast": "Mantieni ultimi",
+      "keepLastHint": "Mantiene sempre questo numero di backup più recenti, indipendentemente dall'età. 0 disattiva il bucket.",
+      "keepYearly": "Mantieni annuali",
+      "keepYearlyHint": "Numero di backup annuali da mantenere. 0 disattiva il bucket.",
+      "historySection": "Storico esecuzioni",
+      "historyDays": "Conserva lo storico per (giorni)",
+      "historyDaysHint": "Le righe di storico e del registro attività più vecchie di così vengono eliminate ogni giorno, così il database non cresce all'infinito. 0 conserva tutto per sempre.",
+      "serverSection": "Server",
+      "restartHint": "⚠️ Queste tre opzioni hanno effetto solo dopo il riavvio del container.",
+      "port": "Porta interfaccia web",
+      "portHint": "Porta su cui l'app ascolta dentro il container. Cambiandola va cambiata anche la mappatura delle porte del container.",
+      "sessionDays": "Durata della sessione (giorni)",
+      "sessionDaysHint": "Per quanto tempo resta valido un accesso prima che ricompaia la schermata di login.",
+      "httpsOnly": "Cookie di sessione solo HTTPS",
+      "httpsOnlyHint": "Attivalo se Joulenap è servito via HTTPS o dietro un proxy che termina il TLS. Lasciarlo attivo su HTTP semplice ti impedirà di accedere.",
+      "yamlTitle": "Modifica config.yaml",
+      "yamlSubtitle": "L'intera configurazione, esattamente come è memorizzata. Tutto ciò che i form non coprono si trova qui.",
+      "yamlHint": "I segreti sono mostrati come ***REDACTED*** — lasciali così per mantenere il valore salvato, oppure scrivine uno nuovo per sostituirlo. Una chiave che cancelli mantiene il valore attuale; il documento viene validato prima di scrivere qualsiasi cosa.",
+      "yamlApply": "Applica modifiche",
+      "yamlSaved": "✓ Configurazione salvata",
+      "copy": "Copia",
+      "copied": "Copiato",
+      "copyFailed": "Copia automatica non riuscita — seleziona il testo e copialo manualmente."
     }
   }
 }

@@ -23,7 +23,7 @@ function ShellInner() {
   const { guard } = useUnsavedGuard()
   const [view, setView] = useState<View>('main')
   const [settingsTab, setSettingsTab] = useState<Tab>('localization')
-  const [version, setVersion] = useState('')
+  const [upd, setUpd] = useState<Awaited<ReturnType<typeof api.update>> | null>(null)
 
   const openSettings = (tab: Tab) => {
     setSettingsTab(tab)
@@ -35,13 +35,13 @@ function ShellInner() {
   // already in Settings configuring it.
   const notConfigured = view === 'main' && !!config && !isConfigured(config)
 
-  // Version is static per deploy — fetch the backend's once for the footer.
+  // The running version for the footer, plus the newer-release badge when the user opted
+  // into the update check (the backend caches it; disabled => no outbound call at all).
+  // Re-runs when the toggle flips so the badge appears without a reload.
+  const updateCheck = config?.app.update_check
   useEffect(() => {
-    api
-      .health()
-      .then((h) => setVersion(h.version))
-      .catch(() => {})
-  }, [])
+    api.update().then(setUpd).catch(() => {})
+  }, [updateCheck])
 
   return (
     <div className="jn-shell">
@@ -126,7 +126,20 @@ function ShellInner() {
             color: c.textFaint,
           }}
         >
-          Joulenap{version && ` v${version}`}
+          Joulenap{upd && ` v${upd.current}`}
+          {upd?.update_available && (
+            <>
+              {' · '}
+              <a
+                href={upd.url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: c.accent, fontWeight: 600 }}
+              >
+                {t('settings.updates.available', { version: upd.latest.replace(/^v/, '') })}
+              </a>
+            </>
+          )}
         </footer>
       </div>
     </div>

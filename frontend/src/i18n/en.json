@@ -151,7 +151,9 @@
       "safety": "Backup safety",
       "safetyHint": "Pre-flight & power-off guards",
       "integrations": "Integrations",
-      "integrationsHint": "Dashboard widgets (Homepage, ...)"
+      "integrationsHint": "Dashboard widgets, updates",
+      "advanced": "Advanced",
+      "advancedHint": "Expert knobs & config.yaml"
     },
     "localization": {
       "title": "Localization",
@@ -373,6 +375,53 @@
       "disableConfirmTitle": "Disable integration?",
       "disableConfirmBody": "The endpoint will return 403 and any dashboard widget using it will stop working.",
       "keyPlaceholder": "<your-api-key>"
+    },
+    "updates": {
+      "title": "Update check",
+      "subtitle": "Ask GitHub once a day whether a newer Joulenap release exists, and show a badge in the footer if so.",
+      "toggle": "Check for updates",
+      "toggleHint": "Off by default: with this disabled Joulenap never contacts the internet.",
+      "upToDate": "Up to date — v{{version}} is the latest release.",
+      "unknown": "Couldn't reach GitHub — will retry later.",
+      "available": "v{{version}} is available."
+    },
+    "advanced": {
+      "title": "Advanced",
+      "subtitle": "Settings with no home on the other screens. If you are not sure what one does, leave it alone.",
+      "saved": "✓ Saved",
+      "backupSection": "Backup job",
+      "mode": "Backup mode",
+      "modeSnapshot": "Snapshot (no downtime)",
+      "modeSuspend": "Suspend",
+      "modeStop": "Stop",
+      "modeHint": "Snapshot backs up a running guest live. Suspend and Stop pause or shut down each guest for the duration of its backup — more consistent, but the guest is unavailable.",
+      "bwlimit": "Bandwidth limit (KiB/s)",
+      "bwlimitHint": "Caps the vzdump write rate. 0 means unlimited.",
+      "retentionSection": "Extra retention buckets",
+      "retentionHint": "Daily, weekly and monthly are on the dashboard's Schedule card. These two are the remaining vzdump buckets.",
+      "keepLast": "Keep last",
+      "keepLastHint": "Always keep this many most-recent backups regardless of age. 0 disables the bucket.",
+      "keepYearly": "Keep yearly",
+      "keepYearlyHint": "Number of yearly backups to keep. 0 disables the bucket.",
+      "historySection": "Run history",
+      "historyDays": "Keep history for (days)",
+      "historyDaysHint": "Run history and activity-log rows older than this are pruned daily so the database can't grow without bound. 0 keeps everything forever.",
+      "serverSection": "Server",
+      "restartHint": "⚠️ These three only take effect after the container is restarted.",
+      "port": "Web UI port",
+      "portHint": "Port the app listens on inside the container. Changing it also means changing the port mapping of your container.",
+      "sessionDays": "Session lifetime (days)",
+      "sessionDaysHint": "How long a sign-in stays valid before the login screen comes back.",
+      "httpsOnly": "HTTPS-only session cookie",
+      "httpsOnlyHint": "Enable when Joulenap is served over HTTPS or behind a TLS-terminating proxy. Leaving it on over plain HTTP will lock you out of signing in.",
+      "yamlTitle": "Edit config.yaml",
+      "yamlSubtitle": "The whole configuration, exactly as it is stored. Everything the forms don't cover lives here.",
+      "yamlHint": "Secrets are shown as ***REDACTED*** — leave them as-is to keep the stored value, or type a new one to replace it. A key you delete keeps its current value; the document is validated before anything is written.",
+      "yamlApply": "Apply changes",
+      "yamlSaved": "✓ Configuration saved",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Couldn't copy automatically — select the text and copy it manually."
     }
   }
 }

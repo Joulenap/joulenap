@@ -18,12 +18,16 @@ import type {
 
 export class ApiError extends Error {
   status: number
+  // The backend's `detail` as parsed, when it wasn't a plain string — the YAML editor reads
+  // {message, line} off it to mark the offending line. `message` stays a string either way.
+  raw?: unknown
   // A plain field assignment, not a `public status` parameter property: the frontend test
   // harness runs `node --test` in strip-only TS mode, which rejects parameter properties.
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, raw?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.raw = raw
   }
 }
 
@@ -84,15 +88,23 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
       onUnauthorized?.()
     }
     let detail: string = res.statusText
+    let raw: unknown
     try {
       const j = await res.json()
       if (j && typeof j.detail !== 'undefined') {
-        detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+        if (typeof j.detail === 'string') {
+          detail = j.detail
+        } else {
+          raw = j.detail
+          // A structured detail: prefer its own message, else fall back to the JSON dump.
+          const m = (j.detail as { message?: unknown }).message
+          detail = typeof m === 'string' ? m : JSON.stringify(j.detail)
+        }
       }
     } catch {
       // non-JSON error body — keep statusText
     }
-    throw new ApiError(res.status, detail)
+    throw new ApiError(res.status, detail, raw)
   }
   if (res.status === 204) return undefined as T
   const text = await res.text()
@@ -102,6 +114,12 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
 export const api = {
   // meta (unauthenticated) — app version for the footer
   health: () => req<{ status: string; version: string }>('GET', '/health'),
+  // meta — running version + (only when app.update_check is on) the latest release
+  update: () =>
+    req<{ current: string; latest: string; update_available: boolean; url: string }>(
+      'GET',
+      '/update',
+    ),
 
   // auth
   authStatus: () => req<AuthStatus>('GET', '/auth/status'),
@@ -122,6 +140,10 @@ export const api = {
   status: () => req<StatusResponse>('GET', '/status'),
   getConfig: () => req<Config>('GET', '/config'),
   putConfig: (config: Config) => req<Config>('PUT', '/config', config),
+  // Raw config.yaml (redacted) for the Advanced tab's editor; PUT goes through the same
+  // validation as putConfig, so a rejected document leaves the stored config untouched.
+  getConfigYaml: () => req<{ yaml: string }>('GET', '/config/yaml'),
+  putConfigYaml: (text: string) => req<Config>('PUT', '/config/yaml', { yaml: text }),
   generateApiKey: () => req<{ api_key: string }>('POST', '/config/api-key'),
   deleteApiKey: () => req<void>('DELETE', '/config/api-key'),
   guests: () => req<GuestInfo[]>('GET', '/guests'),

@@ -45,7 +45,9 @@ const CONFIG: Config = {
     timezone: 'Europe/Rome',
     secret_key: 'stub-secret-key',
     api_key: 'stub-api-key',
+    update_check: true,
     auth: { username: 'admin', password_hash: 'stub' },
+    session: { https_only: false, max_age_days: 14 },
   },
   pve: {
     host: '192.168.1.10',
@@ -218,13 +220,88 @@ const WIZARD_SSH_TRUST: { trusted: boolean } = { trusted: true }
 
 const WIZARD_RESET: { ok: boolean } = { ok: true }
 
+// What GET /config/yaml returns: the redacted config re-serialised, same shape the backend
+// dumps. Hand-written here (no YAML dumper in the stub) but kept in step with CONFIG above.
+const CONFIG_YAML = `app:
+  language: en
+  theme: dark
+  port: 8080
+  timezone: Europe/Rome
+  secret_key: '***REDACTED***'
+  api_key: '***REDACTED***'
+  update_check: true
+  auth:
+    username: admin
+    password_hash: '***REDACTED***'
+  session:
+    https_only: false
+    max_age_days: 14
+pve:
+  host: 192.168.1.10
+  port: 8006
+  node: pve
+  verify_tls: false
+  api_token_id: root@pam!joulenap
+  api_token_secret: '***REDACTED***'
+  storage_id: pbs
+pbs:
+  host: 192.168.1.50
+  port: 8007
+  datastore: backup
+  mac: aa:bb:cc:dd:ee:ff
+  wol_broadcast_iface: eth0
+  wait_timeout: 180
+  wol_retries: 2
+  poweroff_task_wait: 600
+  ssh_user: root
+  ssh_key_path: /app/data/id_ed25519
+backup:
+  enabled: true
+  schedule: 30 2 * * 1,3,5
+  mode: snapshot
+  bwlimit: 0
+  min_free_percent: 10
+  guests:
+    mode: all
+    auto_include_new: true
+    list: []
+  retention:
+    keep_last: 0
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    keep_yearly: 0
+maintenance:
+  gc:
+    enabled: true
+  verify:
+    after_backup: false
+    enabled: true
+    schedule: 0 4 * * 0
+    reverify_days: 30
+  history:
+    retention_days: 90
+notifications:
+  on_success: true
+  on_failure: true
+  custom_urls: []
+`
+
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '0.4.4-stub' },
+  'GET /health': { status: 'ok', version: '0.5.0-stub' },
+  'GET /update': {
+    current: '0.5.0-stub',
+    latest: '0.5.0',
+    update_available: true,
+    url: 'https://github.com/Joulenap/joulenap/releases',
+  },
   'GET /auth/status': AUTH_STATUS,
   'GET /auth/me': ME,
   'GET /status': STATUS,
   'GET /config': CONFIG,
   'PUT /config': CONFIG,
+  'GET /config/yaml': { yaml: CONFIG_YAML },
+  'PUT /config/yaml': CONFIG,
   'GET /guests': GUESTS,
   'GET /tasklog': TASKLOG,
   'POST /wizard/pve/connect': WIZARD_PVE_CONNECT,

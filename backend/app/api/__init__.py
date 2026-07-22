@@ -14,6 +14,7 @@ from . import (
     power,
     scheduler,
     status,
+    update,
     wizard,
     wol,
 )
@@ -31,5 +32,6 @@ api_router.include_router(wol.router)
 api_router.include_router(notify.router)
 api_router.include_router(logs.router)
 api_router.include_router(wizard.router)
+api_router.include_router(update.router)
 
 __all__ = ["api_router"]
