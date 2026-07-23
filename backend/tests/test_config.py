@@ -46,6 +46,23 @@ def test_unknown_key_rejected(tmp_path: Path):
         load_config(p)
 
 
+def test_legacy_auto_include_new_is_dropped_not_rejected(tmp_path: Path):
+    # BE-C5: the field was removed from the schema, but every pre-0.6.0 config.yaml still has
+    # it on disk. extra="forbid" would turn that into a startup failure after a container
+    # pull, so the loader strips it instead — and the next save writes the file without it.
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        "backup:\n  guests:\n    mode: include\n    auto_include_new: true\n    list: [100]\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(p)
+    assert cfg.backup.guests.mode == "include"
+    assert cfg.backup.guests.list == [100]
+    assert not hasattr(cfg.backup.guests, "auto_include_new")
+    save_config(cfg, p)
+    assert "auto_include_new" not in p.read_text(encoding="utf-8")
+
+
 def test_roundtrip_save_load(tmp_path: Path):
     cfg = load_config(EXAMPLE)
     cfg.app.auth.password_hash = "$2b$12$abcdefghijklmnopqrstuv"

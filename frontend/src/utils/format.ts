@@ -34,6 +34,21 @@ export function rel(ms: number): string {
   return `${d}d${hh ? ' ' + hh + 'h' : ''}`
 }
 
+/**
+ * Elapsed time for a run or one of its steps: `43s`, `1m 23s`, `2h 5m`.
+ *
+ * Not `rel()` — that rounds to whole minutes for "next run in 3h", which renders a 41-second
+ * wake-wait as "1m" and a 2-second step as "<1m". Step timings are the diagnostic the run
+ * detail exists for, so below an hour they keep their seconds.
+ */
+export function fmtDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${pad(s % 60)}s`
+  return `${Math.floor(m / 60)}h ${pad(m % 60)}m`
+}
+
 export function fmtBytesTB(n: number): string {
   const tb = n / 1e12
   if (tb >= 1) return tb.toFixed(2) + ' TB'

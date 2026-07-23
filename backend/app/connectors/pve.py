@@ -155,6 +155,14 @@ class PveClient:
         )
         return [(int(e["n"]), e.get("t") or "") for e in (data or [])]
 
+    def stop_task(self, upid: str) -> None:
+        """Ask PVE to stop a running task (the vzdump behind a cancelled run).
+
+        Without this a cancelled backup would keep running on the PVE host after Joulenap
+        stopped watching it, and the next run would collide with it.
+        """
+        self._api.request("DELETE", f"/nodes/{self.node}/tasks/{upid}")
+
     def wait_task(
         self,
         upid: str,
@@ -163,16 +171,18 @@ class PveClient:
         sleep: Callable[[float], None] = time.sleep,
         *,
         on_log: Callable[[list[LogLine]], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         """Poll a task until it stops. Returns the final status; raises on non-OK exit.
 
         Pass ``on_log`` to also tail the task log — each new batch of ``(line_no, text)``
-        pairs is handed to it as the task runs.
+        pairs is handed to it as the task runs. ``should_cancel`` makes the wait
+        interruptible (raises ``TaskCancelled``); see :func:`poll_task`.
         """
         log_fn = (lambda start: self.task_log(upid, start)) if on_log else None
         return poll_task(
             self.task_status, upid, poll_interval, timeout, sleep,
-            log_fn=log_fn, on_lines=on_log,
+            log_fn=log_fn, on_lines=on_log, should_cancel=should_cancel,
         )
 
     def close(self) -> None:

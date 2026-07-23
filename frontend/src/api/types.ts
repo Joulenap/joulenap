@@ -17,6 +17,7 @@ export interface RunSummary {
   status: string
   started_at: string
   finished_at: string | null
+  guests_ok: number | null
   error: string | null
 }
 
@@ -72,6 +73,7 @@ export interface StatusResponse {
   next_run: string | null
   job_running: boolean
   running_kind?: 'cycle' | 'gc' | 'verify' | null
+  running_run_id?: number | null
   pbs_online: boolean
   last_run: RunSummary | null
   datastore: DatastoreInfo | null
@@ -90,7 +92,6 @@ export interface GuestInfo {
 
 export interface GuestsConfig {
   mode: 'all' | 'include' | 'exclude'
-  auto_include_new: boolean
   list: number[]
 }
 

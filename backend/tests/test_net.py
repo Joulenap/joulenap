@@ -36,6 +36,22 @@ def test_wait_until_reachable_succeeds_after_retries():
     assert calls["n"] == 3
 
 
+def test_wait_until_reachable_gives_up_immediately_when_cancelled():
+    # A cancelled run must not sit through the full wake timeout (11.2). Reported as False,
+    # same as a timeout, because "the PBS isn't up" is the state the caller has to handle.
+    with mock.patch("socket.create_connection", side_effect=OSError("down")) as sock:
+        ok = wait_until_reachable(
+            "10.0.0.12",
+            8007,
+            timeout=600,
+            interval=0,
+            sleep=lambda _s: None,
+            should_cancel=lambda: True,
+        )
+    assert ok is False
+    assert sock.call_count == 0  # bailed before even trying to connect
+
+
 def test_wait_until_reachable_times_out():
     with mock.patch("socket.create_connection", side_effect=OSError("down")):
         ok = wait_until_reachable(

@@ -116,7 +116,6 @@ class PbsConfig(_Base):
 
 class GuestsConfig(_Base):
     mode: Literal["all", "include", "exclude"] = "all"
-    auto_include_new: bool = True
     # Field name matches the YAML key. ``typing.List`` (not ``list[int]``) avoids the
     # field name shadowing the builtin during Python 3.14 deferred annotation eval.
     list: List[int] = Field(default_factory=list)  # noqa: UP006
@@ -232,6 +231,23 @@ class Config(_Base):
 # --- load / save / redact ----------------------------------------------------
 
 
+def _drop_legacy_keys(raw: dict[str, Any]) -> None:
+    """Strip keys removed in a later version, in place, before validation.
+
+    ``_Base`` forbids extra keys, so a field we delete from the schema would make every
+    existing ``config.yaml`` fail at startup — the app wouldn't boot after a container pull
+    (the BE-B1 lesson: never brick the app on load). Dropping the key here keeps the old file
+    valid; the next save rewrites it without the key.
+
+    Removed in 0.6.0: ``backup.guests.auto_include_new`` — it never had any effect. Include
+    mode is an explicit list; ``all`` and ``exclude`` already cover newly created guests.
+    """
+    backup = raw.get("backup")
+    guests = backup.get("guests") if isinstance(backup, dict) else None
+    if isinstance(guests, dict):
+        guests.pop("auto_include_new", None)
+
+
 def load_config(path: Path | None = None) -> Config:
     """Read and validate ``config.yaml``. Raises with a clear message if missing/invalid."""
     p = path or paths.config_path()
@@ -243,6 +259,7 @@ def load_config(path: Path | None = None) -> Config:
         raw = yaml.safe_load(fh) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Config at {p} must be a YAML mapping, got {type(raw).__name__}.")
+    _drop_legacy_keys(raw)
     return Config.model_validate(raw)
 
 

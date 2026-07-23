@@ -352,6 +352,40 @@ def test_gc_run_records(app_ctx):
     assert _wait_run(client, run_id)["kind"] == "gc"
 
 
+def test_cancel_asks_the_service_to_stop_that_run(app_ctx):
+    client, app = app_ctx
+    seen = {}
+
+    def fake_cancel(run_id, *, power_off=False):
+        seen["args"] = (run_id, power_off)
+        return True
+
+    app.state.job_service.cancel = fake_cancel
+
+    r = client.post("/api/jobs/cancel", json={"run_id": 7, "power_off": True})
+    assert r.status_code == 202
+    assert r.json() == {"run_id": 7}
+    assert seen["args"] == (7, True)
+
+
+def test_cancel_defaults_to_leaving_the_pbs_on(app_ctx):
+    client, app = app_ctx
+    seen = {}
+    app.state.job_service.cancel = lambda run_id, *, power_off=False: seen.update(
+        power_off=power_off
+    ) or True
+
+    client.post("/api/jobs/cancel", json={"run_id": 7})
+    assert seen["power_off"] is False
+
+
+def test_cancel_conflicts_when_that_run_is_not_in_flight(app_ctx):
+    # e.g. the click landed just after the run finished — 409, not a silent no-op.
+    client, app = app_ctx
+    app.state.job_service.cancel = lambda run_id, *, power_off=False: False
+    assert client.post("/api/jobs/cancel", json={"run_id": 7}).status_code == 409
+
+
 def test_backup_run_conflict_when_busy(app_ctx):
     client, app = app_ctx
 
@@ -368,6 +402,19 @@ def test_backup_run_conflict_when_busy(app_ctx):
 def test_run_not_found(app_ctx):
     client, _app = app_ctx
     assert client.get("/api/runs/999999").status_code == 404
+
+
+def test_run_summary_carries_guests_ok(app_ctx):
+    # The history table shows how many guests a run backed up, so the summary (not just the
+    # detail) has to carry it — /api/runs is the only request that view makes per poll.
+    client, app = app_ctx
+    _inject(app, reachable=True)
+    run_id = client.post("/api/backup/run").json()["run_id"]
+    _wait_run(client, run_id)
+
+    summary = next(r for r in client.get("/api/runs").json() if r["id"] == run_id)
+    assert summary["guests_ok"] == client.get(f"/api/runs/{run_id}").json()["guests_ok"]
+    assert summary["guests_ok"] is not None
 
 
 def test_tasklog_empty_when_nothing_ran(app_ctx):

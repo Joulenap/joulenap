@@ -6,6 +6,7 @@ from fakes import FakePbs, FakePower, FakePve, make_deps
 from sqlalchemy import select
 
 from app.config import Config
+from app.connectors.errors import ConnectorError
 from app.connectors.pve import Guest
 from app.db import session_scope
 from app.db.models import (
@@ -541,3 +542,88 @@ def test_failed_cycle_notifies_with_failure_content(temp_db):
     # Failure title (not the success one); body surfaces the recorded error.
     assert captured["title"] == _pack(cfg.app.language)["failure"]["title"]
     assert captured["run"].error in captured["body"]
+
+
+# --- cancellation (11.2) -----------------------------------------------------
+
+
+def _cancelled_deps(*, power_off: bool = False, **kw):
+    """Deps whose cancel flag is already set, so the first task wait bails out."""
+    deps, pve, pbs, power = make_deps(**kw)
+    deps.cancelled = lambda: True
+    deps.cancel_power_off = lambda: power_off
+    return deps, pve, pbs, power
+
+
+def test_cancel_stops_the_remote_vzdump_task(temp_config, temp_db):
+    # Abandoning the wait isn't enough: vzdump would keep running on PVE while Joulenap
+    # considers itself idle, and the next run would collide with it.
+    deps, pve, _pbs, power = _cancelled_deps()
+    run_id = _run(_config(), deps)
+
+    assert pve.stopped == ["UPID:pve:backup"]
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.status == RunStatus.ABORTED
+        assert run.error == "Cancelled by user"
+    assert power.powered_off is False  # default: leave the box on
+
+
+def test_cancel_powers_off_when_the_stop_dialog_asked_for_it(temp_config, temp_db):
+    deps, _pve, _pbs, power = _cancelled_deps(power_off=True)
+    _run(_config(), deps)
+    assert power.powered_off is True
+
+
+def test_cancel_before_the_pbs_wakes_does_not_try_to_power_off(temp_config, temp_db):
+    # Cancelling during the wake wait: the box may never have come up, so an SSH poweroff
+    # would just fail and leave a spurious failed step on the run.
+    deps, _pve, _pbs, power = _cancelled_deps(power_off=True, reachable=False)
+    run_id = _run(_config(), deps)
+
+    assert power.powered_off is False
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.status == RunStatus.ABORTED
+        steps = {s.name: s for s in run.steps}
+        assert StepName.POWEROFF not in steps
+        assert steps[StepName.WAIT].status != StepStatus.SUCCESS
+
+
+def test_cancel_does_not_notify(temp_config, temp_db):
+    # The user pressed Stop and is standing at the UI; a "backup aborted" push is noise.
+    sent = []
+    deps, _pve, _pbs, _power = _cancelled_deps(notify=lambda c, r, d=None: sent.append(r))
+    _run(_config(), deps)
+    assert sent == []
+
+
+def test_cancel_records_the_stop_in_the_activity_log(temp_config, temp_db):
+    deps, _pve, _pbs, _power = _cancelled_deps()
+    run_id = _run(_config(), deps)
+    with session_scope() as session:
+        messages = [
+            e.message
+            for e in session.scalars(select(LogEvent).where(LogEvent.run_id == run_id)).all()
+        ]
+    assert any("stop task" in m for m in messages)
+
+
+def test_cancel_still_ends_the_run_when_the_remote_stop_fails(temp_config, temp_db):
+    # A refused stop must not leave the lock held — that failure mode *is* finding 11.2.
+    deps, pve, _pbs, _power = _cancelled_deps()
+
+    def boom(_upid):
+        raise ConnectorError("403 no permission")
+
+    pve.stop_task = boom
+    run_id = _run(_config(), deps)
+
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.status == RunStatus.ABORTED
+        messages = [
+            e.message
+            for e in session.scalars(select(LogEvent).where(LogEvent.run_id == run_id)).all()
+        ]
+    assert any("could not stop" in m for m in messages)

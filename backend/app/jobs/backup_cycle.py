@@ -10,7 +10,10 @@ power-off step simply never runs.
 
 from __future__ import annotations
 
+from typing import Any, Protocol
+
 from ..config import Config
+from ..connectors.errors import TaskCancelled
 from ..connectors.pbs import DatastoreStatus
 from ..connectors.pve import PveClient, build_prune_string
 from ..db import session_scope
@@ -43,6 +46,56 @@ def _tailer(recorder: RunRecorder, step: StepName, source: str):
 
 class CycleAbort(Exception):
     """Raised when the PBS doesn't come up — the cycle aborts without powering off."""
+
+
+class CycleCancelled(Exception):
+    """Raised when the user stopped the run from the UI (11.2).
+
+    Separate from :class:`CycleAbort` so the run records *why* it ended and the power-off
+    decision follows what the user chose in the stop dialog rather than the abort rules.
+    """
+
+
+class _TaskClient(Protocol):
+    """The slice of PveClient/PbsClient that :func:`_wait_or_stop` needs."""
+
+    def wait_task(self, upid: str, *args: Any, **kwargs: Any) -> dict[str, Any]: ...
+    def stop_task(self, upid: str) -> None: ...
+
+
+def _wait_or_stop(
+    client: _TaskClient,
+    upid: str,
+    recorder: RunRecorder,
+    deps: CycleDeps,
+    step: StepName,
+    source: str,
+) -> None:
+    """Wait for a PVE/PBS task, stopping it remotely if the user cancels the run.
+
+    Abandoning the wait isn't enough: the vzdump/GC would keep running on the far side while
+    Joulenap considers itself idle, and the next run would collide with it. The stop is
+    best-effort — if the API refuses, the run still ends cancelled and the reason is logged,
+    because leaving the lock held would be the worse failure (that is the whole point of 11.2).
+    """
+    try:
+        client.wait_task(
+            upid,
+            poll_interval=_TAIL_INTERVAL,
+            on_log=_tailer(recorder, step, source),
+            should_cancel=deps.cancelled,
+        )
+    except TaskCancelled as exc:
+        try:
+            client.stop_task(upid)
+            recorder.log(LogLevel.WARN, f"cancelled: asked {source.upper()} to stop task {upid}")
+        except Exception as stop_exc:
+            recorder.log(
+                LogLevel.ERROR,
+                f"cancelled, but could not stop {source.upper()} task {upid}: {stop_exc} "
+                "— check it on the server",
+            )
+        raise CycleCancelled("Run cancelled") from exc
 
 
 def select_vmids(config: Config, pve: PveClient) -> tuple[list[int] | None, bool]:
@@ -79,11 +132,7 @@ def _run_backup_step(config: Config, recorder: RunRecorder, deps: CycleDeps) -> 
                 bwlimit=config.backup.bwlimit,
             )
             step.detail = upid
-            pve.wait_task(
-                upid,
-                poll_interval=_TAIL_INTERVAL,
-                on_log=_tailer(recorder, StepName.BACKUP, "pve"),
-            )
+            _wait_or_stop(pve, upid, recorder, deps, StepName.BACKUP, "pve")
             # Record the count only once the task succeeded, so a failed run doesn't
             # advertise guests as backed up.
             recorder.run.guests_ok = guest_count
@@ -120,11 +169,7 @@ def run_gc_step(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
         with deps.build_pbs(config) as pbs:
             upid = pbs.start_gc()
             step.detail = upid
-            pbs.wait_task(
-                upid,
-                poll_interval=_TAIL_INTERVAL,
-                on_log=_tailer(recorder, StepName.GC, "pbs"),
-            )
+            _wait_or_stop(pbs, upid, recorder, deps, StepName.GC, "pbs")
 
 
 def run_verify_step(
@@ -143,11 +188,7 @@ def run_verify_step(
             else:
                 upid = pbs.start_verify(ignore_verified=True, outdated_after=outdated_after)
             step.detail = upid
-            pbs.wait_task(
-                upid,
-                poll_interval=_TAIL_INTERVAL,
-                on_log=_tailer(recorder, StepName.VERIFY, "pbs"),
-            )
+            _wait_or_stop(pbs, upid, recorder, deps, StepName.VERIFY, "pbs")
 
 
 def _wait_for_pbs(config: Config, recorder: RunRecorder, deps: CycleDeps) -> bool:
@@ -161,8 +202,12 @@ def _wait_for_pbs(config: Config, recorder: RunRecorder, deps: CycleDeps) -> boo
     p = config.pbs
     attempts = p.wol_retries + 1
     for attempt in range(1, attempts + 1):
-        if deps.wait_reachable(config):
+        if deps.wait_reachable(config, deps.cancelled):
             return True
+        # A cancelled wait returns False like a timeout does, so check *why* before
+        # burning the remaining wake attempts on a run the user already stopped.
+        if deps.cancelled():
+            raise CycleCancelled("Run cancelled while waiting for the PBS")
         if attempt < attempts:
             recorder.log(
                 LogLevel.WARN,
@@ -256,6 +301,25 @@ def _poweroff(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
             recorder.log(LogLevel.WARN, f"power-off failed, PBS left on: {exc}")
 
 
+def _finish_cancelled(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
+    """Close out a run the user stopped: record it ABORTED, and honour the power-off choice
+    from the stop dialog.
+
+    Power off only when the user asked *and* the WAIT step actually succeeded — cancelling
+    during the wake wait means the box may never have come up, so an SSH power-off would just
+    fail and muddy the run with a spurious failed step. ``_poweroff`` waits for the PBS to go
+    idle first, which also gives the task we just stopped time to unwind.
+    """
+    woke = any(
+        s.name == StepName.WAIT and s.status == StepStatus.SUCCESS for s in recorder.run.steps
+    )
+    if deps.cancel_power_off() and woke:
+        _poweroff(config, recorder, deps)
+    elif woke:
+        recorder.skip_step(StepName.POWEROFF, "cancelled; PBS left on")
+    recorder.finish(RunStatus.ABORTED, error="Cancelled by user")
+
+
 def _finish_power(
     config: Config, recorder: RunRecorder, deps: CycleDeps, *, power_off: bool
 ) -> None:
@@ -290,10 +354,18 @@ def run_backup_cycle(
         _preflight_step(config, recorder, deps)
         _run_backup_step(config, recorder, deps)
 
+        # A cancel that lands between steps must not start the next one — the task waits
+        # check the flag themselves, this covers the gaps between them.
+        if deps.cancelled():
+            raise CycleCancelled("Run cancelled")
+
         if config.maintenance.gc.enabled:
             run_gc_step(config, recorder, deps)
         else:
             recorder.skip_step(StepName.GC, "GC disabled")
+
+        if deps.cancelled():
+            raise CycleCancelled("Run cancelled")
 
         # Quick verify of just this run's new snapshots, while the PBS is still awake.
         if config.maintenance.verify.after_backup:
@@ -308,6 +380,11 @@ def run_backup_cycle(
         _finish_power(config, recorder, deps, power_off=power_off)
 
         recorder.finish(RunStatus.SUCCESS)
+    except CycleCancelled:
+        # No notification: the user pressed Stop and is standing at the UI — a "backup
+        # aborted" push would just be noise about their own click.
+        _finish_cancelled(config, recorder, deps)
+        return
     except CycleAbort as exc:
         recorder.finish(RunStatus.ABORTED, error=str(exc))
     except Exception as exc:  # connector/task failures: leave PBS on, mark failed
@@ -343,6 +420,11 @@ def run_verify_cycle(
         _finish_power(config, recorder, deps, power_off=power_off)
 
         recorder.finish(RunStatus.SUCCESS)
+    except CycleCancelled:
+        # No notification: the user pressed Stop and is standing at the UI — a "backup
+        # aborted" push would just be noise about their own click.
+        _finish_cancelled(config, recorder, deps)
+        return
     except CycleAbort as exc:
         recorder.finish(RunStatus.ABORTED, error=str(exc))
     except Exception as exc:  # connector/task failures: leave PBS on, mark failed
@@ -377,6 +459,11 @@ def run_gc_cycle(
         _finish_power(config, recorder, deps, power_off=power_off)
 
         recorder.finish(RunStatus.SUCCESS)
+    except CycleCancelled:
+        # No notification: the user pressed Stop and is standing at the UI — a "backup
+        # aborted" push would just be noise about their own click.
+        _finish_cancelled(config, recorder, deps)
+        return
     except CycleAbort as exc:
         recorder.finish(RunStatus.ABORTED, error=str(exc))
     except Exception as exc:  # connector/task failures: leave PBS on, mark failed

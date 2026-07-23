@@ -67,9 +67,11 @@ def _send_wol(config: Config) -> None:
     send_magic_packet(p.mac, broadcast=dest, source_ip=source_ip)
 
 
-def _wait_reachable(config: Config) -> bool:
+def _wait_reachable(config: Config, should_cancel: Callable[[], bool] | None = None) -> bool:
     p = config.pbs
-    return net.wait_until_reachable(p.host, p.port, timeout=p.wait_timeout)
+    return net.wait_until_reachable(
+        p.host, p.port, timeout=p.wait_timeout, should_cancel=should_cancel
+    )
 
 
 def _wait_pbs_idle(config: Config) -> bool:
@@ -89,9 +91,16 @@ class CycleDeps:
     build_pbs: Callable[[Config], PbsClient]
     build_power: Callable[[Config], PbsPower]
     send_wol: Callable[[Config], None]
-    wait_reachable: Callable[[Config], bool]
+    wait_reachable: Callable[..., bool]
     wait_pbs_idle: Callable[[Config], bool]
     notify: Callable[[Config, Run, DatastoreStatus | None], None]
+    # True once the user has asked to stop the in-flight run. Wired by JobService to its own
+    # cancel event and read live, so the cycle can check it without knowing about the service.
+    # Default: nothing ever cancels (tests and direct callers that don't care).
+    cancelled: Callable[[], bool] = lambda: False
+    # Whether that cancel asked for the PBS to be powered off afterwards (the toggle in the
+    # stop dialog). Only meaningful once ``cancelled()`` is True.
+    cancel_power_off: Callable[[], bool] = lambda: False
 
     @classmethod
     def default(cls) -> CycleDeps:

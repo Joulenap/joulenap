@@ -12,6 +12,8 @@ import type {
   NetInterface,
   PbsDerive,
   PveConnectResult,
+  RunDetail,
+  RunSummary,
   StatusResponse,
   TaskLogResponse,
   UserInfo,
@@ -79,7 +81,7 @@ const CONFIG: Config = {
     mode: 'snapshot',
     bwlimit: 0,
     min_free_percent: 10,
-    guests: { mode: 'include', auto_include_new: false, list: [100, 102] },
+    guests: { mode: 'include', list: [100, 102] },
     retention: { keep_last: 0, keep_daily: 7, keep_weekly: 4, keep_monthly: 6, keep_yearly: 0 },
   },
   maintenance: {
@@ -120,6 +122,7 @@ const STATUS: StatusResponse = {
     status: 'ok',
     started_at: '2026-07-08T02:30:00Z',
     finished_at: '2026-07-08T02:41:12Z',
+    guests_ok: 4,
     error: null,
   },
   datastore: { used: 1_800_000_000_000, total: 2_800_000_000_000, used_pct: 63 },
@@ -152,6 +155,88 @@ const LOGS: LogLine[] = [
 ]
 
 const TASKLOG: TaskLogResponse = { lines: [], run_id: null }
+
+// Run history: one of each outcome, so the table's badges, the inline error and the
+// still-running row (no finished_at -> elapsed duration) can all be seen without a backend.
+const RUNS: RunSummary[] = [
+  {
+    id: 45,
+    kind: 'cycle',
+    trigger: 'manual',
+    status: 'running',
+    started_at: '2026-07-09T21:28:40Z',
+    finished_at: null,
+    guests_ok: null,
+    error: null,
+  },
+  {
+    id: 44,
+    kind: 'verify',
+    trigger: 'scheduled',
+    status: 'success',
+    started_at: '2026-07-09T04:00:00Z',
+    finished_at: '2026-07-09T04:06:31Z',
+    guests_ok: null,
+    error: null,
+  },
+  {
+    id: 43,
+    kind: 'cycle',
+    trigger: 'scheduled',
+    status: 'failure',
+    started_at: '2026-07-08T22:30:00Z',
+    finished_at: '2026-07-08T22:30:46Z',
+    guests_ok: null,
+    error: 'vzdump exited with code 255: no space left on device',
+  },
+  {
+    id: 42,
+    kind: 'cycle',
+    trigger: 'scheduled',
+    status: 'success',
+    started_at: '2026-07-08T02:30:00Z',
+    finished_at: '2026-07-08T02:41:12Z',
+    guests_ok: 4,
+    error: null,
+  },
+  {
+    id: 41,
+    kind: 'gc',
+    trigger: 'manual',
+    status: 'aborted',
+    started_at: '2026-07-07T19:05:00Z',
+    finished_at: '2026-07-07T19:08:02Z',
+    guests_ok: null,
+    error: 'PBS did not come up within 180s',
+  },
+]
+
+const RUN_DETAIL: Record<number, RunDetail> = {
+  43: {
+    ...RUNS[2],
+    steps: [
+      { name: 'wake', status: 'success', started_at: '2026-07-08T22:30:00Z', finished_at: '2026-07-08T22:30:02Z', detail: null },
+      { name: 'wait', status: 'success', started_at: '2026-07-08T22:30:02Z', finished_at: '2026-07-08T22:30:43Z', detail: 'reachable after 41s' },
+      { name: 'backup', status: 'failure', started_at: '2026-07-08T22:30:43Z', finished_at: '2026-07-08T22:30:46Z', detail: 'vzdump exit 255' },
+    ],
+    logs: [
+      { id: 91, run_id: 43, ts: '2026-07-08T22:30:43Z', level: 'INFO', message: 'Starting vzdump for 4 guests' },
+      { id: 92, run_id: 43, ts: '2026-07-08T22:30:46Z', level: 'ERROR', message: 'vzdump failed: no space left on device' },
+    ],
+  },
+  42: {
+    ...RUNS[3],
+    steps: [
+      { name: 'wake', status: 'success', started_at: '2026-07-08T02:30:00Z', finished_at: '2026-07-08T02:30:02Z', detail: null },
+      { name: 'backup', status: 'success', started_at: '2026-07-08T02:30:40Z', finished_at: '2026-07-08T02:40:05Z', detail: '4 guests' },
+      { name: 'gc', status: 'success', started_at: '2026-07-08T02:40:05Z', finished_at: '2026-07-08T02:41:00Z', detail: null },
+      { name: 'poweroff', status: 'success', started_at: '2026-07-08T02:41:00Z', finished_at: '2026-07-08T02:41:12Z', detail: null },
+    ],
+    logs: [
+      { id: 80, run_id: 42, ts: '2026-07-08T02:41:12Z', level: 'OK', message: 'Backup finished, 4 guests' },
+    ],
+  },
+}
 
 // --- setup wizard fixtures ---------------------------------------------------
 // Lets the wizard advance card-by-card with no backend: connecting PVE returns a node
@@ -263,7 +348,6 @@ backup:
   min_free_percent: 10
   guests:
     mode: all
-    auto_include_new: true
     list: []
   retention:
     keep_last: 0
@@ -288,10 +372,10 @@ notifications:
 `
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '0.5.0-stub' },
+  'GET /health': { status: 'ok', version: '0.6.0-stub' },
   'GET /update': {
-    current: '0.5.0-stub',
-    latest: '0.5.0',
+    current: '0.6.0-stub',
+    latest: '0.6.0',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },
@@ -304,6 +388,8 @@ const ROUTES: Record<string, unknown> = {
   'PUT /config/yaml': CONFIG,
   'GET /guests': GUESTS,
   'GET /tasklog': TASKLOG,
+  'GET /runs': RUNS,
+  'POST /jobs/cancel': { run_id: 45 },
   'POST /wizard/pve/connect': WIZARD_PVE_CONNECT,
   'POST /wizard/storage/derive': WIZARD_STORAGE_DERIVE,
   'POST /wizard/pbs/check': WIZARD_PBS_CHECK,
@@ -331,6 +417,15 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   let body: unknown = ROUTES[key]
   if (body === undefined && key.startsWith('GET /logs')) body = LOGS
   if (body === undefined && bare === '/logs') body = LOGS
+  // ROUTES is keyed on exact paths, so /runs/{id} needs its own match.
+  const runId = method === 'GET' ? /^\/runs\/(\d+)$/.exec(bare)?.[1] : undefined
+  if (runId !== undefined) {
+    body = RUN_DETAIL[Number(runId)] ?? {
+      ...(RUNS.find((r) => r.id === Number(runId)) ?? RUNS[0]),
+      steps: [],
+      logs: [],
+    }
+  }
   if (body === undefined) body = { ok: true }
 
   return new Response(JSON.stringify(body), {

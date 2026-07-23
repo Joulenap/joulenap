@@ -23,6 +23,19 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
         "success": {"title": "✅ Joulenap — backup succeeded"},
         "failure": {"title": "❌ Joulenap — backup failed"},
         "aborted": {"title": "⚠️ Joulenap — backup aborted"},
+        # Per-kind titles for the non-backup cycles (see _title_for). Full strings rather
+        # than a "{noun} succeeded" template: Italian needs gender agreement (backup
+        # riuscito / verifica riuscita), which a noun slot can't express.
+        "gc": {
+            "success": "✅ Joulenap — garbage collection succeeded",
+            "failure": "❌ Joulenap — garbage collection failed",
+            "aborted": "⚠️ Joulenap — garbage collection aborted",
+        },
+        "verify": {
+            "success": "✅ Joulenap — verification succeeded",
+            "failure": "❌ Joulenap — verification failed",
+            "aborted": "⚠️ Joulenap — verification aborted",
+        },
         "missed": {
             "title": "⚠️ Joulenap — missed scheduled backup",
             "intro": "A scheduled backup was skipped because Joulenap was offline when it "
@@ -53,6 +66,16 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
         "success": {"title": "✅ Joulenap — backup riuscito"},
         "failure": {"title": "❌ Joulenap — backup fallito"},
         "aborted": {"title": "⚠️ Joulenap — backup interrotto"},
+        "gc": {
+            "success": "✅ Joulenap — garbage collection riuscita",
+            "failure": "❌ Joulenap — garbage collection fallita",
+            "aborted": "⚠️ Joulenap — garbage collection interrotta",
+        },
+        "verify": {
+            "success": "✅ Joulenap — verifica riuscita",
+            "failure": "❌ Joulenap — verifica fallita",
+            "aborted": "⚠️ Joulenap — verifica interrotta",
+        },
         "missed": {
             "title": "⚠️ Joulenap — backup pianificato mancato",
             "intro": "Un backup pianificato è stato saltato perché Joulenap era offline "
@@ -91,6 +114,17 @@ _STATUS_EVENT = {
 
 def _pack(language: str) -> dict[str, dict[str, str]]:
     return _MESSAGES.get(language, _MESSAGES["en"])
+
+
+def _title_for(pack: dict[str, dict[str, str]], kind: str, event: str) -> str:
+    """Title for a finished run, worded for the kind of cycle it was.
+
+    A GC or verify cycle reports its own outcome instead of borrowing the backup wording (a
+    scheduled verify failure used to notify "backup failed"). Anything without its own block
+    — a normal backup cycle, or a kind added later — falls back to the backup title, so a new
+    ``RunKind`` degrades to today's behaviour instead of raising.
+    """
+    return pack.get(kind, {}).get(event) or pack[event]["title"]
 
 
 def _format_duration(seconds: float) -> str:
@@ -165,7 +199,7 @@ def build_run_message(
     if _pbs_left_on(run):
         lines.append(labels["pbs_left_on"])
 
-    return pack[event]["title"], "\n".join(lines)
+    return _title_for(pack, run.kind, event), "\n".join(lines)
 
 
 def _format_dt(dt: datetime | None) -> str:

@@ -12,6 +12,9 @@ export function Toggle({ on, onClick, size = 'lg' }: ToggleProps) {
   const knob = size === 'lg' ? 16 : 12
   return (
     <button
+      type="button"
+      role="switch"
+      aria-checked={on}
       onClick={onClick}
       style={{
         width: w,

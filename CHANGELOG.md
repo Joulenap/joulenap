@@ -7,6 +7,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0]
+
+### Added
+
+- **Run history in the interface** — the activity card now has two tabs. Alongside the familiar
+  activity log there is a Run history table listing every run with its job type, what triggered it,
+  the result, how long it took and how many guests it covered. Clicking a run expands it in place to
+  show each step (wake, wait, backup, garbage collection, verify, power-off) with its own duration
+  and outcome, plus that run's log lines. Failures show their error without expanding. The history
+  is kept for as long as `maintenance.history.retention_days`, which the panel states.
+- **Stop a running job** — the Run backup and Run GC buttons turn into a Stop button while a job is
+  in progress, with a confirmation dialog that can also power the PBS off once the job has stopped.
+  Stopping also cancels the underlying task on the Proxmox side, so a cancelled backup does not keep
+  running on the server after Joulenap has stopped watching it. A scheduled verify can be stopped
+  the same way. Previously a stuck backup or an unreachable PBS blocked every later job — and manual
+  power-off — until the container was restarted.
+- **Prometheus metrics for Grafana** — a new `/metrics` endpoint, protected by the same read-only
+  API key as the dashboard integration, exposing PBS power state, scheduler state, the last run's
+  result and duration, datastore usage, run counts, and the last backup time of every individual
+  guest. Scraping never wakes the PBS, and cached values keep reporting while it sleeps. This makes
+  it possible to alert on a guest quietly dropping out of your backup set; `docs/INTEGRATIONS.md`
+  has the scrape configuration, the full metric list, example queries and ready-made alert rules.
+
+### Changed
+
+- **Notifications name the job that ran.** A scheduled verification or a garbage-collection run that
+  failed used to notify "backup failed"; each job type now reports its own outcome, in English and
+  Italian.
+- **Removed the `backup.guests.auto_include_new` setting.** It never had any effect, while its name
+  and default implied newly created guests were picked up automatically. Existing configuration
+  files keep working — the key is ignored and dropped on the next save. The behaviour it seemed to
+  promise is what "all" and "exclude" mode already do; "include" mode is, and always was, an
+  explicit list. The documentation now says so.
+- **Documentation accuracy pass.** Corrected the guest-selection and garbage-collection
+  descriptions, the Proxmox VE token privilege list (which omitted `Datastore.Audit` and
+  `Datastore.Allocate`, so a manually created token would fail at prune time), the Proxmox Backup
+  Server token privileges, the supported-versions table, and the API reference, which was missing
+  several endpoints. Added a walkthrough of the Settings tabs to the install guide.
+
+### Fixed
+
+- Toggle switches are now announced correctly by screen readers, and can no longer submit a
+  surrounding form by accident.
+- Repaired three changelog comparison links that pointed at version tags which were never published.
+
 ## [0.5.0]
 
 ### Added
@@ -263,13 +308,14 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Joulenap/joulenap/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Joulenap/joulenap/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/Joulenap/joulenap/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/Joulenap/joulenap/compare/v0.4.2...v0.4.3
-[0.4.2]: https://github.com/Joulenap/joulenap/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/Joulenap/joulenap/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/Joulenap/joulenap/compare/v0.3.1...v0.4.0
+[0.4.2]: https://github.com/Joulenap/joulenap/compare/3f94413...v0.4.2
+[0.4.1]: https://github.com/Joulenap/joulenap/compare/340646b...3f94413
+[0.4.0]: https://github.com/Joulenap/joulenap/compare/v0.3.1...340646b
 [0.3.1]: https://github.com/Joulenap/joulenap/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Joulenap/joulenap/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Joulenap/joulenap/compare/v0.1.1...v0.2.0

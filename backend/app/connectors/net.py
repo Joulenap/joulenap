@@ -33,10 +33,18 @@ def wait_until_reachable(
     interval: float = 2.0,
     connect_timeout: float = 3.0,
     sleep: Callable[[float], None] = time.sleep,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> bool:
-    """Poll ``host:port`` until reachable or ``timeout`` elapses. Returns success."""
+    """Poll ``host:port`` until reachable or ``timeout`` elapses. Returns success.
+
+    ``should_cancel`` lets a user cancel abandon the wait early — it returns False like a
+    timeout would, since "the PBS never came up" is exactly the state the caller must handle.
+    Without it a cancelled run would sit here for the full wake timeout.
+    """
     deadline = time.monotonic() + timeout
     while True:
+        if should_cancel is not None and should_cancel():
+            return False
         if tcp_reachable(host, port, connect_timeout):
             return True
         if time.monotonic() >= deadline:

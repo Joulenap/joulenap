@@ -20,6 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__
 from .api import api_router
+from .api import metrics as metrics_api
 from .config import Config
 from .core.config_store import ConfigStore
 from .core.ratelimit import LoginRateLimiter
@@ -143,6 +144,9 @@ def create_app() -> FastAPI:
         return JSONResponse({"status": "ok", "version": __version__})
 
     app.include_router(api_router)
+    # Outside /api on purpose: /metrics is Prometheus's default metrics_path, so a scrape
+    # config needs no extra setting. Registered before the SPA mount so it isn't shadowed.
+    app.include_router(metrics_api.router)
     _mount_frontend(app)
     return app
 
