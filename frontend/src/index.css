@@ -51,13 +51,96 @@
   src: url('./assets/fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2');
 }
 
+/* Theme palettes. Dark is the default; index.html sets data-theme before first paint from
+   localStorage, and ConfigContext keeps it in sync with app.theme. Every color the app uses
+   must exist in BOTH blocks (test/theme-parity.test.js enforces it). */
+:root {
+  color-scheme: dark;
+  --jn-bg: #0f1216;
+  --jn-panel: #171b21;
+  --jn-panel-alt: #13171d;
+  --jn-border: #232a32;
+  --jn-border-soft: #1f262e;
+  --jn-input-bg: #0f1216;
+  --jn-input-border: #2b333c;
+  --jn-text: #e7eaee;
+  --jn-text-mid: #c4cad1;
+  --jn-text-dim: #8a929c;
+  --jn-text-faint: #7f8893;
+  --jn-text-muted: #5b636d;
+  --jn-accent: #e8830f;
+  --jn-accent-hover: #f5953a;
+  --jn-accent-ink: #1a1206;
+  --jn-green: #3fb27f;
+  --jn-red: #e5675b;
+  --jn-blue: #3b82f6;
+  --jn-amber: #e0a92b;
+  --jn-btn-bg: #1d232b;
+  --jn-btn-border: #262d35;
+  --jn-ghost-border: #3a434d;
+  --jn-divider: #1b212880;
+  --jn-hover: rgba(255, 255, 255, 0.035);
+  --jn-menu-bg: #161b22;
+  --jn-menu-border: #2c343d;
+  --jn-info: #8aa6c0;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --jn-bg: #f3f4f6;
+  --jn-panel: #ffffff;
+  --jn-panel-alt: #f7f8fa;
+  --jn-border: #dfe3e8;
+  --jn-border-soft: #e7ebef;
+  --jn-input-bg: #fbfcfd;
+  --jn-input-border: #cdd4db;
+  --jn-text: #1c2229;
+  --jn-text-mid: #3d454f;
+  --jn-text-dim: #5d6570;
+  --jn-text-faint: #6b747f;
+  --jn-text-muted: #98a1ab;
+  --jn-accent: #c86f06;
+  --jn-accent-hover: #b26305;
+  --jn-accent-ink: #1a1206;
+  --jn-green: #1e8a5c;
+  --jn-red: #c93f32;
+  --jn-blue: #2563eb;
+  --jn-amber: #9a7410;
+  --jn-btn-bg: #e9edf1;
+  --jn-btn-border: #d5dbe2;
+  --jn-ghost-border: #c3cad2;
+  --jn-divider: #dfe3e880;
+  --jn-hover: rgba(0, 0, 0, 0.04);
+  --jn-menu-bg: #ffffff;
+  --jn-menu-border: #dfe3e8;
+  --jn-info: #46688c;
+}
+
 * {
   box-sizing: border-box;
 }
+/* Present only for ~300ms while applyTheme() swaps palettes, so the theme cross-fades
+   without slowing normal interactions (hovers, pills) the rest of the time. `filter` is
+   included for the wordmark's white↔black swap. */
+html.theme-fade *,
+html.theme-fade *::before,
+html.theme-fade *::after {
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease,
+    border-color 0.3s ease,
+    filter 0.3s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-fade *,
+  html.theme-fade *::before,
+  html.theme-fade *::after {
+    transition: none;
+  }
+}
 body {
   margin: 0;
-  background: #0f1216;
-  color: #e7eaee;
+  background: var(--jn-bg);
+  color: var(--jn-text);
   font-family: 'IBM Plex Sans', system-ui, sans-serif;
 }
 @keyframes spin {
@@ -78,22 +161,32 @@ input[type='time']::-webkit-calendar-picker-indicator {
   filter: invert(0.7);
   cursor: pointer;
 }
+:root[data-theme='light'] input[type='time']::-webkit-calendar-picker-indicator {
+  filter: none;
+}
 input::placeholder {
-  color: #5b636d;
+  color: var(--jn-text-muted);
 }
 input:focus {
   outline: none;
-  border-color: #e8830f;
+  border-color: var(--jn-accent);
 }
 button {
   font-family: 'IBM Plex Sans', system-ui, sans-serif;
+}
+/* The wordmark SVG is ink-colored; dark mode forces it white, light mode forces it black. */
+.jn-header-wordmark {
+  filter: brightness(0) invert(1);
+}
+:root[data-theme='light'] .jn-header-wordmark {
+  filter: brightness(0);
 }
 ::-webkit-scrollbar {
   width: 9px;
   height: 9px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2b333c;
+  background: var(--jn-input-border);
   border-radius: 6px;
 }
 ::-webkit-scrollbar-track {

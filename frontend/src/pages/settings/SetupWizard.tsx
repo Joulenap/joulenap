@@ -37,7 +37,7 @@ const seg = (on: boolean): React.CSSProperties => ({
   flex: 1,
   textAlign: 'center',
   background: on ? c.accent : 'transparent',
-  color: on ? c.accentInk : '#9aa2ac',
+  color: on ? c.accentInk : c.textDim,
   border: 'none',
   borderRadius: 6,
   padding: '8px 16px',
@@ -48,9 +48,9 @@ const seg = (on: boolean): React.CSSProperties => ({
 })
 
 const orangeBtn = (enabled: boolean): React.CSSProperties => ({
-  background: enabled ? c.accent : '#1d232b',
+  background: enabled ? c.accent : c.btnBg,
   color: enabled ? c.accentInk : c.textMuted,
-  border: enabled ? 'none' : '1px solid #262d35',
+  border: enabled ? 'none' : `1px solid ${c.btnBorder}`,
   borderRadius: 7,
   padding: '9px 20px',
   fontSize: 13,
@@ -61,7 +61,7 @@ const orangeBtn = (enabled: boolean): React.CSSProperties => ({
 const ghost: React.CSSProperties = {
   background: 'transparent',
   color: c.textMid,
-  border: '1px solid #3a434d',
+  border: `1px solid ${c.ghostBorder}`,
   borderRadius: 7,
   padding: '9px 16px',
   fontSize: 13,
@@ -176,7 +176,7 @@ function CodeBlock({ text }: { text: string }) {
           background: c.inputBg,
           border: `1px solid ${c.border}`,
           borderRadius: 7,
-          color: '#9aa2ac',
+          color: c.textDim,
           padding: '10px 12px',
           fontFamily: mono,
           fontSize: 11,
@@ -201,7 +201,7 @@ function Why({ why, note }: { why: string; note?: string }) {
     <div style={{ marginTop: 4, fontSize: 12.5, color: c.textDim, lineHeight: 1.5 }}>
       <span>{why}</span>
       {note && (
-        <span style={{ display: 'block', marginTop: 4, color: '#8f98a2' }}>{note}</span>
+        <span style={{ display: 'block', marginTop: 4, color: c.textDim }}>{note}</span>
       )}
     </div>
   )
@@ -542,7 +542,7 @@ export function SetupWizard() {
           <Disclosure>
             <span style={{ fontSize: 12.5, color: c.textDim }}>{t('settings.setup.does.pve')}</span>
             <CodeBlock text={PVE_CLI} />
-            <span style={{ fontSize: 11.5, color: '#6f7884', lineHeight: 1.5 }}>{t('settings.setup.does.manualHint')}</span>
+            <span style={{ fontSize: 11.5, color: c.textFaint, lineHeight: 1.5 }}>{t('settings.setup.does.manualHint')}</span>
           </Disclosure>
         </div>
       )
@@ -588,7 +588,7 @@ export function SetupWizard() {
                 <Field label={t('settings.setup.fields.pbsRootUser')} value={w.pbsUser} onChange={(v) => patch({ pbsUser: v })} />
                 <Field label={t('settings.setup.fields.pbsRootPassword')} value={w.pbsPass} onChange={(v) => patch({ pbsPass: v })} type="password" monoFont={false} placeholder="••••••••" />
               </div>
-              <span style={{ fontSize: 11, color: '#6f7884' }}>{t('settings.setup.hints.pbsRoot')}</span>
+              <span style={{ fontSize: 11, color: c.textFaint }}>{t('settings.setup.hints.pbsRoot')}</span>
             </>
           )}
           <label style={{ display: 'block' }}>
@@ -597,7 +597,7 @@ export function SetupWizard() {
               {w.pbsFp || '—'}
             </div>
           </label>
-          {w.pbsFp && <span style={{ fontSize: 11, color: '#6f7884' }}>{t('settings.setup.hints.fingerprintPinned')}</span>}
+          {w.pbsFp && <span style={{ fontSize: 11, color: c.textFaint }}>{t('settings.setup.hints.fingerprintPinned')}</span>}
           <div>
             <button
               style={orangeBtn(!!w.pbsHost && (!rapido || !!w.pbsPass) && busy !== 'pbs')}
@@ -610,7 +610,7 @@ export function SetupWizard() {
           <Disclosure>
             <span style={{ fontSize: 12.5, color: c.textDim }}>{t('settings.setup.does.pbs')}</span>
             <CodeBlock text={pbsCli(w.pbsDatastore)} />
-            <span style={{ fontSize: 11.5, color: '#6f7884', lineHeight: 1.5 }}>{t('settings.setup.does.tighten')}</span>
+            <span style={{ fontSize: 11.5, color: c.textFaint, lineHeight: 1.5 }}>{t('settings.setup.does.tighten')}</span>
           </Disclosure>
         </div>
       )
@@ -634,7 +634,7 @@ export function SetupWizard() {
             </div>
             <Field label={t('settings.setup.fields.mac')} value={w.wolMac} onChange={(v) => patch({ wolMac: v })} width={220} />
           </div>
-          <span style={{ fontSize: 11, color: '#6f7884' }}>{t('settings.setup.hints.wolIface')}</span>
+          <span style={{ fontSize: 11, color: c.textFaint }}>{t('settings.setup.hints.wolIface')}</span>
           <div style={{ display: 'flex', gap: 10 }}>
             <button style={ghost} onClick={detectMac}>
               {busy === 'mac' ? t('settings.setup.buttons.detecting') : t('settings.setup.buttons.detectMac')}
@@ -662,7 +662,7 @@ export function SetupWizard() {
                 <span style={{ ...labelStyle, marginBottom: 0 }}>{t('settings.setup.fieldsAuthLine')}</span>
                 <CopyButton text={w.sshKeyLine} />
               </div>
-              <div style={{ background: c.inputBg, border: `1px solid ${c.border}`, borderRadius: 7, color: '#9aa2ac', padding: '10px 12px', fontFamily: mono, fontSize: 11, lineHeight: 1.5, wordBreak: 'break-all' }}>
+              <div style={{ background: c.inputBg, border: `1px solid ${c.border}`, borderRadius: 7, color: c.textDim, padding: '10px 12px', fontFamily: mono, fontSize: 11, lineHeight: 1.5, wordBreak: 'break-all' }}>
                 {w.sshKeyLine}
               </div>
             </div>
@@ -744,7 +744,7 @@ export function SetupWizard() {
             {t('settings.setup.subtitle')}
           </span>
         </div>
-        <span style={{ fontFamily: mono, fontSize: 11, fontWeight: 600, color: '#9aa2ac', background: c.inputBg, border: '1px solid #262d35', borderRadius: 7, padding: '6px 11px', whiteSpace: 'nowrap' }}>
+        <span style={{ fontFamily: mono, fontSize: 11, fontWeight: 600, color: c.textDim, background: c.inputBg, border: `1px solid ${c.btnBorder}`, borderRadius: 7, padding: '6px 11px', whiteSpace: 'nowrap' }}>
           {t('settings.setup.progress', { done: doneCount })}
         </span>
       </div>
@@ -767,7 +767,7 @@ export function SetupWizard() {
         <span style={{ display: 'block', fontSize: 12.5, color: c.textDim, lineHeight: 1.55 }}>
           {t('settings.setup.trust.body')}
         </span>
-        <span style={{ display: 'block', fontSize: 11.5, color: '#6f7884', marginTop: 7, fontFamily: mono }}>
+        <span style={{ display: 'block', fontSize: 11.5, color: c.textFaint, marginTop: 7, fontFamily: mono }}>
           {t('settings.setup.trust.source')}
         </span>
       </div>
@@ -808,7 +808,7 @@ export function SetupWizard() {
               key={i}
               style={{
                 background: c.panelAlt,
-                border: `1px solid ${act ? '#2c343d' : done ? 'rgba(63,178,127,.28)' : c.borderSoft}`,
+                border: `1px solid ${act ? c.menuBorder : done ? 'rgba(63,178,127,.28)' : c.borderSoft}`,
                 borderRadius: 10,
                 padding: '16px 18px',
                 opacity: locked ? 0.5 : 1,
@@ -828,7 +828,7 @@ export function SetupWizard() {
                     fontFamily: mono,
                     fontSize: 13,
                     fontWeight: 600,
-                    background: act ? c.accent : done ? 'rgba(63,178,127,.18)' : '#222a32',
+                    background: act ? c.accent : done ? 'rgba(63,178,127,.18)' : c.btnBg,
                     color: act ? c.accentInk : done ? c.green : c.textFaint,
                   }}
                 >
@@ -844,9 +844,9 @@ export function SetupWizard() {
                         fontWeight: 600,
                         padding: '2px 8px',
                         borderRadius: 999,
-                        color: act ? c.accent : done ? c.green : '#6f7884',
-                        background: act ? 'rgba(232,131,15,.14)' : done ? 'rgba(63,178,127,.14)' : 'rgba(255,255,255,.04)',
-                        border: `1px solid ${act ? 'rgba(232,131,15,.2)' : done ? 'rgba(63,178,127,.25)' : '#262d35'}`,
+                        color: act ? c.accent : done ? c.green : c.textFaint,
+                        background: act ? 'rgba(232,131,15,.14)' : done ? 'rgba(63,178,127,.14)' : c.hover,
+                        border: `1px solid ${act ? 'rgba(232,131,15,.2)' : done ? 'rgba(63,178,127,.25)' : c.btnBorder}`,
                       }}
                     >
                       {act ? t('settings.setup.inProgress') : done ? t('settings.setup.completed') : t('settings.setup.locked')}
@@ -884,9 +884,9 @@ export function SetupWizard() {
             const ok = w.checks[key]
             return (
               <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: ok ? c.green : '#6b7480', boxShadow: ok ? '0 0 0 3px rgba(63,178,127,.18)' : 'none', flex: '0 0 auto' }} />
-                <span style={{ fontSize: 13, color: ok ? '#cdd3da' : c.textDim }}>{label}</span>
-                <span style={{ fontFamily: mono, fontSize: 11, color: ok ? c.green : '#6f7884' }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: ok ? c.green : c.textFaint, boxShadow: ok ? '0 0 0 3px rgba(63,178,127,.18)' : 'none', flex: '0 0 auto' }} />
+                <span style={{ fontSize: 13, color: ok ? c.textMid : c.textDim }}>{label}</span>
+                <span style={{ fontFamily: mono, fontSize: 11, color: ok ? c.green : c.textFaint }}>
                   {ok ? t('settings.setup.ok') : t('settings.setup.pending')}
                 </span>
               </div>
@@ -907,7 +907,7 @@ export function SetupWizard() {
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             {saved && <span style={{ fontSize: 12, color: c.green }}>{t('settings.setup.saved')}</span>}
-            <button onClick={onSave} disabled={!canSave || busy === 'save'} style={{ ...primaryBtn, padding: '9px 22px', background: canSave ? c.accent : '#1d232b', color: canSave ? c.accentInk : c.textMuted, border: canSave ? 'none' : '1px solid #262d35', cursor: canSave ? 'pointer' : 'not-allowed' }}>
+            <button onClick={onSave} disabled={!canSave || busy === 'save'} style={{ ...primaryBtn, padding: '9px 22px', background: canSave ? c.accent : c.btnBg, color: canSave ? c.accentInk : c.textMuted, border: canSave ? 'none' : `1px solid ${c.btnBorder}`, cursor: canSave ? 'pointer' : 'not-allowed' }}>
               {t('settings.setup.save')}
             </button>
           </div>

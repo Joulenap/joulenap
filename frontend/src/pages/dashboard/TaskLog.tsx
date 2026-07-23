@@ -82,7 +82,7 @@ export function TaskLog({ lines, running, runId }: TaskLogProps) {
             </span>
           )}
         </span>
-        <span style={{ fontFamily: mono, fontSize: 11, color: '#6f7884' }}>
+        <span style={{ fontFamily: mono, fontSize: 11, color: c.textFaint }}>
           {t('dashboard.taskLines', { n: lines.length })}
         </span>
       </button>
@@ -127,7 +127,7 @@ export function TaskLog({ lines, running, runId }: TaskLogProps) {
               >
                 {l.step}
               </span>
-              <span style={{ color: '#c8cdd4', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <span style={{ color: c.textMid, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {l.text}
               </span>
             </div>

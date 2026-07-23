@@ -71,7 +71,7 @@ function RunDetailPanel({ detail }: { detail: RunDetail | null }) {
             <span style={{ ...badge, color: lvl.color, background: lvl.bg, flex: '0 0 auto' }}>
               {l.level}
             </span>
-            <span style={{ fontSize: 12, color: '#c8cdd4', minWidth: 0, overflowWrap: 'anywhere' }}>
+            <span style={{ fontSize: 12, color: c.textMid, minWidth: 0, overflowWrap: 'anywhere' }}>
               {l.message}
             </span>
           </div>
@@ -131,7 +131,7 @@ export function RunHistory({ runs, error }: { runs: RunSummary[]; error: boolean
           const open = openId === run.id
           const ms = runDurationMs(run)
           return (
-            <div key={run.id} style={{ borderBottom: '1px solid #1b212880' }}>
+            <div key={run.id} style={{ borderBottom: `1px solid ${c.divider}` }}>
               <button
                 type="button"
                 onClick={() => void toggle(run)}

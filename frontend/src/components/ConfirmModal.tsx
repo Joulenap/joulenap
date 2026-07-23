@@ -93,8 +93,8 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
         style={{
           width: 430,
           maxWidth: '100%',
-          background: '#191e25',
-          border: '1px solid #2c343d',
+          background: c.menuBg,
+          border: `1px solid ${c.menuBorder}`,
           borderRadius: 14,
           padding: 22,
           boxShadow: '0 24px 60px rgba(0,0,0,.5)',
@@ -119,7 +119,7 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
           </div>
           <span id={titleId} style={{ fontSize: 17, fontWeight: 700 }}>{state.title}</span>
         </div>
-        <p id={msgId} style={{ margin: '0 0 20px', fontSize: 14, lineHeight: 1.55, color: '#a8b0ba' }}>
+        <p id={msgId} style={{ margin: '0 0 20px', fontSize: 14, lineHeight: 1.55, color: c.textMid }}>
           {state.message}
         </p>
         {state.toggle && (
@@ -145,7 +145,7 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
             style={{
               background: 'transparent',
               color: c.textMid,
-              border: '1px solid #3a434d',
+              border: `1px solid ${c.ghostBorder}`,
               borderRadius: 8,
               padding: '9px 18px',
               fontSize: 13,

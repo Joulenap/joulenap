@@ -127,7 +127,7 @@ export function SchedulerCard({ enabled, onToggleEnabled, toggleError, draft, pa
               ] as const
             ).map(([lbl, key]) => (
               <label key={key} style={{ display: 'block', width: 92 }}>
-                <span style={{ display: 'block', fontSize: 11, color: '#9aa2ac', marginBottom: 5 }}>
+                <span style={{ display: 'block', fontSize: 11, color: c.textDim, marginBottom: 5 }}>
                   {t(`dashboard.${lbl}`)}
                 </span>
                 <input
@@ -163,7 +163,7 @@ export function SchedulerCard({ enabled, onToggleEnabled, toggleError, draft, pa
               onChange={(e) => patch({ wakeTimeout: toInt(e.target.value) })}
               style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: c.text, padding: '9px 11px', fontFamily: mono, fontSize: 14 }}
             />
-            <span style={{ fontFamily: mono, fontSize: 13, color: '#6f7884' }}>{t('dashboard.seconds')}</span>
+            <span style={{ fontFamily: mono, fontSize: 13, color: c.textFaint }}>{t('dashboard.seconds')}</span>
           </div>
         </label>
 
@@ -245,9 +245,9 @@ export function SchedulerCard({ enabled, onToggleEnabled, toggleError, draft, pa
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            background: dirty ? c.accent : '#1d232b',
+            background: dirty ? c.accent : c.btnBg,
             color: dirty ? c.accentInk : c.textMuted,
-            border: dirty ? 'none' : '1px solid #262d35',
+            border: dirty ? 'none' : `1px solid ${c.btnBorder}`,
             borderRadius: 8,
             padding: '11px 28px',
             fontSize: 13,

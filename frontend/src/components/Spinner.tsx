@@ -1,4 +1,4 @@
-import { c } from '../theme'
+import { c, tint } from '../theme'
 
 export function Spinner({ size = 16, color = c.accent }: { size?: number; color?: string }) {
   return (
@@ -7,7 +7,7 @@ export function Spinner({ size = 16, color = c.accent }: { size?: number; color?
         width: size,
         height: size,
         borderRadius: '50%',
-        border: `2px solid ${color}33`,
+        border: `2px solid ${tint(color, 20)}`,
         borderTopColor: color,
         animation: 'spin .7s linear infinite',
       }}

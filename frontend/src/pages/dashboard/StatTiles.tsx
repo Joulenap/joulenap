@@ -77,7 +77,7 @@ export function StatTiles({ status }: { status: StatusResponse | null }) {
       <Tile>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 9, alignItems: 'center' }}>
           <span style={{ ...tileLabel, marginBottom: 0 }}>{t('dashboard.diskSpace')}</span>
-          <span style={{ fontFamily: mono, fontSize: 12, color: '#9aa2ac' }}>
+          <span style={{ fontFamily: mono, fontSize: 12, color: c.textDim }}>
             {ds ? `${ds.used_pct}%` : '—'}
           </span>
         </div>

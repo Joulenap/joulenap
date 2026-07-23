@@ -4,7 +4,19 @@
     <meta charset="utf-8" />
     <link rel="icon" type="image/svg+xml" href="/assets/joulenap-icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f1216" />
     <title>Joulenap</title>
+    <script>
+      // Apply the persisted theme before first paint so a light-theme user never sees a
+      // dark flash (and vice versa). Config is the source of truth once loaded; this
+      // localStorage mirror only covers boot and the pre-login screen.
+      try {
+        if (localStorage.getItem('jnTheme') === 'light') {
+          document.documentElement.dataset.theme = 'light'
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f3f4f6')
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

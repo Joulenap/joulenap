@@ -6,7 +6,7 @@
 
 app:
   language: en              # UI language: en, it, ...
-  theme: dark               # reserved — the UI is dark-only today; this value is not read
+  theme: dark               # dark | light — also switchable from the header toggle
   port: 8080                # web UI port
   timezone: ""              # IANA tz for the scheduler, e.g. "Europe/Rome".
                             # Empty -> the TZ env var, then UTC. Set this (or TZ) or

@@ -21,7 +21,7 @@
   align-items: center;
   gap: 14px;
   margin-bottom: 18px;
-  border-bottom: 1px solid #20262e;
+  border-bottom: 1px solid var(--jn-border-soft);
 }
 .jn-header-brand {
   display: flex;
@@ -36,7 +36,9 @@
 }
 .jn-header-actions {
   display: flex;
-  align-items: center;
+  /* stretch, not center: the Logout button runs a smaller font than the icon buttons and
+     would otherwise render 3px shorter than its siblings */
+  align-items: stretch;
   gap: 14px;
 }
 .jn-header-icon {
