@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { api } from '../api/client'
 import type { Config } from '../api/types'
 import i18n from '../i18n'
+import { applyTheme, currentTheme } from '../theme'
 
 interface ConfigCtx {
   config: Config | null
@@ -19,6 +20,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const apply = (c: Config) => {
     setConfig(c)
     if (c.app?.language && i18n.language !== c.app.language) i18n.changeLanguage(c.app.language)
+    if (c.app?.theme && c.app.theme !== currentTheme()) applyTheme(c.app.theme)
   }
 
   const reload = useCallback(async () => {

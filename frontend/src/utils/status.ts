@@ -42,13 +42,13 @@ export interface RunStatusStyle {
   bg: string
 }
 
-// Palette hexes are inlined rather than imported from theme.ts so this module stays free of
-// React/CSS imports and can be unit-tested under `node --test`.
+// Palette vars are inlined rather than imported from theme.ts so this module stays free of
+// React/CSS imports and can be unit-tested under `node --test`. Must track theme.ts tokens.
 const RUN_STATUS: Record<string, RunStatusStyle> = {
-  success: { labelKey: 'dashboard.runSuccess', color: '#3fb27f', bg: 'rgba(63,178,127,.14)' },
-  failure: { labelKey: 'dashboard.runFailure', color: '#e5675b', bg: 'rgba(229,103,91,.14)' },
-  aborted: { labelKey: 'dashboard.runAborted', color: '#e0a92b', bg: 'rgba(224,169,43,.14)' },
-  running: { labelKey: 'dashboard.runRunning', color: '#3b82f6', bg: 'rgba(59,130,246,.14)' },
+  success: { labelKey: 'dashboard.runSuccess', color: 'var(--jn-green)', bg: 'rgba(63,178,127,.14)' },
+  failure: { labelKey: 'dashboard.runFailure', color: 'var(--jn-red)', bg: 'rgba(229,103,91,.14)' },
+  aborted: { labelKey: 'dashboard.runAborted', color: 'var(--jn-amber)', bg: 'rgba(224,169,43,.14)' },
+  running: { labelKey: 'dashboard.runRunning', color: 'var(--jn-blue)', bg: 'rgba(59,130,246,.14)' },
 }
 
 /** Badge styling + label key for a run or step status; unknown values read as running. */

@@ -59,7 +59,7 @@ export function HistoryCard({ logs }: { logs: LogLine[] }) {
           {tab('log', 'dashboard.activityLog')}
           {tab('runs', 'dashboard.runHistory')}
         </div>
-        <span style={{ fontFamily: mono, fontSize: 11, color: '#6f7884', flex: '0 0 auto' }}>
+        <span style={{ fontFamily: mono, fontSize: 11, color: c.textFaint, flex: '0 0 auto' }}>
           {view === 'log'
             ? t('dashboard.events', { n: logs.length })
             : t('dashboard.runsCount', { n: runs.length })}

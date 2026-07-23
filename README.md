@@ -51,7 +51,7 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 ## Status
 
-**v0.6.0.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
+**v0.7.0.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
 notifications + setup wizard, packaged as a Docker image — with transport hardening (PBS TLS
 pinning + SSH host-key verification) and auth hardening (login rate-limit, session hardening).
 Includes run history with per-step detail, the ability to stop a job mid-run,

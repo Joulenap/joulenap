@@ -37,12 +37,12 @@ function actionBtn(variant: 'primary' | 'ghost' | 'green' | 'red', enabled: bool
     cursor: enabled ? 'pointer' : 'not-allowed',
   }
   if (!enabled) {
-    return { ...base, background: '#1d232b', color: c.textMuted, border: '1px solid #262d35' }
+    return { ...base, background: c.btnBg, color: c.textMuted, border: `1px solid ${c.btnBorder}` }
   }
   if (variant === 'primary') return { ...base, background: c.accent, color: c.accentInk, border: 'none' }
-  if (variant === 'green') return { ...base, background: 'transparent', color: c.green, border: '1px solid #2f5e4b' }
-  if (variant === 'red') return { ...base, background: 'transparent', color: c.red, border: '1px solid #5e3330' }
-  return { ...base, background: 'transparent', color: c.text, border: '1px solid #3a434d' }
+  if (variant === 'green') return { ...base, background: 'transparent', color: c.green, border: '1px solid rgba(63,178,127,.35)' }
+  if (variant === 'red') return { ...base, background: 'transparent', color: c.red, border: '1px solid rgba(229,103,91,.35)' }
+  return { ...base, background: 'transparent', color: c.text, border: `1px solid ${c.ghostBorder}` }
 }
 
 export function ManualPanel({ status, error, onBackup, onGc, onStop, onPowerOn, onPowerOff }: Props) {

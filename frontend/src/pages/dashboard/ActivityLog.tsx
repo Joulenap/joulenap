@@ -5,7 +5,7 @@ import { fmtClock } from '../../utils/format'
 
 // Shared with RunHistory, which renders the same log lines nested inside an expanded run.
 export const LEVELS: Record<string, { color: string; bg: string }> = {
-  INFO: { color: '#8aa6c0', bg: 'rgba(138,166,192,.13)' },
+  INFO: { color: c.info, bg: 'rgba(138,166,192,.13)' },
   OK: { color: c.green, bg: 'rgba(63,178,127,.14)' },
   WARN: { color: c.amber, bg: 'rgba(224,169,43,.14)' },
   ERROR: { color: c.red, bg: 'rgba(229,103,91,.14)' },
@@ -16,7 +16,7 @@ export const colHead: React.CSSProperties = {
   fontWeight: 600,
   letterSpacing: '.06em',
   textTransform: 'uppercase',
-  color: '#6f7884',
+  color: c.textFaint,
 }
 
 // The flat activity stream. The surrounding panel, the view switch and the scroll container
@@ -46,7 +46,7 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
               style={{
                 alignItems: 'center',
                 padding: '7px 18px',
-                borderBottom: '1px solid #1b212880',
+                borderBottom: `1px solid ${c.divider}`,
               }}
             >
               <span style={{ fontFamily: mono, fontSize: 12, color: c.textFaint }}>{fmtClock(new Date(l.ts))}</span>
@@ -66,7 +66,7 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
                   {l.level}
                 </span>
               </span>
-              <span style={{ fontSize: 13, color: '#c8cdd4', minWidth: 0, overflowWrap: 'anywhere' }}>
+              <span style={{ fontSize: 13, color: c.textMid, minWidth: 0, overflowWrap: 'anywhere' }}>
                 {l.message}
               </span>
             </div>

@@ -229,9 +229,9 @@ export function Advanced() {
             style={{
               ...primaryBtn,
               padding: '10px 24px',
-              background: dirty ? c.accent : '#1d232b',
+              background: dirty ? c.accent : c.btnBg,
               color: dirty ? c.accentInk : c.textMuted,
-              border: dirty ? 'none' : '1px solid #262d35',
+              border: dirty ? 'none' : `1px solid ${c.btnBorder}`,
               cursor: dirty && !busy ? 'pointer' : 'not-allowed',
             }}
           >

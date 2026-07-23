@@ -61,7 +61,7 @@ export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
                 borderRadius: 8,
                 padding: '9px 11px',
                 cursor: 'pointer',
-                color: active ? '#f0f2f4' : c.textMid,
+                color: active ? c.text : c.textMid,
               }}
             >
               <span
@@ -78,7 +78,7 @@ export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
                   style={{
                     fontSize: 11,
                     fontWeight: 500,
-                    color: '#6f7884',
+                    color: c.textFaint,
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',

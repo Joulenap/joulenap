@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { StatusResponse } from '../api/types'
+import { useConfig } from '../config/ConfigContext'
 import { useClock } from '../hooks/useClock'
-import { c, mono } from '../theme'
+import { applyTheme, c, currentTheme, mono, tint } from '../theme'
 import { fmtClock } from '../utils/format'
 import { runningLabelKey } from '../utils/status'
 
@@ -24,13 +26,23 @@ function pill(status: StatusResponse | null, t: (k: string) => string) {
       sub: status.scheduler_enabled ? '' : t('status.timerDisabled'),
     }
   }
-  return { label: t('status.off'), color: '#6b7480', busy: false, sub: '' }
+  return { label: t('status.off'), color: c.textFaint, busy: false, sub: '' }
 }
 
 export function Header({ host, status, view, onToggleView, onLogout }: HeaderProps) {
   const { t } = useTranslation()
+  const { config, save } = useConfig()
   const now = useClock()
   const p = pill(status, t)
+  const [theme, setTheme] = useState(currentTheme())
+
+  const onToggleTheme = () => {
+    const next = theme === 'light' ? 'dark' : 'light'
+    applyTheme(next)
+    setTheme(next)
+    // Persist as app.theme; if config never loaded the toggle still works for this session.
+    if (config) save({ ...config, app: { ...config.app, theme: next } }).catch(() => {})
+  }
 
   return (
     <header className="jn-header">
@@ -46,12 +58,12 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
           src="/assets/joulenap-wordmark.svg"
           alt="Joulenap"
           className="jn-header-wordmark"
-          style={{ filter: 'brightness(0) invert(1)', position: 'relative', top: 4 }}
+          style={{ position: 'relative', top: 4 }}
         />
       </div>
 
       <div className="jn-header-status">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: mono, fontSize: 16, color: '#6f7884' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: mono, fontSize: 16, color: c.textFaint }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.color }} />
           {host || '—'}
         </div>
@@ -64,8 +76,8 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
             padding: '6px 13px',
             borderRadius: 999,
             whiteSpace: 'nowrap',
-            background: 'rgba(255,255,255,.035)',
-            border: `1px solid ${p.color}55`,
+            background: c.hover,
+            border: `1px solid ${tint(p.color, 33)}`,
           }}
         >
           {p.busy ? (
@@ -74,14 +86,14 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
                 width: 13,
                 height: 13,
                 borderRadius: '50%',
-                border: `2px solid ${p.color}33`,
+                border: `2px solid ${tint(p.color, 20)}`,
                 borderTopColor: p.color,
                 animation: 'spin .7s linear infinite',
               }}
             />
           ) : (
             <div
-              style={{ width: 9, height: 9, borderRadius: '50%', background: p.color, boxShadow: `0 0 0 3px ${p.color}22` }}
+              style={{ width: 9, height: 9, borderRadius: '50%', background: p.color, boxShadow: `0 0 0 3px ${tint(p.color, 13)}` }}
             />
           )}
           <span style={{ fontSize: 13, fontWeight: 600 }}>{p.label}</span>
@@ -101,7 +113,7 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
             display: 'flex',
             alignItems: 'center',
             gap: 7,
-            background: '#1d232b',
+            background: c.btnBg,
             border: `1px solid ${c.inputBorder}`,
             borderRadius: 8,
             padding: '8px 12px',
@@ -115,10 +127,32 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
         </button>
 
         <button
+          onClick={onToggleTheme}
+          title={t('header.theme')}
+          aria-label={t('header.theme')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            background: c.btnBg,
+            border: `1px solid ${c.inputBorder}`,
+            borderRadius: 8,
+            padding: '8px 12px',
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          <span style={{ color: theme === 'dark' ? c.accent : c.textMuted }}>☾</span>
+          <span style={{ color: c.textMuted, fontWeight: 400 }}>/</span>
+          <span style={{ color: theme === 'light' ? c.accent : c.textMuted }}>☀</span>
+        </button>
+
+        <button
           onClick={onLogout}
           title={t('header.signOut')}
           style={{
-            background: '#1d232b',
+            background: c.btnBg,
             border: `1px solid ${c.inputBorder}`,
             borderRadius: 8,
             color: c.textMid,

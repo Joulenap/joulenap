@@ -1,4 +1,4 @@
-// Dev/preview only. Imported from main.tsx behind `import.meta.env.VITE_STUB_API`,
+﻿// Dev/preview only. Imported from main.tsx behind `import.meta.env.VITE_STUB_API`,
 // so Vite's static replacement drops it from production builds.
 //
 // Two jobs:
@@ -42,7 +42,9 @@ const ME: UserInfo = { username: 'admin' }
 const CONFIG: Config = {
   app: {
     language: 'en',
-    theme: 'dark',
+    // The real backend persists app.theme; the stub resets on every reload, which would
+    // override the toggle. Seeding from the same localStorage mirror fakes persistence.
+    theme: localStorage.getItem('jnTheme') === 'light' ? 'light' : 'dark',
     port: 8080,
     timezone: 'Europe/Rome',
     secret_key: 'stub-secret-key',
@@ -372,10 +374,10 @@ notifications:
 `
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '0.6.0-stub' },
+  'GET /health': { status: 'ok', version: '0.7.0-stub' },
   'GET /update': {
-    current: '0.6.0-stub',
-    latest: '0.6.0',
+    current: '0.7.0-stub',
+    latest: '0.7.0',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },
@@ -415,6 +417,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const key = `${method} ${bare}`
 
   let body: unknown = ROUTES[key]
+  // The real backend persists and echoes the config it just saved; the static CONFIG would
+  // silently undo edits (e.g. the theme toggle reverting on the PUT response / next GET).
+  if (key === 'PUT /config' && typeof init?.body === 'string') {
+    Object.assign(CONFIG, JSON.parse(init.body))
+    body = CONFIG
+  }
   if (body === undefined && key.startsWith('GET /logs')) body = LOGS
   if (body === undefined && bare === '/logs') body = LOGS
   // ROUTES is keyed on exact paths, so /runs/{id} needs its own match.

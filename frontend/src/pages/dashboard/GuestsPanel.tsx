@@ -21,7 +21,7 @@ function modeBtn(active: boolean): React.CSSProperties {
     flex: 1,
     textAlign: 'center',
     background: active ? c.accent : 'transparent',
-    color: active ? c.accentInk : '#9aa2ac',
+    color: active ? c.accentInk : c.textDim,
     border: 'none',
     borderRadius: 6,
     padding: '7px 4px',
@@ -49,7 +49,7 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px 12px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
           <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '.04em' }}>{t('dashboard.guests')}</span>
-          <span style={{ fontFamily: mono, fontSize: 11, color: '#6f7884' }}>{count}</span>
+          <span style={{ fontFamily: mono, fontSize: 11, color: c.textFaint }}>{count}</span>
         </div>
         <button
           onClick={onRefresh}
@@ -60,7 +60,7 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
             justifyContent: 'center',
             width: 28,
             height: 28,
-            background: '#1d232b',
+            background: c.btnBg,
             border: `1px solid ${c.inputBorder}`,
             borderRadius: 7,
             color: c.textMid,
@@ -92,7 +92,7 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
                 padding: '7px 4px',
                 fontSize: 12,
                 fontWeight: 600,
-                color: '#9aa2ac',
+                color: c.textDim,
               }}
             >
               🔒 {t('dashboard.excludeMode')}
@@ -134,7 +134,7 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
                 alignItems: 'center',
                 gap: 10,
                 padding: '8px 18px',
-                borderBottom: '1px solid #1b212880',
+                borderBottom: `1px solid ${c.divider}`,
               }}
             >
               {selective && <Toggle on={on} onClick={() => onToggleGuest(g.vmid)} size="sm" />}
@@ -165,13 +165,13 @@ export function GuestsPanel({ guests, mode, onModeChange, selected, onToggleGues
                   fontWeight: 600,
                   padding: '2px 0',
                   borderRadius: 5,
-                  color: isCt ? c.green : '#6aa6e8',
+                  color: isCt ? c.green : c.blue,
                   background: isCt ? 'rgba(63,178,127,.14)' : 'rgba(106,166,232,.14)',
                 }}
               >
                 {isCt ? 'CT' : 'VM'}
               </span>
-              <span style={{ fontFamily: mono, fontSize: 11, color: '#6f7884', width: 30, flex: '0 0 auto' }}>{g.vmid}</span>
+              <span style={{ fontFamily: mono, fontSize: 11, color: c.textFaint, width: 30, flex: '0 0 auto' }}>{g.vmid}</span>
               <span
                 style={{
                   flex: 1,

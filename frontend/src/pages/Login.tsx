@@ -191,7 +191,7 @@ export function Login() {
                   alignItems: 'center',
                   gap: 8,
                   background: 'rgba(229,103,91,.12)',
-                  border: '1px solid #5e3330',
+                  border: '1px solid rgba(229,103,91,.35)',
                   borderRadius: 7,
                   padding: '9px 12px',
                   marginBottom: 14,
@@ -221,7 +221,7 @@ export function Login() {
             textAlign: 'center',
             fontFamily: "'IBM Plex Mono', monospace",
             fontSize: 11,
-            color: '#4d555f',
+            color: c.textMuted,
             marginTop: 18,
           }}
         >

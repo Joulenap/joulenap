@@ -11,26 +11,29 @@ import { api, ApiError } from '../../api/client'
 import { Spinner } from '../../components/Spinner'
 import { useConfig } from '../../config/ConfigContext'
 import { useRegisterDirty } from '../../shell/UnsavedGuard'
-import { c, ghostBtn, mono, panelStyle, primaryBtn } from '../../theme'
+import { c, currentTheme, ghostBtn, mono, panelStyle, primaryBtn } from '../../theme'
 import { copyToClipboard } from '../../utils/clipboard'
 
 // This module is loaded lazily (see Advanced.tsx) so CodeMirror lands in its own chunk and
 // never weighs on the dashboard's first paint.
 
-const theme = EditorView.theme(
-  {
-    '&': { height: '440px', fontSize: '13px', color: c.text },
-    '&.cm-focused': { outline: `1px solid ${c.accent}` },
-    '.cm-scroller': { fontFamily: mono, overflow: 'auto' },
-    '.cm-content': { caretColor: c.accent },
-    '.cm-cursor': { borderLeftColor: c.accent },
-    '.cm-gutters': { background: c.panelAlt, color: c.textMuted, border: 'none' },
-    '.cm-activeLine': { background: 'rgba(255,255,255,.03)' },
-    '.cm-activeLineGutter': { background: 'transparent', color: c.textDim },
-    '&.cm-focused .cm-selectionBackground, ::selection': { background: 'rgba(232,131,15,.25)' },
-  },
-  { dark: true },
-)
+// Colors are CSS vars, so a theme toggle restyles the editor live; the `dark` flag only
+// scopes CodeMirror's own defaults and is read at mount (stale until remount — acceptable).
+const makeTheme = () =>
+  EditorView.theme(
+    {
+      '&': { height: '440px', fontSize: '13px', color: c.text },
+      '&.cm-focused': { outline: `1px solid ${c.accent}` },
+      '.cm-scroller': { fontFamily: mono, overflow: 'auto' },
+      '.cm-content': { caretColor: c.accent },
+      '.cm-cursor': { borderLeftColor: c.accent },
+      '.cm-gutters': { background: c.panelAlt, color: c.textMuted, border: 'none' },
+      '.cm-activeLine': { background: c.hover },
+      '.cm-activeLineGutter': { background: 'transparent', color: c.textDim },
+      '&.cm-focused .cm-selectionBackground, ::selection': { background: 'rgba(232,131,15,.25)' },
+    },
+    { dark: currentTheme() === 'dark' },
+  )
 
 const highlight = HighlightStyle.define([
   { tag: [tg.propertyName, tg.definition(tg.propertyName)], color: c.accent },
@@ -84,7 +87,7 @@ export function YamlEditor() {
           indentUnit.of('  '),
           yamlLang(),
           syntaxHighlighting(highlight),
-          theme,
+          makeTheme(),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) {
               setText(u.state.doc.toString())
@@ -176,9 +179,9 @@ export function YamlEditor() {
           style={{
             ...primaryBtn,
             padding: '10px 24px',
-            background: dirty ? c.accent : '#1d232b',
+            background: dirty ? c.accent : c.btnBg,
             color: dirty ? c.accentInk : c.textMuted,
-            border: dirty ? 'none' : '1px solid #262d35',
+            border: dirty ? 'none' : `1px solid ${c.btnBorder}`,
             cursor: dirty && !busy ? 'pointer' : 'not-allowed',
           }}
         >

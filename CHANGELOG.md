@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0]
+
+### Added
+
+- **Light theme.** The interface now ships the light theme that `app.theme` always promised: a
+  header toggle (moon/sun, sitting between the Settings and Logout buttons) switches the whole
+  interface — dashboard, settings, dialogs and the config.yaml editor included — with a short
+  cross-fade, and remembers the choice in `config.yaml` so it survives restarts and follows you to
+  other browsers. The login screen picks up the last theme used on that device. Dark remains the
+  default, and existing installations that never touch the toggle look exactly as before. Users who
+  have asked their system to reduce motion get an instant switch instead of the fade.
+
+### Fixed
+
+- **The `app.theme` config value is honoured.** It was accepted and stored since 0.1.0 but never
+  read; setting it to `light` now actually applies the light theme at startup.
+- **Header buttons render at the same height.** The Logout button was a few pixels shorter than
+  its neighbours.
+
 ## [0.6.0]
 
 ### Added
@@ -308,7 +327,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Joulenap/joulenap/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Joulenap/joulenap/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Joulenap/joulenap/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/Joulenap/joulenap/compare/v0.4.3...v0.4.4
