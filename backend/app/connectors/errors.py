@@ -33,3 +33,11 @@ class TaskError(ConnectorError):
     def __init__(self, message: str, exit_status: str | None = None):
         super().__init__(message)
         self.exit_status = exit_status
+
+
+class TaskCancelled(ConnectorError):
+    """The caller asked to stop waiting on a task (user-requested cancellation).
+
+    Deliberately *not* a :class:`TaskError`: the remote task didn't fail, we chose to stop
+    waiting for it — the two lead to different run outcomes (aborted vs failed).
+    """

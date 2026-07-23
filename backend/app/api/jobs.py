@@ -47,3 +47,30 @@ def run_gc(
     opts: RunOptions | None = None, job_service: JobService = Depends(get_job_service)
 ) -> RunStarted:
     return _start(job_service.submit_gc, (opts or RunOptions()).keep_on)
+
+
+class CancelRequest(BaseModel):
+    # Which run to stop. Required so a click landing as one run ends and another begins
+    # can't cancel the wrong job.
+    run_id: int
+    # Power the PBS off after stopping (the toggle in the stop dialog). Default: leave it
+    # on, since cancelling often means the user wants to work on the box.
+    power_off: bool = False
+
+
+@router.post("/jobs/cancel", status_code=status.HTTP_202_ACCEPTED)
+def cancel_job(
+    body: CancelRequest, job_service: JobService = Depends(get_job_service)
+) -> dict[str, int]:
+    """Ask the in-flight run to stop (11.2).
+
+    202 means the request was accepted, not that the run has ended: cancellation is
+    cooperative, so the worker stops the remote vzdump/GC task and unwinds within a poll
+    interval. Poll GET /api/runs/{id} for the final status.
+    """
+    if not job_service.cancel(body.run_id, power_off=body.power_off):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That run is not the one currently in progress",
+        )
+    return {"run_id": body.run_id}

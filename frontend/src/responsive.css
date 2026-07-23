@@ -88,6 +88,14 @@
   grid-template-columns: 84px 96px 1fr;
 }
 
+/* Run history: started | kind | trigger | status | duration | guests */
+.jn-run-head,
+.jn-run-row {
+  display: grid;
+  grid-template-columns: 116px 90px 92px 92px 72px 1fr;
+  gap: 8px;
+}
+
 /* Settings */
 .jn-settings {
   display: grid;
@@ -185,6 +193,19 @@
   }
   .jn-log-row > :nth-child(3) {
     grid-column: 1 / -1;
+  }
+
+  /* Same treatment for run rows: drop the six column labels, then two lines per run —
+   * started + kind + status on the first, trigger/duration/guests on the second. */
+  .jn-run-head {
+    display: none;
+  }
+  .jn-run-row {
+    grid-template-columns: 106px 1fr auto;
+    row-gap: 3px;
+  }
+  .jn-run-row > :nth-child(n + 4) {
+    grid-row: 2;
   }
 
   .jn-settings {

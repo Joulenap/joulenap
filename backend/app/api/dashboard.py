@@ -9,10 +9,9 @@ session cookie — so this router is deliberately outside require_auth.
 
 from __future__ import annotations
 
-import secrets
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,6 +19,7 @@ from ..core.config_store import ConfigStore
 from ..db import get_session
 from ..db.models import RunStatus
 from . import _probe
+from ._apikey import authorize_api_key
 from .deps import JobService, Scheduler, get_config_store, get_job_service, get_scheduler
 
 router = APIRouter(tags=["dashboard"])
@@ -35,20 +35,6 @@ class DashboardResponse(BaseModel):
     datastore_total_bytes: int | None
 
 
-def _authorize(request: Request, store: ConfigStore) -> None:
-    key = store.config.app.api_key
-    if not key:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Dashboard integration is disabled (no API key configured)",
-        )
-    provided = request.headers.get("X-API-Key") or request.query_params.get("key") or ""
-    if not secrets.compare_digest(provided.encode("utf-8"), key.encode("utf-8")):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key"
-        )
-
-
 @router.get("/dashboard", response_model=DashboardResponse)
 def get_dashboard(
     request: Request,
@@ -57,7 +43,7 @@ def get_dashboard(
     job_service: JobService = Depends(get_job_service),
     session: Session = Depends(get_session),
 ) -> DashboardResponse:
-    _authorize(request, store)
+    authorize_api_key(request, store)
 
     config = store.config
     last = _probe.latest_finished_cycle_run(session)

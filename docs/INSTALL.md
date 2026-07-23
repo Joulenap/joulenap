@@ -251,6 +251,35 @@ Once the UI is up at `http://<host>:8080` (same for every install path):
    **notifications** (Telegram / ntfy / email / Discord) under Settings if you want them. Use **Run
    backup now** to test the full wake → backup → power-off cycle end-to-end.
 
+## The Settings tabs
+
+Day-to-day you'll live on the Dashboard (schedule, guests, retention, manual runs). Everything else
+sits behind **Settings**:
+
+- **Setup** — the connection wizard from step 2 above: PVE, the PBS-backed storage, Wake-on-LAN MAC
+  and the poweroff SSH key. Re-run it whenever the PBS certificate is renewed or its address changes.
+- **Backup safety** — guardrails around the cycle: a minimum-free-space check that aborts rather than
+  backing up onto a nearly-full datastore, how long to wait for a busy PBS to finish its own task
+  before powering it off, and the verify options (a quick verify of new snapshots after each backup,
+  or a full verification on its own schedule). *(The wake timeout and Wake-on-LAN retries live on the
+  Dashboard, next to the schedule.)*
+- **Notifications** — Telegram, ntfy, email (SMTP) and Discord with friendly forms, plus a
+  catch-all list for any other [Apprise](https://github.com/caronc/apprise) URL or plain webhook.
+  Choose whether to notify on success, on failure, or both; **Send test** reports per channel.
+- **Integrations** — generate the read-only API key for the dashboard endpoint and copy a
+  ready-made snippet for Homepage / Homarr / Dashy / Glance (details in
+  [`INTEGRATIONS.md`](INTEGRATIONS.md)). The opt-in **update check** lives here too: off by default,
+  and while it's off Joulenap makes no outbound internet call at all.
+- **Localization** — interface language and the timezone your schedule is interpreted in.
+- **Account** — change the admin username or password. Changing the password signs out every
+  existing session immediately.
+- **Advanced** — the knobs with no home on the other screens: backup mode (snapshot / suspend /
+  stop), a vzdump bandwidth cap, the `keep_last` and `keep_yearly` retention buckets, how long run
+  history is kept, and the web port / session settings (these last ones need a restart). At the
+  bottom is a **`config.yaml` editor** with syntax highlighting: it saves through exactly the same
+  validation as the forms, so a bad value is rejected instead of persisted, and its **Copy** button
+  gives you the whole config with the secrets redacted — handy for a bug report.
+
 ## Updating
 
 Your `config.yaml` and data live in the mounted `data/` directory (or your native data dir), so they

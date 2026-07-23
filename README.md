@@ -40,20 +40,22 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 - ⏰ Web UI scheduler: choose backup time, enable/disable, see next/last run
 - 🔌 Wake-on-LAN of the PBS, with readiness wait and timeout
-- 🗂️ Per-guest selection (toggle which CTs/VMs to back up, or "all + auto-include new")
-- ♻️ Retention (daily/weekly/monthly) and scheduled Garbage Collection
+- 🗂️ Per-guest selection: back up **all** guests, all **except** a list, or an explicit **include** list (new guests are covered automatically in the first two)
+- ♻️ Retention (daily/weekly/monthly/yearly), Garbage Collection after each backup, and a separately scheduled verify
 - 🔔 Notifications: Apprise, Telegram, ntfy, Discord, email — on success and/or failure
-- 📜 Live log viewer and manual "Run backup now" / "Run GC now"
-- 📊 Dashboard integration: expose backup status to Homepage, Homarr, Dashy or Glance — see [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)
+- 📜 Live log viewer, run history with per-step detail, live PVE/PBS task output, and manual "Run backup now" / "Run GC now" (optionally leaving the PBS awake) — stoppable mid-run
+- ⚙️ Advanced settings tab with a built-in `config.yaml` editor, plus an opt-in update check
+- 📊 Integrations: backup status for Homepage, Homarr, Dashy or Glance, plus a Prometheus `/metrics` endpoint for Grafana (alert when a guest stops being backed up) — see [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)
 - 🌍 Multi-language UI
 - 🔒 Login-protected; secrets kept out of the repo
 
 ## Status
 
-**v0.5.0.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
+**v0.6.0.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
 notifications + setup wizard, packaged as a Docker image — with transport hardening (PBS TLS
 pinning + SSH host-key verification) and auth hardening (login rate-limit, session hardening).
-Includes a read-only [dashboard integration](docs/INTEGRATIONS.md) (Homepage/Homarr/Dashy/Glance),
+Includes run history with per-step detail, the ability to stop a job mid-run,
+[integrations](docs/INTEGRATIONS.md) for dashboards (Homepage/Homarr/Dashy/Glance) and Prometheus,
 persistent datastore usage shown even while the PBS is powered off, a per-channel notification
 test report, and a responsive UI that works on a phone.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and API.
@@ -95,7 +97,7 @@ All settings live in `config.yaml` (see [`config.example.yaml`](config.example.y
 
 Joulenap can trigger backups and power machines on/off, so treat it as privileged:
 
-- Use **scoped API tokens** for PVE (Audit + Backup) and PBS, not root passwords.
+- Use **scoped API tokens** for PVE and PBS, not root passwords — the exact privileges each one needs are listed in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#permissions-cheat-sheet).
 - The SSH key to PBS should be dedicated and, ideally, restricted to the power-off command.
 - **PBS API is TLS-pinned**: calls to PBS are pinned to its certificate fingerprint (captured at setup), so a swapped/MITM cert is rejected; a legitimately renewed cert is accepted after you re-run PBS detection in the wizard.
 - **PBS SSH host key is verified**: confirmed once during setup and stored in `data/known_hosts`; later power-off/GC connections verify against it. Details in [`docs/CONFIG-WIZARD.md`](docs/CONFIG-WIZARD.md#security).
@@ -109,7 +111,7 @@ Joulenap can trigger backups and power machines on/off, so treat it as privilege
 ## Roadmap
 
 - [✅] v0.1: scheduler + WoL + vzdump + retention + notifications + web UI
-- [✅] Garbage Collection scheduling and verify jobs
+- [✅] Garbage Collection after each backup, and scheduled verify jobs
 - [✅] Per-guest last-backup status from PBS
 - [ ] RTC-wake option (BIOS alarm) as an alternative to WoL
 - [ ] Multiple PBS targets / off-site sync

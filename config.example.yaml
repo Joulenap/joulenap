@@ -6,14 +6,15 @@
 
 app:
   language: en              # UI language: en, it, ...
-  theme: dark               # dark | light
+  theme: dark               # reserved — the UI is dark-only today; this value is not read
   port: 8080                # web UI port
   timezone: ""              # IANA tz for the scheduler, e.g. "Europe/Rome".
                             # Empty -> the TZ env var, then UTC. Set this (or TZ) or
                             # "backup at 02:00" runs at 02:00 UTC in a container.
   secret_key: "CHANGE_ME"   # random string for session signing
-  # Read-only key for the dashboard integration endpoint (GET /api/dashboard).
-  # Leave empty to disable. Generate/rotate it from Settings -> Integrations in the UI.
+  # Read-only key for the machine-readable endpoints: GET /api/dashboard (dashboard
+  # widgets) and GET /metrics (Prometheus). Leave empty to disable both.
+  # Generate/rotate it from Settings -> Integrations in the UI.
   api_key: ""
   # Ask GitHub once a day whether a newer Joulenap release exists, and show a footer
   # badge if so. Off by default: the app makes no outbound internet call unless you
@@ -38,7 +39,10 @@ pve:
   port: 8006
   node: ""                  # node name, e.g. pve
   verify_tls: false         # self-signed cert on most homelabs
-  api_token_id: ""          # e.g. "root@pam!joulenap" — token with PVEAuditor (VM.Audit) + VM.Backup + Datastore.AllocateSpace
+  # Token privileges: VM.Audit, VM.Backup, Datastore.Audit, Datastore.AllocateSpace and
+  # Datastore.Allocate on the PBS storage. The last one is required for vzdump's
+  # retention/prune (it deletes old backups) — without it, backups run but pruning fails.
+  api_token_id: ""          # e.g. "root@pam!joulenap"
   api_token_secret: ""
   storage_id: ""            # the PBS storage as named in PVE (Datacenter > Storage), e.g. pbs
 
@@ -49,7 +53,9 @@ pbs:
   port: 8007
   datastore: ""             # e.g. backup
   fingerprint: ""           # PBS dashboard > Show Fingerprint, e.g. "aa:bb:cc:..."
-  api_token_id: ""          # e.g. "root@pam!joulenap" — token for GC / status (DatastoreAdmin or similar)
+  # Token privileges: DatastoreAdmin on the datastore (status + start GC) plus Audit on
+  # /system (read-only node CPU/RAM/network for the dashboard).
+  api_token_id: ""          # e.g. "root@pam!joulenap"
   api_token_secret: ""
   # Wake-on-LAN
   mac: ""                             # PBS NIC MAC, e.g. "00:11:22:33:44:55"
@@ -70,8 +76,8 @@ backup:
   min_free_percent: 0       # abort backup if PBS datastore free space is below this % (0 = disabled)
   guests:
     mode: all               # all | include | exclude
-    # auto_include_new applies when mode = all
-    auto_include_new: true
+    # A newly created VM/CT is backed up automatically in "all" and "exclude" mode, but NOT
+    # in "include" mode — that list is explicit, so add new guests to it yourself.
     # used when mode = include / exclude
     list: []                # e.g. [104, 106, 202]
   retention:

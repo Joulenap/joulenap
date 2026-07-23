@@ -7,6 +7,7 @@ interface Props {
   error: string | null
   onBackup: () => void
   onGc: () => void
+  onStop: () => void
   onPowerOn: () => void
   onPowerOff: () => void
 }
@@ -44,7 +45,7 @@ function actionBtn(variant: 'primary' | 'ghost' | 'green' | 'red', enabled: bool
   return { ...base, background: 'transparent', color: c.text, border: '1px solid #3a434d' }
 }
 
-export function ManualPanel({ status, error, onBackup, onGc, onPowerOn, onPowerOff }: Props) {
+export function ManualPanel({ status, error, onBackup, onGc, onStop, onPowerOn, onPowerOff }: Props) {
   const { t } = useTranslation()
   const online = !!status?.pbs_online
   const busy = !!status?.job_running
@@ -53,27 +54,56 @@ export function ManualPanel({ status, error, onBackup, onGc, onPowerOn, onPowerO
   const canJob = !busy
   const canPower = online && !busy
 
+  // While a run is in flight, its own button becomes Stop (11.2). A scheduled *verify* has
+  // no button of its own, so it borrows the primary slot — otherwise a hung verify would be
+  // unstoppable, which is exactly the deadlock this feature exists to break. Cancelling
+  // needs the run id; without it (a run started before this build, say) we only disable.
+  const runningKind = busy ? (status?.running_kind ?? 'cycle') : null
+  const canStop = busy && typeof status?.running_run_id === 'number'
+  const stopSlot = runningKind === 'gc' ? 'gc' : 'primary'
+  const stopLabel = t(
+    runningKind === 'gc'
+      ? 'dashboard.stopGc'
+      : runningKind === 'verify'
+        ? 'dashboard.stopVerify'
+        : 'dashboard.stopBackup',
+  )
+
+  const stopButton = (
+    <button type="button" style={actionBtn('red', canStop)} disabled={!canStop} onClick={onStop}>
+      ■ {stopLabel}
+    </button>
+  )
+
   return (
     <div style={{ ...panelStyle, padding: '16px 18px', height: '100%' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 22 }}>
         <div>
           <span style={colHead}>{t('dashboard.manualJobs')}</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-            <button style={actionBtn('primary', canJob)} disabled={!canJob} onClick={onBackup}>
-              ▶ {t('dashboard.runBackup')}
-            </button>
-            <button style={actionBtn('ghost', canJob)} disabled={!canJob} onClick={onGc}>
-              ⟳ {t('dashboard.runGc')}
-            </button>
+            {stopSlot === 'primary' && busy ? (
+              stopButton
+            ) : (
+              <button type="button" style={actionBtn('primary', canJob)} disabled={!canJob} onClick={onBackup}>
+                ▶ {t('dashboard.runBackup')}
+              </button>
+            )}
+            {stopSlot === 'gc' && busy ? (
+              stopButton
+            ) : (
+              <button type="button" style={actionBtn('ghost', canJob)} disabled={!canJob} onClick={onGc}>
+                ⟳ {t('dashboard.runGc')}
+              </button>
+            )}
           </div>
         </div>
         <div>
           <span style={colHead}>{t('dashboard.power')}</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-            <button style={actionBtn('green', !online)} disabled={online} onClick={onPowerOn}>
+            <button type="button" style={actionBtn('green', !online)} disabled={online} onClick={onPowerOn}>
               ⏻ {t('dashboard.powerOn')}
             </button>
-            <button style={actionBtn('red', canPower)} disabled={!canPower} onClick={onPowerOff}>
+            <button type="button" style={actionBtn('red', canPower)} disabled={!canPower} onClick={onPowerOff}>
               ⏻ {t('dashboard.powerOff')}
             </button>
           </div>

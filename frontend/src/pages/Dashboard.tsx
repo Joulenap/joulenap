@@ -8,8 +8,9 @@ import { useRegisterDirty } from '../shell/UnsavedGuard'
 import { useTaskLog } from '../hooks/useTaskLog'
 import { buildCron, isAdvancedSchedule, parseCron } from '../utils/cron'
 import { guestsSelectionError } from '../utils/guests'
-import { ActivityLog } from './dashboard/ActivityLog'
+import { runKindLabelKey } from '../utils/status'
 import { GuestsPanel } from './dashboard/GuestsPanel'
+import { HistoryCard } from './dashboard/HistoryCard'
 import { ManualPanel } from './dashboard/ManualPanel'
 import { type SchedulerDraft, SchedulerCard } from './dashboard/SchedulerCard'
 import { StatTiles } from './dashboard/StatTiles'
@@ -256,6 +257,32 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     })
   }
 
+  // Stop the in-flight run (11.2). Reuses the same confirm as the run actions, with the
+  // toggle repurposed: default OFF, because cancelling usually means "I want the box now".
+  const stopAction = () => {
+    const runId = status?.running_run_id
+    if (typeof runId !== 'number') return
+    const kind = status?.running_kind ?? 'cycle'
+    setKeepOn(false)
+    setConfirm({
+      title: t('dashboard.confirm.stopTitle'),
+      message: t('dashboard.confirm.stopMsg', { job: t(runKindLabelKey(kind)) }),
+      confirmLabel: t('dashboard.confirm.stopYes'),
+      danger: true,
+      icon: '■',
+      toggle: { label: t('dashboard.confirm.stopPowerOff'), value: false, onChange: setKeepOn },
+      onConfirm: async () => {
+        setActionErr(null)
+        try {
+          await api.cancelJob(runId, keepOnRef.current)
+        } catch (e) {
+          setActionErr(e instanceof ApiError ? e.message : t('dashboard.actionFailed'))
+        }
+        pollAfterAction()
+      },
+    })
+  }
+
   const toggleGuest = (vmid: number) => {
     setSavedNote(false)
     setErr(null)
@@ -275,6 +302,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
           error={actionErr}
           onBackup={() => runAction('backup', (k) => api.runBackup(k), false, '▶')}
           onGc={() => runAction('gc', (k) => api.runGc(k), false, '⟳')}
+          onStop={stopAction}
           onPowerOn={() => runAction('on', () => api.powerOn(), false, '⏻')}
           onPowerOff={() => runAction('off', () => api.powerOff(), true, '⏻')}
         />
@@ -305,7 +333,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
           refreshing={refreshing}
           error={guestsErr}
         />
-        <ActivityLog logs={logs} />
+        <HistoryCard logs={logs} />
       </div>
 
       <TaskLog lines={taskLog.lines} running={jobRunning} runId={taskLog.runId} />

@@ -18,6 +18,8 @@ class RunSummary(BaseModel):
     status: str
     started_at: datetime
     finished_at: datetime | None
+    # Nullable while a run is in flight, and for kinds that don't touch guests (GC/verify).
+    guests_ok: int | None = None
     error: str | None = None
 
     @classmethod

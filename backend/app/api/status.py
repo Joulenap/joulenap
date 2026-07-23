@@ -42,6 +42,7 @@ class StatusResponse(BaseModel):
     next_run: datetime | None
     job_running: bool
     running_kind: str | None = None  # "cycle" | "gc" | "verify" while a run is in flight
+    running_run_id: int | None = None  # the in-flight run, so the UI can cancel exactly it
     pbs_online: bool
     last_run: RunSummary | None
     datastore: DatastoreInfo | None = None
@@ -72,6 +73,7 @@ def get_status(
         next_run=scheduler.next_run_time,
         job_running=job_service.is_running,
         running_kind=running.kind if running else None,
+        running_run_id=running.id if running else None,
         pbs_online=pbs_online,
         last_run=RunSummary.of(last) if last else None,
         datastore=datastore,

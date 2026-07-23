@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .errors import TaskError
+from .errors import TaskCancelled, TaskError
 
 # One task-log line as returned by the tailer: (line number, text). The line number is
 # the task's own 1-based ``n``; the tailer uses it as the offset cursor for the next fetch.
@@ -28,11 +28,17 @@ def poll_task(
     *,
     log_fn: Callable[[int], list[LogLine]] | None = None,
     on_lines: Callable[[list[LogLine]], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Poll ``status_fn(upid)`` until the task stops; return its final status.
 
     Raises :class:`TaskError` if the task finishes with a non-OK exit status or does
     not finish within ``timeout`` seconds.
+
+    ``should_cancel`` makes the wait interruptible: it is consulted once per poll, and a
+    True raises :class:`TaskCancelled` — the caller decides whether to also stop the remote
+    task. This is the only way out of a long wait, since a blocking thread can't be
+    interrupted from outside; the poll interval is therefore the cancel latency.
 
     If both ``log_fn`` and ``on_lines`` are given, each poll also drains any new task-log
     lines: ``log_fn(offset)`` returns lines numbered greater than ``offset`` (empty once
@@ -54,6 +60,11 @@ def poll_task(
             seen = max(n for n, _ in batch)
 
     while True:
+        if should_cancel is not None and should_cancel():
+            # Drain first so the task-log panel keeps the last lines the task managed to
+            # write before we walked away.
+            drain()
+            raise TaskCancelled(f"Wait for task {upid} cancelled")
         status = status_fn(upid)
         drain()  # pull whatever's been logged since the last tick (tail after stop)
         if status.get("status") == "stopped":

@@ -151,6 +151,8 @@ export const api = {
     req<{ enabled: boolean; next_run: string | null }>('POST', '/scheduler/toggle', { enabled }),
   runBackup: (keepOn: boolean) => req<{ run_id: number }>('POST', '/backup/run', { keep_on: keepOn }),
   runGc: (keepOn: boolean) => req<{ run_id: number }>('POST', '/gc/run', { keep_on: keepOn }),
+  cancelJob: (runId: number, powerOff: boolean) =>
+    req<{ run_id: number }>('POST', '/jobs/cancel', { run_id: runId, power_off: powerOff }),
   powerOn: () => req<{ ok: boolean }>('POST', '/power/on'),
   powerOff: () => req<{ ok: boolean }>('POST', '/power/off'),
   wolTest: () => req<{ sent: boolean; mac: string }>('POST', '/wol/test'),

@@ -32,10 +32,33 @@ class JobService:
         self._store = config_store
         self.deps = deps or CycleDeps.default()
         self._lock = threading.Lock()
+        # Cancellation (11.2). The cycle can't be interrupted from outside — a blocking
+        # thread never yields — so it polls these through `deps`, which we point at our own
+        # state here. Guarded by `_lock` only for the run id; the Event is already atomic.
+        self._cancel = threading.Event()
+        self._cancel_power_off = False
+        self._current_run_id: int | None = None
+        self.deps.cancelled = self._cancel.is_set
+        self.deps.cancel_power_off = lambda: self._cancel_power_off
 
     @property
     def is_running(self) -> bool:
         return self._lock.locked()
+
+    def cancel(self, run_id: int, *, power_off: bool = False) -> bool:
+        """Ask the in-flight run to stop. Returns False if it isn't the one running.
+
+        The run id is required rather than "cancel whatever is running": a click that lands
+        just as one run finishes and the next begins would otherwise stop the wrong job. The
+        flag is cooperative — the worker notices within a poll interval, stops the remote
+        task, and releases the lock on its way out.
+        """
+        if self._current_run_id != run_id or not self.is_running:
+            return False
+        self._cancel_power_off = power_off
+        self._cancel.set()
+        log.info("Cancellation requested for run %d (power_off=%s)", run_id, power_off)
+        return True
 
     @contextmanager
     def exclusive(self) -> Iterator[None]:
@@ -116,8 +139,12 @@ class JobService:
         if not self._lock.acquire(blocking=False):
             raise AlreadyRunningError("A backup or GC run is already in progress")
         try:
+            # Clear any cancel left over from the previous run before this one can observe it.
+            self._cancel.clear()
+            self._cancel_power_off = False
             config = self._store.config  # read live config at run time
             recorder = RunRecorder(kind, trigger)
+            self._current_run_id = recorder.run_id
         except BaseException:
             self._lock.release()
             raise

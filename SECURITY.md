@@ -9,8 +9,8 @@ Joulenap is pre-1.0 and moves fast; only the latest release line receives securi
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x   | ✅        |
-| < 0.1   | ❌        |
+| 0.5.x   | ✅        |
+| < 0.5   | ❌        |
 
 ## Reporting a vulnerability
 

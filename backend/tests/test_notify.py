@@ -162,8 +162,10 @@ def test_ntfy_http_uses_insecure_scheme():
 # --- messages ----------------------------------------------------------------
 
 
-def _run(status: RunStatus, *, error: str | None = None) -> Run:
-    run = Run(kind=RunKind.CYCLE, trigger=RunTrigger.MANUAL, status=status, error=error)
+def _run(
+    status: RunStatus, *, error: str | None = None, kind: RunKind = RunKind.CYCLE
+) -> Run:
+    run = Run(kind=kind, trigger=RunTrigger.MANUAL, status=status, error=error)
     run.started_at = datetime(2026, 6, 28, 4, 0, 0, tzinfo=UTC)
     run.finished_at = datetime(2026, 6, 28, 4, 1, 23, tzinfo=UTC)
     return run
@@ -200,6 +202,35 @@ def test_run_message_failure_includes_error_and_locale():
     title, body = build_run_message(cfg, _run(RunStatus.FAILURE, error="vzdump failed"))
     assert "fallito" in title
     assert "vzdump failed" in body
+
+
+def test_run_message_title_names_the_kind_that_ran():
+    # A verify or GC cycle must not report itself as a backup (doc-gap #7): a scheduled
+    # verify failure used to notify "backup failed".
+    verify = build_run_message(Config(), _run(RunStatus.FAILURE, kind=RunKind.VERIFY))[0]
+    assert "verification failed" in verify
+    assert "backup" not in verify
+    gc = build_run_message(Config(), _run(RunStatus.SUCCESS, kind=RunKind.GC))[0]
+    assert "garbage collection succeeded" in gc
+    assert "backup" not in gc
+
+
+def test_run_message_kind_titles_are_localized():
+    cfg = Config()
+    cfg.app.language = "it"
+    # Italian agrees in gender with the noun — "verifica fallita", not "fallito".
+    assert "verifica fallita" in build_run_message(
+        cfg, _run(RunStatus.FAILURE, kind=RunKind.VERIFY)
+    )[0]
+
+
+def test_run_message_unmapped_kind_falls_back_to_the_backup_title():
+    # A backup cycle keeps today's wording, and a kind with no block of its own degrades to
+    # it rather than raising.
+    assert "backup succeeded" in build_run_message(Config(), _run(RunStatus.SUCCESS))[0]
+    assert "backup succeeded" in build_run_message(
+        Config(), _run(RunStatus.SUCCESS, kind=RunKind.BACKUP)
+    )[0]
 
 
 def _woke() -> RunStep:

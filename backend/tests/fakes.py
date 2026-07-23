@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from app.connectors.errors import ConnectorError, TaskError
+from app.connectors.errors import ConnectorError, TaskCancelled, TaskError
 from app.connectors.pbs import DatastoreStatus, NodeLoad
 from app.connectors.pve import Guest
 from app.jobs.deps import CycleDeps
@@ -34,6 +34,7 @@ class FakePve:
         self.fail_task = fail_task
         self.log_lines = log_lines or []
         self.vzdump_args: dict | None = None
+        self.stopped: list[str] = []  # upids passed to stop_task
 
     def __enter__(self) -> FakePve:
         return self
@@ -64,12 +65,21 @@ class FakePve:
         }
         return "UPID:pve:backup"
 
-    def wait_task(self, upid: str, poll_interval=None, on_log=None, **_) -> dict:
+    def wait_task(
+        self, upid: str, poll_interval=None, on_log=None, should_cancel=None, **_
+    ) -> dict:
         if on_log and self.log_lines:
             on_log(list(enumerate(self.log_lines, start=1)))
+        # Mirror poll_task: the cancel probe is checked before reporting a result, so a
+        # cycle test can cancel mid-task exactly like the real client would.
+        if should_cancel is not None and should_cancel():
+            raise TaskCancelled(f"Wait for task {upid} cancelled")
         if self.fail_task:
             raise TaskError("vzdump failed", exit_status="job errors")
         return {"status": "stopped", "exitstatus": "OK"}
+
+    def stop_task(self, upid: str) -> None:
+        self.stopped.append(upid)
 
 
 class FakePbs:
@@ -88,6 +98,7 @@ class FakePbs:
         self.fail_task = fail_task
         self.gc_started = False
         self.verify_started = False
+        self.stopped: list[str] = []  # upids passed to stop_task
         self.verify_args: dict | None = None
         self.log_lines = log_lines or []
         self.fail_datastore = fail_datastore
@@ -115,7 +126,9 @@ class FakePbs:
         self.verify_args = {"ignore_verified": ignore_verified, "outdated_after": outdated_after}
         return "UPID:pbs:verify"
 
-    def wait_task(self, upid: str, poll_interval=None, on_log=None, **_) -> dict:
+    def wait_task(
+        self, upid: str, poll_interval=None, on_log=None, should_cancel=None, **_
+    ) -> dict:
         lines = self.log_lines
         if upid.endswith(":gc") and self.gc_log_lines is not None:
             lines = self.gc_log_lines
@@ -123,9 +136,14 @@ class FakePbs:
             lines = self.verify_log_lines
         if on_log and lines:
             on_log(list(enumerate(lines, start=1)))
+        if should_cancel is not None and should_cancel():
+            raise TaskCancelled(f"Wait for task {upid} cancelled")
         if self.fail_task:
             raise TaskError("gc failed", exit_status="error")
         return {"status": "stopped", "exitstatus": "OK"}
+
+    def stop_task(self, upid: str) -> None:
+        self.stopped.append(upid)
 
     def datastore_status(self) -> DatastoreStatus:
         if self.fail_datastore:
@@ -173,7 +191,8 @@ def make_deps(
         build_pbs=lambda _c: pbs,
         build_power=lambda _c: power,
         send_wol=wol or (lambda _c: None),
-        wait_reachable=lambda _c: wait(),
+        # Second arg is the cancel probe the real _wait_reachable takes; fakes ignore it.
+        wait_reachable=lambda _c, _cancel=None: wait(),
         wait_pbs_idle=lambda _c: idle(),
         notify=notify or (lambda _c, _r, _d=None: None),
     )

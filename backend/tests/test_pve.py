@@ -7,7 +7,7 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from app.connectors.errors import ApiError, TaskError
+from app.connectors.errors import ApiError, TaskCancelled, TaskError
 from app.connectors.pve import PveClient, build_prune_string
 
 
@@ -121,6 +121,51 @@ def test_wait_task_timeout():
         make_client(handler).wait_task(
             "UPID:x", poll_interval=0, timeout=0, sleep=lambda _s: None
         )
+
+
+def test_wait_task_cancels_without_waiting_for_the_task():
+    """A cancel flag breaks the wait even though the task is still running (11.2)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return json_data({"status": "running"})
+
+    with pytest.raises(TaskCancelled):
+        make_client(handler).wait_task(
+            "UPID:x",
+            poll_interval=0,
+            sleep=lambda _s: None,
+            should_cancel=lambda: True,
+        )
+
+
+def test_wait_task_keeps_waiting_while_cancel_is_false():
+    # The probe must be consulted per poll, not once — a False mustn't end the wait.
+    polls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        polls["n"] += 1
+        if polls["n"] < 3:
+            return json_data({"status": "running"})
+        return json_data({"status": "stopped", "exitstatus": "OK"})
+
+    status = make_client(handler).wait_task(
+        "UPID:x", poll_interval=0, sleep=lambda _s: None, should_cancel=lambda: False
+    )
+    assert status["exitstatus"] == "OK"
+    assert polls["n"] == 3
+
+
+def test_stop_task_deletes_the_task():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        return json_data(None)
+
+    make_client(handler).stop_task("UPID:x")
+    assert seen["method"] == "DELETE"
+    assert seen["path"].endswith("/nodes/pve/tasks/UPID:x")
 
 
 def test_task_log_parses_offset_lines():
