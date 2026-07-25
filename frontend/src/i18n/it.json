@@ -116,6 +116,7 @@
     "historyViews": "Viste attività",
     "runHistory": "Cronologia",
     "runsCount": "{{n}} esecuzioni",
+    "colId": "Run",
     "colStarted": "Inizio",
     "colKind": "Operazione",
     "colTrigger": "Avvio",

@@ -112,6 +112,7 @@ export function RunHistory({ runs, error }: { runs: RunSummary[]; error: boolean
         className="jn-run-head"
         style={{ padding: '0 18px 7px', borderBottom: `1px solid ${c.border}` }}
       >
+        <span style={colHead}>{t('dashboard.colId')}</span>
         <span style={colHead}>{t('dashboard.colStarted')}</span>
         <span style={colHead}>{t('dashboard.colKind')}</span>
         <span style={colHead}>{t('dashboard.colTrigger')}</span>
@@ -148,6 +149,9 @@ export function RunHistory({ runs, error }: { runs: RunSummary[]; error: boolean
                   color: c.text,
                 }}
               >
+                {/* The run number the notifications quote — this is where you come to look
+                    it up, so it leads the row. */}
+                <span style={{ ...cell, color: c.textMuted }}>#{run.id}</span>
                 <span style={{ ...cell, color: c.textFaint }}>
                   <span style={{ color: c.textFaint, marginRight: 6 }}>{open ? '▾' : '▸'}</span>
                   {fmtShort(new Date(run.started_at))}

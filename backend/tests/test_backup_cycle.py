@@ -452,6 +452,75 @@ def test_backup_records_guest_count(temp_db):
         assert session.get(Run, run_id).guests_ok == 2
 
 
+def _guests() -> list[Guest]:
+    return [
+        Guest(vmid=100, name="web01", type="lxc", status="running"),
+        Guest(vmid=101, name="db02", type="qemu", status="running"),
+    ]
+
+
+def _notified_guests(cfg: Config, pve: FakePve):
+    """Run a cycle and hand back the GuestSummary the notification was built from."""
+    captured = {}
+    deps, _pve, _pbs, _power = make_deps(
+        pve=pve, notify=lambda _c, _r, _d, guests, _n: captured.update(summary=guests)
+    )
+    _run(cfg, deps)
+    return captured["summary"]
+
+
+def test_failed_backup_names_the_guests_that_failed(temp_db):
+    """One vzdump task covers every guest, so a single guest failing takes the whole task
+    down and unwinds the step before it can record anything — the tally has to be filled from
+    the log as it streams, into an object the step doesn't own."""
+    pve = FakePve(
+        guests=_guests(),
+        fail_task=True,
+        log_lines=[
+            "INFO: Starting Backup of VM 100 (lxc)",
+            "INFO: Finished Backup of VM 100 (00:00:12)",
+            "INFO: Starting Backup of VM 101 (qemu)",
+            "ERROR: Backup of VM 101 failed - command 'qm' failed: exit code 1",
+        ],
+    )
+    summary = _notified_guests(_config(), pve)
+
+    assert (summary.total, summary.ok, summary.failed) == (2, 1, ["db02"])
+
+
+def test_successful_backup_reports_every_guest_ok(temp_db):
+    # No parseable per-guest lines at all: a vzdump wording change must never make a good run
+    # advertise "0/2".
+    summary = _notified_guests(_config(), FakePve(guests=_guests()))
+
+    assert (summary.total, summary.ok, summary.failed) == (2, 2, [])
+
+
+def test_excluded_guests_are_never_counted_as_failed(temp_db):
+    # The excluded guest is not in the vzdump log at all, so it can't land in either bucket —
+    # the total is the kept guests only.
+    summary = _notified_guests(
+        _config(guests_mode="exclude", guests_list=[101]), FakePve(guests=_guests())
+    )
+
+    assert (summary.total, summary.failed) == (1, [])
+
+
+def test_next_run_time_reaches_the_notification(temp_db):
+    from datetime import UTC, datetime
+
+    captured = {}
+    deps, _pve, _pbs, _power = make_deps(
+        notify=lambda _c, _r, _d, _g, next_at: captured.update(next_at=next_at)
+    )
+    when = datetime(2026, 6, 29, 4, 0, tzinfo=UTC)
+    deps.next_run = lambda: when
+
+    _run(_config(), deps)
+
+    assert captured["next_at"] == when
+
+
 def test_exclude_mode_filters_listed_vmids(temp_db):
     guests = [
         Guest(vmid=100, name="a", type="lxc", status="running"),
@@ -504,7 +573,7 @@ def test_datastore_read_failure_is_best_effort(temp_db):
     cfg = _config()
     captured = {}
 
-    def capture(config, run, ds=None):
+    def capture(config, run, ds=None, *_a):
         captured["status"] = run.status
         captured["ds"] = ds
 
@@ -528,7 +597,7 @@ def test_failed_cycle_notifies_with_failure_content(temp_db):
     cfg = _config()
     captured = {}
 
-    def capture(config, run, ds=None):
+    def capture(config, run, ds=None, *_a):
         captured["run"] = run
         captured["title"], captured["body"] = build_run_message(config, run, ds)
 
@@ -593,7 +662,7 @@ def test_cancel_before_the_pbs_wakes_does_not_try_to_power_off(temp_config, temp
 def test_cancel_does_not_notify(temp_config, temp_db):
     # The user pressed Stop and is standing at the UI; a "backup aborted" push is noise.
     sent = []
-    deps, _pve, _pbs, _power = _cancelled_deps(notify=lambda c, r, d=None: sent.append(r))
+    deps, _pve, _pbs, _power = _cancelled_deps(notify=lambda c, r, *_a: sent.append(r))
     _run(_config(), deps)
     assert sent == []
 

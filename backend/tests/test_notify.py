@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fakes import make_deps
 from fastapi.testclient import TestClient
@@ -17,6 +17,7 @@ from app.main import create_app
 from app.notify import NotificationService
 from app.notify.apprise_urls import Channel, build_channels
 from app.notify.messages import (
+    GuestSummary,
     build_interrupted_message,
     build_missed_backup_message,
     build_run_message,
@@ -48,6 +49,7 @@ class FakeApprise:
         self.raise_urls = raise_urls or {}
         self.urls: list[str] = []
         self.payload: tuple[str, str] | None = None
+        self.body_format: str | None = None
 
     def add(self, url: str) -> bool:
         if not self.add_ok:
@@ -55,8 +57,9 @@ class FakeApprise:
         self.urls.append(url)
         return True
 
-    def notify(self, title: str = "", body: str = "") -> bool:
+    def notify(self, title: str = "", body: str = "", body_format: str = "") -> bool:
         self.payload = (title, body)
+        self.body_format = body_format
         url = self.urls[-1]
         if url in self.raise_urls:
             raise RuntimeError(self.raise_urls[url])
@@ -163,12 +166,25 @@ def test_ntfy_http_uses_insecure_scheme():
 
 
 def _run(
-    status: RunStatus, *, error: str | None = None, kind: RunKind = RunKind.CYCLE
+    status: RunStatus,
+    *,
+    error: str | None = None,
+    kind: RunKind = RunKind.CYCLE,
+    trigger: RunTrigger = RunTrigger.MANUAL,
 ) -> Run:
-    run = Run(kind=kind, trigger=RunTrigger.MANUAL, status=status, error=error)
+    run = Run(kind=kind, trigger=trigger, status=status, error=error)
+    run.id = 128
     run.started_at = datetime(2026, 6, 28, 4, 0, 0, tzinfo=UTC)
     run.finished_at = datetime(2026, 6, 28, 4, 1, 23, tzinfo=UTC)
     return run
+
+
+def _step(name: StepName, status: StepStatus, seconds: int) -> RunStep:
+    """A finished step that took ``seconds``, for the duration breakdown."""
+    step = RunStep(name=name, status=status)
+    step.started_at = datetime(2026, 6, 28, 4, 0, 0, tzinfo=UTC)
+    step.finished_at = step.started_at + timedelta(seconds=seconds)
+    return step
 
 
 def test_run_message_success_english():
@@ -181,19 +197,99 @@ def test_run_message_includes_guests_and_datastore():
     from app.connectors.pbs import DatastoreStatus
 
     run = _run(RunStatus.SUCCESS)
-    run.guests_ok = 4
     ds = DatastoreStatus(total=8_000_000_000_000, used=2_000_000_000_000, avail=6_000_000_000_000)
-    _title, body = build_run_message(Config(), run, ds)
-    assert "Guests: 4" in body
+    _title, body = build_run_message(Config(), run, ds, GuestSummary(total=4, ok=4))
+    assert "Guests: 4/4" in body
     assert "25.0% used" in body
     assert "5.5 TiB free" in body
 
 
 def test_run_message_omits_guests_and_datastore_when_absent():
-    # No guests_ok and no datastore -> neither line appears (e.g. an aborted run).
+    # No guest summary and no datastore -> neither line appears (e.g. an aborted run).
     _title, body = build_run_message(Config(), _run(RunStatus.ABORTED))
     assert "Guests" not in body
     assert "Datastore" not in body
+
+
+def test_run_message_names_the_guests_that_failed():
+    """A single guest failing takes the whole vzdump task down, so the run reads FAILURE with
+    no hint of which guest broke. The tally is the only place that detail exists."""
+    _title, body = build_run_message(
+        Config(),
+        _run(RunStatus.FAILURE, error="vzdump failed"),
+        None,
+        GuestSummary(total=14, ok=12, failed=["web01", "db02"]),
+    )
+    assert "Guests: 12/14 (failed: web01, db02)" in body
+
+
+def test_run_message_omits_the_guest_line_when_nothing_was_selected():
+    # total == 0 means the cycle never got as far as picking guests: "0/0" would read like a
+    # result when it is really an absence.
+    _title, body = build_run_message(Config(), _run(RunStatus.ABORTED), None, GuestSummary())
+    assert "Guests" not in body
+
+
+def test_run_message_field_order():
+    """The order is the spec — asserting the lines individually wouldn't catch a reshuffle."""
+    from app.connectors.pbs import DatastoreStatus
+
+    run = _run(RunStatus.FAILURE, error="boom", trigger=RunTrigger.SCHEDULED)
+    run.steps = [_woke(), RunStep(name=StepName.BACKUP, status=StepStatus.FAILURE)]
+    ds = DatastoreStatus(total=8_000_000_000_000, used=2_000_000_000_000, avail=6_000_000_000_000)
+    _title, body = build_run_message(
+        Config(),
+        run,
+        ds,
+        GuestSummary(total=2, ok=1, failed=["web01"]),
+        datetime(2026, 6, 29, 4, 0, tzinfo=UTC),
+    )
+    assert [line.split(":")[0] for line in body.splitlines()] == [
+        "Trigger",
+        "Duration",
+        "Guests",
+        "Datastore",
+        "Error",
+        "⚠️ PBS left powered on — check it",
+        "Next scheduled run",
+        "Run #128",
+    ]
+
+
+def test_run_message_duration_breaks_down_the_work_phases():
+    """Where the time actually went. Wake/wait/power-off stay out: near-constant overhead
+    that would only crowd the line."""
+    run = _run(RunStatus.SUCCESS)
+    run.steps = [
+        _step(StepName.WAIT, StepStatus.SUCCESS, 40),
+        _step(StepName.BACKUP, StepStatus.SUCCESS, 70),
+        RunStep(name=StepName.GC, status=StepStatus.SKIPPED),
+        _step(StepName.POWEROFF, StepStatus.SUCCESS, 9),
+    ]
+    _title, body = build_run_message(Config(), run)
+    assert "Duration: 1m 23s (backup 1m 10s)" in body
+
+
+def test_run_message_trigger_and_next_run_are_localized():
+    cfg = Config()
+    cfg.app.language = "it"
+    _title, body = build_run_message(
+        cfg,
+        _run(RunStatus.SUCCESS, trigger=RunTrigger.SCHEDULED),
+        None,
+        None,
+        datetime(2026, 6, 29, 4, 0, tzinfo=UTC),
+    )
+    assert body.startswith("Avvio: pianificato")
+    assert "Prossima esecuzione pianificata: 2026-06-29 04:00" in body
+    assert body.endswith("Run #128")
+
+
+def test_run_message_omits_next_run_when_no_schedule_is_armed():
+    # A disabled/invalid schedule leaves no armed job: better no line than a "—" placeholder,
+    # which reads like an error in an otherwise-fine success push.
+    _title, body = build_run_message(Config(), _run(RunStatus.SUCCESS))
+    assert "Next scheduled run" not in body
 
 
 def test_run_message_failure_includes_error_and_locale():
@@ -333,6 +429,32 @@ def test_send_missed_backup_skipped_when_on_failure_disabled():
     assert report.reason == "on_failure disabled"
 
 
+def test_missed_backup_message_renders_every_time_in_the_configured_zone():
+    """The missed/next times come from the cron trigger (already local) but the last run is
+    read back from the database in UTC — so this message used to mix two zones, with one line
+    silently hours off from the two around it."""
+    cfg = Config()
+    cfg.app.timezone = "Europe/Rome"  # UTC+2 in July
+    _title, body = build_missed_backup_message(
+        cfg,
+        datetime(2026, 7, 9, 2, 0, tzinfo=UTC),
+        datetime(2026, 7, 8, 2, 0, tzinfo=UTC),
+        datetime(2026, 7, 10, 2, 0, tzinfo=UTC),
+    )
+    assert "Missed run: 2026-07-09 04:00 CEST" in body
+    assert "Last backup run: 2026-07-08 04:00 CEST" in body
+    assert "Next scheduled run: 2026-07-10 04:00 CEST" in body
+
+
+def test_run_message_next_run_uses_the_configured_zone():
+    cfg = Config()
+    cfg.app.timezone = "Europe/Rome"
+    _title, body = build_run_message(
+        cfg, _run(RunStatus.SUCCESS), None, None, datetime(2026, 7, 10, 2, 0, tzinfo=UTC)
+    )
+    assert "Next scheduled run: 2026-07-10 04:00 CEST" in body
+
+
 def test_interrupted_message_flags_pbs_left_on_when_it_had_woken():
     # Crashed during backup after the PBS woke: WAIT succeeded, no POWEROFF -> warn.
     run = _run(RunStatus.FAILURE, error="Interrupted — Joulenap restarted")
@@ -355,6 +477,28 @@ def test_interrupted_message_no_pbs_line_when_it_never_woke():
     ]
     _title, body = build_interrupted_message(Config(), run)
     assert "left powered on" not in body
+
+
+def test_interrupted_message_reports_how_long_the_pbs_has_been_awake():
+    """This alert has no Duration line, and the interval that matters isn't the run's — it's
+    how long the box has been burning power since it woke, which nothing has switched off."""
+    run = _run(RunStatus.FAILURE, error="Interrupted")
+    run.finished_at = datetime(2026, 6, 28, 13, 12, 0, tzinfo=UTC)  # the restart (sweep) time
+    run.steps = [
+        _step(StepName.WAIT, StepStatus.SUCCESS, 40),  # came up at 04:00:40
+        RunStep(name=StepName.BACKUP, status=StepStatus.FAILURE),
+    ]
+    _title, body = build_interrupted_message(Config(), run)
+    assert "PBS awake for: 9h 11m 20s" in body
+    assert body.endswith("Run #128")
+
+
+def test_interrupted_message_no_awake_line_when_it_never_woke():
+    # WAIT failed: the box never came up, so there is no interval to report (and no warning).
+    run = _run(RunStatus.FAILURE, error="Interrupted")
+    run.steps = [_step(StepName.WAIT, StepStatus.FAILURE, 300)]
+    _title, body = build_interrupted_message(Config(), run)
+    assert "awake for" not in body
 
 
 def test_interrupted_message_localized_italian():
@@ -414,6 +558,22 @@ def test_send_test_dispatches_to_every_channel():
     assert fake.payload is not None
 
 
+def test_body_is_declared_as_plain_text_so_html_channels_keep_the_line_breaks():
+    """Every body is a "Label: value" list separated by newlines. Apprise only converts those
+    newlines for an HTML-format channel (email, Telegram) when told the input is TEXT —
+    without the declaration the whole body renders on a single line."""
+    from apprise.common import NotifyFormat
+    from apprise.conversion import convert_between
+
+    fake = FakeApprise()
+    svc = NotificationService(apprise_factory=lambda: fake)
+    svc.send_test(_notifications_config())
+
+    assert fake.body_format == NotifyFormat.TEXT
+    rendered = convert_between(fake.body_format, NotifyFormat.HTML, "Duration: 8m\nGuests: 13")
+    assert "<br/>" in rendered
+
+
 def test_send_test_with_no_channels_reports_reason():
     svc = NotificationService(apprise_factory=FakeApprise)
     report = svc.send_test(Config())
@@ -466,7 +626,7 @@ def test_a_raising_add_does_not_leak_the_url():
         def add(self, url: str) -> bool:
             raise RuntimeError(f"cannot parse {url}")
 
-        def notify(self, title: str = "", body: str = "") -> bool:
+        def notify(self, title: str = "", body: str = "", body_format: str = "") -> bool:
             raise AssertionError("notify must not run when add raised")
 
     svc = NotificationService(apprise_factory=RaisingAdd)
@@ -565,7 +725,7 @@ def test_log_capture_is_isolated_per_thread():
             self.urls.append(url)
             return True
 
-        def notify(self, title: str = "", body: str = "") -> bool:
+        def notify(self, title: str = "", body: str = "", body_format: str = "") -> bool:
             # Simulate a concurrent send on another thread logging to the same "apprise"
             # logger while this send is in flight. Joined (not slept) so the emission is
             # guaranteed to happen, deterministically, before notify() returns.
@@ -614,7 +774,9 @@ def test_failure_sent_when_on_failure_enabled():
 
 def test_backup_cycle_notifies_with_final_run(temp_db):
     captured: list[tuple[RunStatus, bool]] = []
-    deps, *_ = make_deps(notify=lambda _c, run, ds: captured.append((run.status, ds is not None)))
+    deps, *_ = make_deps(
+        notify=lambda _c, run, ds, *_a: captured.append((run.status, ds is not None))
+    )
     cfg = Config()
     cfg.pve.storage_id = "pbs"
     with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
@@ -624,7 +786,7 @@ def test_backup_cycle_notifies_with_final_run(temp_db):
 
 
 def test_notify_failure_does_not_break_cycle(temp_db):
-    def boom(_c, _run, _ds=None):
+    def boom(_c, _run, _ds=None, *_a):
         raise RuntimeError("smtp down")
 
     deps, *_ = make_deps(notify=boom)

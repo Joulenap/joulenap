@@ -90,11 +90,11 @@
   grid-template-columns: 84px 96px 1fr;
 }
 
-/* Run history: started | kind | trigger | status | duration | guests */
+/* Run history: id | started | kind | trigger | status | duration | guests */
 .jn-run-head,
 .jn-run-row {
   display: grid;
-  grid-template-columns: 116px 90px 92px 92px 72px 1fr;
+  grid-template-columns: 52px 116px 90px 92px 92px 72px 1fr;
   gap: 8px;
 }
 
@@ -197,17 +197,23 @@
     grid-column: 1 / -1;
   }
 
-  /* Same treatment for run rows: drop the six column labels, then two lines per run —
-   * started + kind + status on the first, trigger/duration/guests on the second. */
+  /* Same treatment for run rows: drop the column labels, then two lines per run — id +
+   * started + kind + trigger on the first, status/duration/guests on the second. The
+   * nth-child index is positional, so it moves with the column count. */
   .jn-run-head {
     display: none;
   }
   .jn-run-row {
-    grid-template-columns: 106px 1fr auto;
+    grid-template-columns: 44px 100px 1fr auto;
     row-gap: 3px;
   }
-  .jn-run-row > :nth-child(n + 4) {
+  .jn-run-row > :nth-child(n + 5) {
     grid-row: 2;
+  }
+  /* The result badge opens the second line, where it would otherwise land in the narrow
+   * id track and run into the duration next to it. */
+  .jn-run-row > :nth-child(5) {
+    grid-column: 1 / 3;
   }
 
   .jn-settings {

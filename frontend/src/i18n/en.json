@@ -116,6 +116,7 @@
     "historyViews": "Activity views",
     "runHistory": "Run history",
     "runsCount": "{{n}} runs",
+    "colId": "Run",
     "colStarted": "Started",
     "colKind": "Job",
     "colTrigger": "Trigger",

@@ -7,6 +7,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0]
+
+### Added
+
+- **Notifications say a lot more.** Every run notification now opens with what started the run
+  (scheduled or manual), breaks the duration down by phase (`12m 34s (backup 7m 10s · GC 1m 6s)`),
+  reports guests as a fraction with the names of the ones that failed
+  (`Guests: 12/14 (failed: web01, db02)`), and closes with the next scheduled run and the run
+  number. The alert for a run a restart interrupted also states how long the PBS has been awake.
+  All of it is translated in both languages.
+- **Run history shows the run number.** A new first column, so the `Run #128` a notification
+  quotes can actually be looked up in the interface.
+- **A failed backup names the guest that broke.** Proxmox runs one vzdump task for all selected
+  guests, so a single guest failing used to fail the run with no indication of which one; the
+  outcome is now read off the task log as it streams, so the notification can name it.
+
+### Fixed
+
+- **Notification bodies keep their line breaks.** Channels that deliver in HTML (email, Telegram)
+  collapsed the whole body onto a single line because Apprise was never told the text was plain
+  text.
+- **Notification timestamps all use the configured timezone.** In the missed-backup alert the
+  "Last backup run" line was rendered in UTC while the two lines around it used `app.timezone`,
+  so the same message could disagree with itself by hours.
+
 ## [0.7.0]
 
 ### Added
@@ -327,7 +352,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Joulenap/joulenap/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Joulenap/joulenap/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Joulenap/joulenap/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Joulenap/joulenap/compare/v0.4.4...v0.5.0

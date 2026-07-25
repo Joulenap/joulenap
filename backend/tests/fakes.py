@@ -194,6 +194,6 @@ def make_deps(
         # Second arg is the cancel probe the real _wait_reachable takes; fakes ignore it.
         wait_reachable=lambda _c, _cancel=None: wait(),
         wait_pbs_idle=lambda _c: idle(),
-        notify=notify or (lambda _c, _r, _d=None: None),
+        notify=notify or (lambda *_a: None),
     )
     return deps, pve, pbs, power

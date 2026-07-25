@@ -10,6 +10,7 @@ from __future__ import annotations
 import ssl
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 
 from ..config import Config
 from ..connectors import net, tls
@@ -19,6 +20,7 @@ from ..connectors.pve import PveClient
 from ..connectors.wol import send_magic_packet
 from ..db.models import Run
 from ..notify import NotificationService
+from ..notify.messages import GuestSummary
 
 
 def _build_pve(config: Config) -> PveClient:
@@ -79,8 +81,14 @@ def _wait_pbs_idle(config: Config) -> bool:
         return pbs.wait_until_idle(timeout=config.pbs.poweroff_task_wait)
 
 
-def _notify(config: Config, run: Run, datastore: DatastoreStatus | None = None) -> None:
-    NotificationService().send_run_result(config, run, datastore)
+def _notify(
+    config: Config,
+    run: Run,
+    datastore: DatastoreStatus | None = None,
+    guests: GuestSummary | None = None,
+    next_at: datetime | None = None,
+) -> None:
+    NotificationService().send_run_result(config, run, datastore, guests, next_at)
 
 
 @dataclass
@@ -93,7 +101,9 @@ class CycleDeps:
     send_wol: Callable[[Config], None]
     wait_reachable: Callable[..., bool]
     wait_pbs_idle: Callable[[Config], bool]
-    notify: Callable[[Config, Run, DatastoreStatus | None], None]
+    # (config, run, datastore, guests, next_at) -> None. Untyped args because the test fakes
+    # take fewer of them; the production implementation is ``_notify`` above.
+    notify: Callable[..., None]
     # True once the user has asked to stop the in-flight run. Wired by JobService to its own
     # cancel event and read live, so the cycle can check it without knowing about the service.
     # Default: nothing ever cancels (tests and direct callers that don't care).
@@ -101,6 +111,10 @@ class CycleDeps:
     # Whether that cancel asked for the PBS to be powered off afterwards (the toggle in the
     # stop dialog). Only meaningful once ``cancelled()`` is True.
     cancel_power_off: Callable[[], bool] = lambda: False
+    # Next armed backup fire, for the notification's "next scheduled run" line. Late-bound by
+    # main.py the same way: the Scheduler lives on app.state and isn't reachable from inside a
+    # running cycle. Default "unknown" — tests and direct callers just omit the line.
+    next_run: Callable[[], datetime | None] = lambda: None
 
     @classmethod
     def default(cls) -> CycleDeps:
