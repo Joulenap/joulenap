@@ -24,7 +24,12 @@ import apprise
 from ..config import Config, NotificationsConfig
 from ..db.models import Run, RunStatus
 from .apprise_urls import Channel, build_channels
-from .messages import build_missed_backup_message, build_run_message, build_test_message
+from .messages import (
+    GuestSummary,
+    build_missed_backup_message,
+    build_run_message,
+    build_test_message,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -134,7 +139,12 @@ class NotificationService:
         self._apprise_factory = apprise_factory
 
     def send_run_result(
-        self, config: Config, run: Run, datastore: DatastoreStatus | None = None
+        self,
+        config: Config,
+        run: Run,
+        datastore: DatastoreStatus | None = None,
+        guests: GuestSummary | None = None,
+        next_at: datetime | None = None,
     ) -> NotifyReport:
         """Notify the run outcome, honouring the on_success / on_failure routing toggles."""
         n = config.notifications
@@ -142,7 +152,7 @@ class NotificationService:
             return NotifyReport(sent=False, channels=0, skipped=True, reason="on_success disabled")
         if run.status in (RunStatus.FAILURE, RunStatus.ABORTED) and not n.on_failure:
             return NotifyReport(sent=False, channels=0, skipped=True, reason="on_failure disabled")
-        title, body = build_run_message(config, run, datastore)
+        title, body = build_run_message(config, run, datastore, guests, next_at)
         report = self._dispatch(build_channels(n), title, body, n)
         # A run notification has no UI: without this, a channel that silently stopped working
         # would never surface anywhere.
@@ -220,7 +230,13 @@ class NotificationService:
             if not engine.add(channel.url):
                 return ChannelResult(channel=channel.name, ok=False, error="invalid URL")
             with _captured_apprise_logs() as captured:
-                ok = bool(engine.notify(title=title, body=body))
+                # Declare the body as plain text. Without this Apprise leaves it unconverted,
+                # so an HTML-format channel (email, Telegram) renders our "\n" separators as
+                # spaces and the whole body collapses onto one line. With it, Apprise turns
+                # them into <br/> for HTML channels and leaves text/markdown ones untouched.
+                ok = bool(
+                    engine.notify(title=title, body=body, body_format=apprise.NotifyFormat.TEXT)
+                )
         except Exception as exc:  # a broken channel must not stop the others
             return ChannelResult(
                 channel=channel.name, ok=False, error=_scrub(str(exc), channel_secrets)

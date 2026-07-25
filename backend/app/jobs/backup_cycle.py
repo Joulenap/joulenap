@@ -10,16 +10,19 @@ power-off step simply never runs.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from ..config import Config
 from ..connectors.errors import TaskCancelled
 from ..connectors.pbs import DatastoreStatus
-from ..connectors.pve import PveClient, build_prune_string
+from ..connectors.pve import Guest, build_prune_string
 from ..db import session_scope
 from ..db.datastore_stats import upsert_datastore_stat
 from ..db.guest_backups import upsert_last_backups
 from ..db.models import LogLevel, RunStatus, StepName, StepStatus
+from ..notify.messages import GuestSummary
 from .deps import CycleDeps
 from .recorder import RunRecorder
 
@@ -28,11 +31,39 @@ from .recorder import RunRecorder
 _TAIL_INTERVAL = 2.0
 
 
-def _tailer(recorder: RunRecorder, step: StepName, source: str):
+# vzdump narrates one line per guest; these are its two outcomes:
+#   INFO: Finished Backup of VM 100 (00:01:23)
+#   ERROR: Backup of VM 101 failed - command 'lxc-freeze -n 101' failed: exit code 1
+_VZDUMP_DONE = re.compile(r"Finished Backup of VM (\d+)")
+_VZDUMP_FAILED = re.compile(r"ERROR: Backup of VM (\d+) failed")
+
+
+def _guest_watcher(summary: GuestSummary, names: dict[int, str]):
+    """A log-batch callback that fills ``summary`` from the vzdump output *as it streams*.
+
+    One vzdump task covers every selected guest, so a single guest failing makes the whole
+    task exit non-OK and the wait raises before the step body can record anything. Reading
+    the outcome line by line into an object owned by the *caller* is what makes the tally
+    survive that raise — which is precisely the run the user needs the detail for.
+    """
+
+    def watch(lines: list[tuple[int, str]]) -> None:
+        for _line_no, text in lines:
+            if _VZDUMP_DONE.search(text):
+                summary.ok += 1
+            elif match := _VZDUMP_FAILED.search(text):
+                vmid = int(match.group(1))
+                summary.failed.append(names.get(vmid) or str(vmid))
+
+    return watch
+
+
+def _tailer(recorder: RunRecorder, step: StepName, source: str, watch=None):
     """A ``wait_task(on_log=...)`` callback that persists each task-log batch.
 
     Best-effort: a failure to store a log line must never fail an otherwise-fine backup,
-    so it's swallowed with a warning (the narration just misses a line).
+    so it's swallowed with a warning (the narration just misses a line). ``watch``, when
+    given, also gets each batch — see :func:`_guest_watcher`.
     """
 
     def on_log(lines: list[tuple[int, str]]) -> None:
@@ -40,6 +71,8 @@ def _tailer(recorder: RunRecorder, step: StepName, source: str):
             recorder.task_log(step, source, lines)
         except Exception as exc:  # pragma: no cover - defensive
             recorder.log(LogLevel.WARN, f"could not store task-log line(s): {exc}")
+        if watch is not None:
+            watch(lines)
 
     return on_log
 
@@ -70,6 +103,7 @@ def _wait_or_stop(
     deps: CycleDeps,
     step: StepName,
     source: str,
+    watch: Callable[[list[tuple[int, str]]], None] | None = None,
 ) -> None:
     """Wait for a PVE/PBS task, stopping it remotely if the user cancels the run.
 
@@ -82,7 +116,7 @@ def _wait_or_stop(
         client.wait_task(
             upid,
             poll_interval=_TAIL_INTERVAL,
-            on_log=_tailer(recorder, step, source),
+            on_log=_tailer(recorder, step, source, watch),
             should_cancel=deps.cancelled,
         )
     except TaskCancelled as exc:
@@ -98,30 +132,34 @@ def _wait_or_stop(
         raise CycleCancelled("Run cancelled") from exc
 
 
-def select_vmids(config: Config, pve: PveClient) -> tuple[list[int] | None, bool]:
+def select_vmids(config: Config, guests: list[Guest]) -> tuple[list[int] | None, bool]:
     """Resolve the configured guest selection into vzdump arguments.
 
     Returns ``(vmids, all_guests)``: for ``mode=all`` -> ``(None, True)``; otherwise an
-    explicit id list. ``exclude`` is materialised by listing the node's guests and
-    dropping the excluded ids.
+    explicit id list. ``exclude`` is materialised from ``guests`` (the node's current
+    guests) by dropping the excluded ids.
     """
-    guests = config.backup.guests
-    if guests.mode == "all":
+    selection = config.backup.guests
+    if selection.mode == "all":
         return None, True
-    if guests.mode == "include":
-        return list(guests.list), False
-    excluded = set(guests.list)
-    vmids = [g.vmid for g in pve.list_guests() if g.vmid not in excluded]
-    return vmids, False
+    if selection.mode == "include":
+        return list(selection.list), False
+    excluded = set(selection.list)
+    return [g.vmid for g in guests if g.vmid not in excluded], False
 
 
-def _run_backup_step(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
+def _run_backup_step(
+    config: Config, recorder: RunRecorder, deps: CycleDeps, summary: GuestSummary
+) -> None:
     with recorder.step(StepName.BACKUP) as step:
         with deps.build_pve(config) as pve:
-            vmids, all_guests = select_vmids(config, pve)
+            # One listing feeds all three needs: the exclude-mode selection, the guest count
+            # and the {vmid: name} map the notification names failed guests with.
+            guests = pve.list_guests()
+            vmids, all_guests = select_vmids(config, guests)
             if not all_guests and not vmids:
                 raise CycleAbort("No guests selected for backup")
-            guest_count = len(pve.list_guests()) if all_guests else len(vmids)
+            summary.total = len(guests) if all_guests else len(vmids)
             prune = build_prune_string(config.backup.retention.model_dump())
             upid = pve.vzdump(
                 config.pve.storage_id,
@@ -132,10 +170,20 @@ def _run_backup_step(config: Config, recorder: RunRecorder, deps: CycleDeps) -> 
                 bwlimit=config.backup.bwlimit,
             )
             step.detail = upid
-            _wait_or_stop(pve, upid, recorder, deps, StepName.BACKUP, "pve")
-            # Record the count only once the task succeeded, so a failed run doesn't
-            # advertise guests as backed up.
-            recorder.run.guests_ok = guest_count
+            _wait_or_stop(
+                pve,
+                upid,
+                recorder,
+                deps,
+                StepName.BACKUP,
+                "pve",
+                _guest_watcher(summary, {g.vmid: g.name for g in guests}),
+            )
+            # The task exited OK, so every selected guest was backed up whatever the log
+            # parse made of it — a vzdump wording change must never report "0/14" on a good
+            # run. Recorded only here so a failed run doesn't advertise guests as backed up.
+            summary.ok = summary.total
+            recorder.run.guests_ok = summary.total
 
 
 def _preflight_step(config: Config, recorder: RunRecorder, deps: CycleDeps) -> None:
@@ -339,6 +387,9 @@ def run_backup_cycle(
     ``power_off=False`` (manual "keep PBS on") runs everything but the final power-off, so a
     PBS the user wants to keep awake (e.g. woken for a restore) is left on."""
     datastore: DatastoreStatus | None = None
+    # Owned here, not by the backup step: a guest failing takes the whole vzdump task down
+    # and unwinds that frame, and the failed run is exactly the one whose tally we want.
+    guests = GuestSummary()
     try:
         with recorder.step(StepName.WAKE):
             deps.send_wol(config)
@@ -352,7 +403,7 @@ def run_backup_cycle(
                 )
 
         _preflight_step(config, recorder, deps)
-        _run_backup_step(config, recorder, deps)
+        _run_backup_step(config, recorder, deps, guests)
 
         # A cancel that lands between steps must not start the next one — the task waits
         # check the flag themselves, this covers the gaps between them.
@@ -390,7 +441,7 @@ def run_backup_cycle(
     except Exception as exc:  # connector/task failures: leave PBS on, mark failed
         recorder.finish(RunStatus.FAILURE, error=str(exc))
 
-    _notify_result(config, recorder, deps, datastore)
+    _notify_result(config, recorder, deps, datastore, guests)
 
 
 def run_verify_cycle(
@@ -477,10 +528,11 @@ def _notify_result(
     recorder: RunRecorder,
     deps: CycleDeps,
     datastore: DatastoreStatus | None = None,
+    guests: GuestSummary | None = None,
 ) -> None:
     """Send the result notification. A delivery failure is logged, never fatal — the run
     has already completed and its recorded status must not depend on the notifier."""
     try:
-        deps.notify(config, recorder.run, datastore)
+        deps.notify(config, recorder.run, datastore, guests, deps.next_run())
     except Exception as exc:
         recorder.log(LogLevel.WARN, f"notification failed: {exc}")

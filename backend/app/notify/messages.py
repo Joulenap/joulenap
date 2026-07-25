@@ -8,7 +8,8 @@ the UI locales but kept deliberately tiny (only the strings that ship in a notif
 
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING
 
 from ..config import Config
@@ -16,6 +17,25 @@ from ..db.models import Run, RunStatus, StepName, StepStatus
 
 if TYPE_CHECKING:
     from ..connectors.pbs import DatastoreStatus
+
+
+@dataclass
+class GuestSummary:
+    """What the vzdump task did per guest, for the notification's ``Guests`` line.
+
+    Deliberately **not** persisted: ``runs`` has no migration path (``init_db`` only calls
+    ``create_all``, which never adds a column to an existing table), so this rides along to
+    the notifier as an argument exactly like :class:`DatastoreStatus` does.
+
+    ``failed`` holds display names (the vmid when the guest's name is unknown). Only guests
+    vzdump actually reported on can land here, so a guest the user excluded from the
+    selection is never counted or named.
+    """
+
+    total: int = 0  # guests the run set out to back up
+    ok: int = 0
+    failed: list[str] = field(default_factory=list)
+
 
 # event keys: success | failure | aborted | test
 _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
@@ -50,16 +70,28 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "body": "If you can read this, notifications are configured correctly.",
         },
         "_labels": {
+            "trigger": "Trigger",
+            "trigger_scheduled": "scheduled",
+            "trigger_manual": "manual",
             "duration": "Duration",
             "guests": "Guests",
+            "failed": "failed",
             "datastore": "Datastore",
             "used": "used",
             "free": "free",
             "error": "Error",
             "pbs_left_on": "⚠️ PBS left powered on — check it",
+            "awake_for": "PBS awake for",
             "missed_run": "Missed run",
             "last_run": "Last backup run",
             "next_run": "Next scheduled run",
+            "run_no": "Run",
+            # Names for the duration breakdown. Only the phases that do the actual work: the
+            # wake packet is instant, and wait/power-off are near-constant overhead that would
+            # just crowd the line.
+            "phase_backup": "backup",
+            "phase_gc": "GC",
+            "phase_verify": "verify",
         },
     },
     "it": {
@@ -91,16 +123,25 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "body": "Se leggi questo messaggio, le notifiche sono configurate correttamente.",
         },
         "_labels": {
+            "trigger": "Avvio",
+            "trigger_scheduled": "pianificato",
+            "trigger_manual": "manuale",
             "duration": "Durata",
             "guests": "Guest",
+            "failed": "falliti",
             "datastore": "Datastore",
             "used": "usato",
             "free": "liberi",
             "error": "Errore",
             "pbs_left_on": "⚠️ PBS lasciato acceso — controllalo",
+            "awake_for": "PBS sveglio da",
             "missed_run": "Esecuzione mancata",
             "last_run": "Ultimo backup eseguito",
             "next_run": "Prossima esecuzione pianificata",
+            "run_no": "Run",
+            "phase_backup": "backup",
+            "phase_gc": "GC",
+            "phase_verify": "verifica",
         },
     },
 }
@@ -138,6 +179,32 @@ def _format_duration(seconds: float) -> str:
     return f"{secs}s"
 
 
+#: Steps that get a slot in the duration breakdown, keyed to their ``_labels`` entry. Wake,
+#: wait, precheck and power-off are left out on purpose — see the label block's comment.
+_PHASE_LABEL = {
+    StepName.BACKUP: "phase_backup",
+    StepName.GC: "phase_gc",
+    StepName.VERIFY: "phase_verify",
+}
+
+
+def _phase_breakdown(labels: dict[str, str], run: Run) -> str:
+    """``backup 7m 10s · GC 1m 6s`` — where the run's time actually went, in step order.
+
+    Skipped steps (GC turned off) and steps still running contribute nothing, so the
+    parentheses never advertise work that didn't happen. A ``StepName`` added later simply
+    doesn't appear rather than raising.
+    """
+    parts = []
+    for step in run.steps:  # the relationship is ordered by started_at
+        key = _PHASE_LABEL.get(step.name)
+        if key is None or step.status == StepStatus.SKIPPED or not step.finished_at:
+            continue
+        seconds = (step.finished_at - step.started_at).total_seconds()
+        parts.append(f"{labels[key]} {_format_duration(seconds)}")
+    return " · ".join(parts)
+
+
 def human_bytes(n: int) -> str:
     """Binary-unit size, e.g. ``4.6 TiB`` (PBS reports datastore sizes in bytes)."""
     size = float(n)
@@ -170,11 +237,18 @@ def _pbs_left_on(run: Run) -> bool:
 
 
 def build_run_message(
-    config: Config, run: Run, datastore: DatastoreStatus | None = None
+    config: Config,
+    run: Run,
+    datastore: DatastoreStatus | None = None,
+    guests: GuestSummary | None = None,
+    next_at: datetime | None = None,
 ) -> tuple[str, str]:
     """``(title, body)`` describing a finished run, in the configured language.
 
-    ``datastore`` (read while the PBS was still awake) adds a usage line on success.
+    One field per line, in a fixed order; a field whose data is missing drops out entirely
+    rather than rendering a placeholder. ``datastore`` (read while the PBS was still awake)
+    adds the usage line, ``guests`` the per-guest tally of a backup cycle, ``next_at`` the
+    schedule's following fire.
     """
     pack = _pack(config.app.language)
     labels = pack["_labels"]
@@ -182,12 +256,21 @@ def build_run_message(
 
     # The title already conveys success/failure/aborted, so we don't repeat the (untranslated)
     # status enum in the body.
-    lines: list[str] = []
+    lines: list[str] = [
+        f"{labels['trigger']}: {labels.get(f'trigger_{run.trigger}', run.trigger)}"
+    ]
     if run.started_at and run.finished_at:
         duration = (run.finished_at - run.started_at).total_seconds()
-        lines.append(f"{labels['duration']}: {_format_duration(duration)}")
-    if run.guests_ok is not None:
-        lines.append(f"{labels['guests']}: {run.guests_ok}")
+        breakdown = _phase_breakdown(labels, run)
+        line = f"{labels['duration']}: {_format_duration(duration)}"
+        lines.append(f"{line} ({breakdown})" if breakdown else line)
+    # No summary at all (a GC or verify cycle, or an abort before the guests were picked)
+    # means there is nothing truthful to say about guests — better silent than "0".
+    if guests is not None and guests.total:
+        line = f"{labels['guests']}: {guests.ok}/{guests.total}"
+        if guests.failed:
+            line += f" ({labels['failed']}: {', '.join(guests.failed)})"
+        lines.append(line)
     if datastore is not None:
         lines.append(
             f"{labels['datastore']}: {datastore.used_pct}% {labels['used']}, "
@@ -199,17 +282,34 @@ def build_run_message(
     if _pbs_left_on(run):
         lines.append(labels["pbs_left_on"])
 
+    if next_at is not None:
+        lines.append(f"{labels['next_run']}: {_format_dt(next_at, _timezone(config))}")
+    if run.id is not None:
+        lines.append(f"{labels['run_no']} #{run.id}")
+
     return _title_for(pack, run.kind, event), "\n".join(lines)
 
 
-def _format_dt(dt: datetime | None) -> str:
+def _timezone(config: Config) -> tzinfo:
+    """The zone every timestamp in a notification is rendered in.
+
+    Imported here rather than at module scope because ``core.scheduler`` pulls in ``jobs``,
+    which pulls in this package — a top-level import would be circular."""
+    from ..core.scheduler import resolve_timezone
+
+    return resolve_timezone(config.app.timezone)
+
+
+def _format_dt(dt: datetime | None, tz: tzinfo) -> str:
     """A short absolute timestamp for notifications, e.g. ``2026-07-11 04:00 CEST``.
 
-    The datetimes passed here come straight from the schedule's cron trigger, so they are
-    already in the user's configured timezone — no re-localisation needed."""
+    Everything is converted into the configured zone first. Cron-derived times already
+    arrive in it, but anything read back from the database is UTC (see ``UtcDateTime``) —
+    without the conversion one line of the same message would silently be hours off from
+    the ones around it."""
     if dt is None:
         return "—"
-    return dt.strftime("%Y-%m-%d %H:%M %Z").rstrip()
+    return dt.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z").rstrip()
 
 
 def build_missed_backup_message(
@@ -219,12 +319,13 @@ def build_missed_backup_message(
     over its window (BE-R1), in the configured language."""
     pack = _pack(config.app.language)
     labels = pack["_labels"]
+    tz = _timezone(config)
     lines = [
         pack["missed"]["intro"],
         "",
-        f"{labels['missed_run']}: {_format_dt(missed_at)}",
-        f"{labels['last_run']}: {_format_dt(last_run_at)}",
-        f"{labels['next_run']}: {_format_dt(next_at)}",
+        f"{labels['missed_run']}: {_format_dt(missed_at, tz)}",
+        f"{labels['last_run']}: {_format_dt(last_run_at, tz)}",
+        f"{labels['next_run']}: {_format_dt(next_at, tz)}",
     ]
     return pack["missed"]["title"], "\n".join(lines)
 
@@ -237,12 +338,31 @@ def build_interrupted_message(config: Config, run: Run) -> tuple[str, str]:
     (WAIT succeeded, no POWEROFF) — the whole point of the alert: a normally-off box that a
     crash left awake and burning power."""
     pack = _pack(config.app.language)
+    labels = pack["_labels"]
     lines = [pack["interrupted"]["intro"]]
     if run.error:
-        lines.append(f"{pack['_labels']['error']}: {run.error}")
+        lines.append(f"{labels['error']}: {run.error}")
     if _pbs_left_on(run):
-        lines.append(pack["_labels"]["pbs_left_on"])
+        lines.append(labels["pbs_left_on"])
+        # This alert has no Duration line (the run's own span would span the whole downtime,
+        # not the work), so the one interval worth reporting is how long the box has been
+        # awake: from the moment it came up to the restart — and, since nothing powered it
+        # off, counting still.
+        awake_since = _awake_since(run)
+        if awake_since and run.finished_at:
+            awake = (run.finished_at - awake_since).total_seconds()
+            lines.append(f"{labels['awake_for']}: {_format_duration(awake)}")
+    if run.id is not None:
+        lines.append(f"{labels['run_no']} #{run.id}")
     return pack["interrupted"]["title"], "\n".join(lines)
+
+
+def _awake_since(run: Run) -> datetime | None:
+    """When the PBS finished coming up — the WAIT step's finish, or None if it never did."""
+    for step in run.steps:
+        if step.name == StepName.WAIT and step.status == StepStatus.SUCCESS:
+            return step.finished_at
+    return None
 
 
 def build_test_message(config: Config) -> tuple[str, str]:

@@ -374,10 +374,10 @@ notifications:
 `
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '0.7.0-stub' },
+  'GET /health': { status: 'ok', version: '0.8.0-stub' },
   'GET /update': {
-    current: '0.7.0-stub',
-    latest: '0.7.0',
+    current: '0.8.0-stub',
+    latest: '0.8.0',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },

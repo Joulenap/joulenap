@@ -71,6 +71,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     scheduler.start()
     scheduler.rearm(store.config)
     scheduler.arm_prune()
+    # Late-bound so a cycle can put the next scheduled run in its notification: the cycle
+    # only ever sees its CycleDeps, and the Scheduler doesn't exist yet when JobService
+    # builds them (same reason cancelled/cancel_power_off are wired this way).
+    service.deps.next_run = lambda: scheduler.next_run_time
     app.state.job_service = service
     app.state.scheduler = scheduler
     app.state.notifier = NotificationService()
