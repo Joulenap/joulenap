@@ -66,6 +66,14 @@ screenshots and layout comparisons. It is loaded only when `VITE_STUB_API=1`, wh
 
 Add `--host 0.0.0.0` to reach the dev server from a phone on the same network.
 
+### The public demo
+
+`npm run build:demo` bundles that same stub into `frontend/dist-demo/`, which is what the
+demo at joulenap.com/demo serves: real clock, fixtures slid onto today's calendar, a banner
+saying the data is fake, and a scripted backup cycle (`frontend/src/demoTimeline.ts`) that
+plays out when you press Run backup now. `--mode demo` is the only build that ships the
+stub; `npm run build` — what CI and the Docker image run — never does.
+
 ## Before you open a PR
 
 Run what CI runs (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)); all of it must pass:

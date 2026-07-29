@@ -1,9 +1,12 @@
-﻿// Dev/preview only. Imported from main.tsx behind `import.meta.env.VITE_STUB_API`,
-// so Vite's static replacement drops it from production builds.
+﻿// Dev/preview only — see the guard in main.tsx for who is allowed to load this.
 //
-// Two jobs:
+// Three jobs:
 //   1. answer every `/api/*` fetch from fixtures, so the SPA renders with no backend;
-//   2. pin the clock, so repeated screenshots of the same layout are byte-identical.
+//   2. pin the clock, so repeated screenshots of the same layout are byte-identical;
+//   3. under `--mode demo` only (the public joulenap.com/demo build): let the clock run, slide
+//      the fixtures up to today, and replay a scripted backup cycle when the visitor presses
+//      "Run now". Everything demo-specific hangs off `DEMO` and leaves dev mode untouched.
+import { runFor, stateAt, type DemoState } from './demoTimeline'
 import type {
   AuthStatus,
   Config,
@@ -15,9 +18,13 @@ import type {
   RunDetail,
   RunSummary,
   StatusResponse,
+  StepInfo,
+  TaskLogLine,
   TaskLogResponse,
   UserInfo,
 } from './api/types'
+
+const DEMO = import.meta.env.VITE_DEMO === '1'
 
 const FIXED_MS = Date.UTC(2026, 6, 9, 21, 30, 0)
 
@@ -31,7 +38,9 @@ class FrozenDate extends RealDate {
     return FIXED_MS
   }
 }
-globalThis.Date = FrozenDate as unknown as DateConstructor
+// The demo needs a ticking header clock and a run that visibly advances, so it keeps the real
+// clock; the freeze exists only to make dev screenshots reproducible.
+if (!DEMO) globalThis.Date = FrozenDate as unknown as DateConstructor
 
 // Fixture values are chosen to exercise the layout hard: a long guest name, a long log
 // message, an ERROR level, a non-trivial host.
@@ -373,6 +382,270 @@ notifications:
   custom_urls: []
 `
 
+// --- demo mode ---------------------------------------------------------------
+// Only reached under `--mode demo`. Two halves: slide the fixtures onto today's calendar,
+// and drive a scripted run from ./demoTimeline when the visitor presses Run now / Run GC.
+
+const DAY_MS = 86_400_000
+const RUN_DAYS = [1, 3, 5] // Mon/Wed/Fri — the fixture's `30 2 * * 1,3,5`
+// Fixture times are UTC; re-reading them as local ones makes 02:30Z show up as 02:30 on the
+// visitor's clock, which is what the schedule panel claims the backup time is.
+const TZ_MS = new RealDate().getTimezoneOffset() * 60_000
+
+let DELTA = 0
+
+/**
+ * How far to slide the fixtures onto today's calendar: whole days (so every clock time
+ * survives), as recent as possible, but only a shift that lands the last backup on a
+ * scheduled weekday and leaves no run in the future.
+ */
+function computeDelta(): number {
+  const now = RealDate.now()
+  const last = RealDate.parse(STATUS.last_run!.started_at)
+  const newest = Math.max(...RUNS.map((r) => RealDate.parse(r.started_at)))
+  const start = Math.floor((now - FIXED_MS) / DAY_MS) * DAY_MS + TZ_MS
+  for (let d = 0; d < 10; d++) {
+    const delta = start - d * DAY_MS
+    if (newest + delta < now && RUN_DAYS.includes(new RealDate(last + delta).getDay())) return delta
+  }
+  return start
+}
+
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/
+
+/** Rewrite every ISO timestamp in a fixture tree, in place, so new fixtures are covered too. */
+function shiftDates(node: unknown, seen = new WeakSet<object>()): void {
+  if (typeof node !== 'object' || node === null || seen.has(node)) return
+  seen.add(node)
+  for (const [k, v] of Object.entries(node)) {
+    if (typeof v === 'string' && ISO_RE.test(v)) {
+      ;(node as Record<string, unknown>)[k] = new RealDate(RealDate.parse(v) + DELTA).toISOString()
+    } else shiftDates(v, seen)
+  }
+}
+
+/** The next 02:30 on a scheduled weekday, on the visitor's clock. */
+function nextRunIso(): string {
+  const d = new RealDate(RealDate.now())
+  d.setHours(2, 30, 0, 0)
+  for (let i = 0; i < 8; i++) {
+    if (d.getTime() > RealDate.now() && RUN_DAYS.includes(d.getDay())) break
+    d.setDate(d.getDate() + 1)
+  }
+  return d.toISOString()
+}
+
+const iso = (ms: number) => new RealDate(ms).toISOString()
+
+type Job = { runId: number; kind: 'cycle' | 'gc'; startedMs: number; archived: boolean }
+let job: Job | null = null
+let nextRunId = 46
+let nextLogId = 100
+// The PBS sleeps until something wakes it — that is the whole point of the product, so the
+// demo starts with it off rather than with the dev fixture's always-on box.
+let pbsOnline = false
+
+if (DEMO) {
+  // The dev fixture keeps a permanently "running" row (id 45) to exercise the elapsed-time
+  // cell; on a demo it would be a job that never ends. Drop it before measuring the shift.
+  const stuck = RUNS.findIndex((r) => r.status === 'running')
+  if (stuck >= 0) RUNS.splice(stuck, 1)
+  DELTA = computeDelta()
+  shiftDates(STATUS)
+  shiftDates(GUESTS)
+  shiftDates(LOGS)
+  shiftDates(RUNS)
+  shiftDates(RUN_DETAIL)
+  STATUS.pbs_online = false
+  STATUS.load = null
+  STATUS.next_run = nextRunIso()
+}
+
+const jobState = (j: Job): DemoState => stateAt(runFor(j.kind), (RealDate.now() - j.startedMs) / 1000)
+
+const stepsOf = (j: Job, st: DemoState): StepInfo[] =>
+  st.steps.map((s) => ({
+    name: s.name,
+    status: s.status,
+    started_at: iso(j.startedMs + s.from * 1000),
+    finished_at: s.to === null ? null : iso(j.startedMs + s.to * 1000),
+    detail: null,
+  }))
+
+const taskLinesOf = (j: Job, st: DemoState): TaskLogLine[] =>
+  st.events.map((e, i) => ({
+    id: j.runId * 1000 + i,
+    step: e.step === 'gc' ? 'gc' : 'backup',
+    source: e.source,
+    text: e.text,
+    ts: iso(j.startedMs + e.at * 1000),
+  }))
+
+const summaryOf = (j: Job, running: boolean): RunSummary => {
+  const run = runFor(j.kind)
+  return {
+    id: j.runId,
+    kind: j.kind,
+    trigger: 'manual',
+    status: running ? 'running' : 'success',
+    started_at: iso(j.startedMs),
+    finished_at: running ? null : iso(j.startedMs + run.seconds * 1000),
+    guests_ok: running || !run.guestsOk ? null : run.guestsOk,
+    error: null,
+  }
+}
+
+/** Move a finished run into the history exactly once. Called before every read. */
+function tick(): void {
+  if (!job || job.archived) return
+  const st = jobState(job)
+  if (st.running) return
+  job.archived = true
+  const summary = summaryOf(job, false)
+  RUNS.unshift(summary)
+  RUN_DETAIL[job.runId] = {
+    ...summary,
+    steps: stepsOf(job, st),
+    logs: [
+      {
+        id: nextLogId++,
+        run_id: job.runId,
+        ts: summary.finished_at!,
+        level: 'OK',
+        message:
+          job.kind === 'gc' ? 'garbage collection finished' : 'backup completed: 2 guests, 6.09 GiB',
+      },
+    ],
+  }
+  STATUS.last_run = summary
+  LOGS.unshift(RUN_DETAIL[job.runId].logs[0])
+  if (STATUS.datastore) {
+    STATUS.datastore.used += job.kind === 'gc' ? -3_670_000_000 : 6_090_000_000
+    STATUS.datastore.used_pct = Math.round((STATUS.datastore.used / STATUS.datastore.total) * 100)
+  }
+  pbsOnline = false
+}
+
+/** The stub's version with its marker suffix removed — one place to bump, not two. */
+const DEMO_VERSION = () => (ROUTES['GET /health'] as { version: string }).version.replace('-stub', '')
+
+/** Demo-only responses. Returns undefined to fall through to the static ROUTES table. */
+function demoRoute(key: string, init?: RequestInit): unknown {
+  tick()
+  const live = job && !job.archived ? job : null
+  const st = live ? jobState(live) : null
+
+  switch (key) {
+    // Dev wants the "-stub" marker and the update badge; a public demo wants neither.
+    case 'GET /health':
+      return { status: 'ok', version: DEMO_VERSION() }
+    case 'GET /update':
+      return {
+        current: DEMO_VERSION(),
+        latest: DEMO_VERSION(),
+        update_available: false,
+        url: 'https://github.com/Joulenap/joulenap/releases',
+      }
+    case 'PUT /account':
+      return ME
+    case 'GET /status':
+      return {
+        ...STATUS,
+        job_running: !!live,
+        running_kind: live ? live.kind : null,
+        running_run_id: live ? live.runId : null,
+        pbs_online: st ? st.pbsOnline : pbsOnline,
+        load: (st ? st.pbsOnline : pbsOnline) ? { cpu: 12, mem: 41, uptime: 356_400 } : null,
+      } satisfies StatusResponse
+    case 'GET /runs':
+      return live ? [summaryOf(live, true), ...RUNS] : RUNS
+    case 'GET /tasklog': {
+      // The last run's log stays on screen after it ends, like the real backend's tail.
+      const j = job
+      if (!j) return { run_id: null, lines: [] }
+      return { run_id: j.runId, lines: taskLinesOf(j, jobState(j)) }
+    }
+    case 'POST /backup/run':
+    case 'POST /gc/run': {
+      if (live) return { run_id: live.runId }
+      job = {
+        runId: nextRunId++,
+        kind: key === 'POST /gc/run' ? 'gc' : 'cycle',
+        startedMs: RealDate.now(),
+        archived: false,
+      }
+      LOGS.unshift({
+        id: nextLogId++,
+        run_id: job.runId,
+        ts: iso(job.startedMs),
+        level: 'INFO',
+        message: 'wake-on-lan packet sent',
+      })
+      return { run_id: job.runId }
+    }
+    case 'POST /jobs/cancel': {
+      if (!live) return { run_id: null }
+      const summary = { ...summaryOf(live, false), status: 'aborted', error: 'cancelled from the UI' }
+      live.archived = true
+      RUNS.unshift(summary)
+      RUN_DETAIL[live.runId] = { ...summary, steps: stepsOf(live, jobState(live)), logs: [] }
+      STATUS.last_run = summary
+      pbsOnline = false
+      return { run_id: live.runId }
+    }
+    case 'POST /power/on':
+      pbsOnline = true
+      return { ok: true }
+    case 'POST /power/off':
+      pbsOnline = false
+      return { ok: true }
+    case 'POST /scheduler/toggle': {
+      const enabled = !!JSON.parse((init?.body as string) ?? '{}').enabled
+      STATUS.scheduler_enabled = enabled
+      STATUS.next_run = enabled ? nextRunIso() : null
+      return { enabled, next_run: STATUS.next_run }
+    }
+    case 'POST /wol/test':
+      return { sent: true, mac: CONFIG.pbs.mac }
+    case 'POST /notify/test':
+      return { channels: [{ channel: 'telegram', ok: true, error: null }] }
+    case 'POST /config/api-key':
+      CONFIG.app.api_key = 'demo-0123456789abcdef0123456789abcdef'
+      return { api_key: CONFIG.app.api_key }
+  }
+
+  // The live run has no row in RUN_DETAIL until it is archived.
+  if (live && key === `GET /runs/${live.runId}`) {
+    return { ...summaryOf(live, true), steps: stepsOf(live, jobState(live)), logs: [] }
+  }
+  return undefined
+}
+
+/** Fixed strip that makes it unmistakable this is a sandbox, not someone's real backup box. */
+function mountDemoBanner(): void {
+  const css = document.createElement('style')
+  // In the flow rather than fixed: it then wraps to any width without a padding hack, and
+  // cannot end up covering the header on a phone.
+  css.textContent = `
+    #jn-demo-banner {
+      display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
+      background: #e8830f; color: #12151a; font: 600 13px/1.4 system-ui, sans-serif;
+      padding: 9px 12px; text-align: center;
+    }
+    #jn-demo-banner a { color: inherit; }
+    @media (max-width: 600px) { #jn-demo-banner { font-size: 11px; } }
+  `
+  const bar = document.createElement('div')
+  bar.id = 'jn-demo-banner'
+  bar.innerHTML =
+    'DEMO — fake data, no Proxmox attached. Reload to reset. ' +
+    '<a href="https://www.joulenap.com/">joulenap.com</a>'
+  document.head.append(css)
+  document.body.prepend(bar)
+}
+
+if (DEMO) mountDemoBanner()
+
 const ROUTES: Record<string, unknown> = {
   'GET /health': { status: 'ok', version: '0.8.0-stub' },
   'GET /update': {
@@ -416,7 +689,15 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const bare = path.slice(4).split('?')[0]
   const key = `${method} ${bare}`
 
-  let body: unknown = ROUTES[key]
+  // Logout has nowhere to go without a backend (the stub can't log back in), so on the demo it
+  // doubles as "start over": reload, and never resolve the call that is about to be discarded.
+  if (DEMO && key === 'POST /logout') {
+    location.reload()
+    return new Promise<Response>(() => {})
+  }
+
+  let body: unknown = DEMO ? demoRoute(key, init) : undefined
+  if (body === undefined) body = ROUTES[key]
   // The real backend persists and echoes the config it just saved; the static CONFIG would
   // silently undo edits (e.g. the theme toggle reverting on the PUT response / next GET).
   if (key === 'PUT /config' && typeof init?.body === 'string') {
@@ -427,7 +708,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (body === undefined && bare === '/logs') body = LOGS
   // ROUTES is keyed on exact paths, so /runs/{id} needs its own match.
   const runId = method === 'GET' ? /^\/runs\/(\d+)$/.exec(bare)?.[1] : undefined
-  if (runId !== undefined) {
+  if (runId !== undefined && body === undefined) {
     body = RUN_DETAIL[Number(runId)] ?? {
       ...(RUNS.find((r) => r.id === Number(runId)) ?? RUNS[0]),
       steps: [],

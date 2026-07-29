@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Live demo build.** `npm run build:demo` emits a self-contained copy of the UI that answers
+  its own API calls from fixtures, so it can be hosted as static files (joulenap.com/demo).
+  It opens on the dashboard with no login, carries an orange banner making clear the data is
+  fake, and replays a scripted backup cycle — wake, vzdump, prune, GC, power off — when you
+  press Run backup now, with the task log streaming and a new row landing in the run history.
+  The regular `npm run build` that the container image uses never includes any of it.
+
 ## [0.8.0]
 
 ### Added

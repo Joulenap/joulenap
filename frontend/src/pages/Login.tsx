@@ -70,9 +70,13 @@ export function Login() {
             marginBottom: 26,
           }}
         >
-          <img src="/assets/joulenap-icon.svg" alt="Joulenap" style={{ height: 62, width: 62 }} />
           <img
-            src="/assets/joulenap-wordmark.svg"
+            src={`${import.meta.env.BASE_URL}assets/joulenap-icon.svg`}
+            alt="Joulenap"
+            style={{ height: 62, width: 62 }}
+          />
+          <img
+            src={`${import.meta.env.BASE_URL}assets/joulenap-wordmark.svg`}
             alt="Joulenap"
             style={{ height: 30, filter: 'brightness(0) invert(1)' }}
           />

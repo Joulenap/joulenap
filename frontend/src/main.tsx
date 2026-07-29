@@ -5,10 +5,12 @@ import './i18n'
 import './index.css'
 import './responsive.css'
 
-// `import.meta.env.DEV` is false for `vite build` under every mode, so no build can ship the
-// stub — not even `vite build --mode stub`, which would otherwise load `.env.stub` and bundle a
-// module that fakes an authenticated session.
-if (import.meta.env.DEV && import.meta.env.VITE_STUB_API === '1') {
+// The stub fakes an authenticated session, so exactly two things may load it:
+//   - dev server with `--mode stub` (`import.meta.env.DEV` is false for any `vite build`);
+//   - `npm run build:demo`, i.e. `--mode demo`, which builds the public joulenap.com/demo
+//     page and nothing else. `Dockerfile` and CI both run `npm run build` (default mode),
+//     where VITE_DEMO is undefined and Vite's static replacement drops the import entirely.
+if (import.meta.env.VITE_DEMO === '1' || (import.meta.env.DEV && import.meta.env.VITE_STUB_API === '1')) {
   await import('./devStub')
 }
 

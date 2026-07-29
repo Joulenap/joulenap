@@ -5,6 +5,10 @@ config.yaml
 id_*
 .env
 .env.*
+# ...except the two vite modes, which hold a flag and no secret (stub = dev fixtures,
+# demo = the public joulenap.com/demo build).
+!frontend/.env.stub
+!frontend/.env.demo
 data/
 design/
 *.db
@@ -33,6 +37,7 @@ npm-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 frontend/dist/
+frontend/dist-demo/
 
 # Playwright MCP run artifacts (screenshots/snapshots from local UI verification)
 .playwright-mcp/

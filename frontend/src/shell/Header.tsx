@@ -47,15 +47,17 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
   return (
     <header className="jn-header">
       <div className="jn-header-brand">
+        {/* BASE_URL is "/" for the app the backend serves and "./" for the public demo build,
+            which lives under /demo/ — a root-absolute src would 404 there. */}
         <img
-          src="/assets/joulenap-icon.svg"
+          src={`${import.meta.env.BASE_URL}assets/joulenap-icon.svg`}
           alt="Joulenap"
           className="jn-header-icon"
           style={{ position: 'relative', left: 5 }}
         />
         <div style={{ width: 1, height: 28, background: c.inputBorder }} />
         <img
-          src="/assets/joulenap-wordmark.svg"
+          src={`${import.meta.env.BASE_URL}assets/joulenap-wordmark.svg`}
           alt="Joulenap"
           className="jn-header-wordmark"
           style={{ position: 'relative', top: 4 }}
