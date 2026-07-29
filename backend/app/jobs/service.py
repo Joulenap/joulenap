@@ -16,7 +16,7 @@ from ..core.config_store import ConfigStore
 from ..db import session_scope
 from ..db.models import RunKind, RunStatus, RunTrigger
 from ..db.prune import PruneResult, prune_history
-from .backup_cycle import run_backup_cycle, run_gc_cycle, run_verify_cycle
+from .backup_cycle import run_backup_cycle, run_gc_cycle, run_monitor_cycle, run_verify_cycle
 from .deps import CycleDeps
 from .recorder import RunRecorder
 
@@ -74,13 +74,21 @@ class JobService:
 
     # --- blocking entry points (internal / tests) ----------------------------
 
+    def _backup_slot(self):
+        """``(RunKind, cycle fn)`` for the backup slot: the full backup cycle, or — in
+        external-schedules mode — the watch cycle (wake -> watch PVE/PBS's own jobs ->
+        power off). One switch here covers the scheduler fire, the REST "run now" and the
+        blocking test entry point alike."""
+        if self._store.config.backup.external.enabled:
+            return RunKind.MONITOR, run_monitor_cycle
+        return RunKind.CYCLE, run_backup_cycle
+
     def run_backup(
         self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True
     ) -> int:
-        """Run a full backup cycle to completion. Returns the run id."""
-        return self._run(
-            RunKind.CYCLE, trigger, lambda c, r, d: run_backup_cycle(c, r, d, power_off=power_off)
-        )
+        """Run the backup slot's cycle to completion. Returns the run id."""
+        kind, cycle = self._backup_slot()
+        return self._run(kind, trigger, lambda c, r, d: cycle(c, r, d, power_off=power_off))
 
     def run_gc(self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True) -> int:
         """Run a full GC cycle (wake -> GC -> power-off) to completion. Returns the run id."""
@@ -97,10 +105,9 @@ class JobService:
     def submit_backup(
         self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True
     ) -> int:
-        """Start a backup cycle in the background; return its run id immediately."""
-        return self._submit(
-            RunKind.CYCLE, trigger, lambda c, r, d: run_backup_cycle(c, r, d, power_off=power_off)
-        )
+        """Start the backup slot's cycle in the background; return its run id immediately."""
+        kind, cycle = self._backup_slot()
+        return self._submit(kind, trigger, lambda c, r, d: cycle(c, r, d, power_off=power_off))
 
     def submit_gc(self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True) -> int:
         """Start a full GC cycle in the background; return its run id immediately."""

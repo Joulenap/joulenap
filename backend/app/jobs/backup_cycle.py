@@ -11,6 +11,7 @@ power-off step simply never runs.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -29,6 +30,10 @@ from .recorder import RunRecorder
 # Poll cadence while tailing a task's log — snappier than the plain wait default so the
 # live Task-log panel narrates in near-real-time (Proxmox has no push API).
 _TAIL_INTERVAL = 2.0
+
+# Poll cadence of the external-schedules watch. Coarser than the log tail: nothing is
+# narrated here, we only need to notice tasks appearing/finishing within a few seconds.
+_MONITOR_INTERVAL = 10.0
 
 
 # vzdump narrates one line per guest; these are its two outcomes:
@@ -518,6 +523,115 @@ def run_gc_cycle(
     except CycleAbort as exc:
         recorder.finish(RunStatus.ABORTED, error=str(exc))
     except Exception as exc:  # connector/task failures: leave PBS on, mark failed
+        recorder.finish(RunStatus.FAILURE, error=str(exc))
+
+    _notify_result(config, recorder, deps, datastore)
+
+
+class _TaskLister(Protocol):
+    """The slice of PbsClient that :func:`watch_external_tasks` needs."""
+
+    def active_tasks(self) -> list[dict[str, Any]]: ...
+
+
+def watch_external_tasks(
+    pbs: _TaskLister,
+    config: Config,
+    *,
+    cancelled: Callable[[], bool],
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> int | None:
+    """Follow the PBS's own (externally scheduled) tasks until they are done.
+
+    Both knobs are timeouts, not fixed delays. Phase one waits up to ``first_task_wait``
+    for the first task to *appear* — polling starts immediately, so a job that starts 90s
+    after wake ends the wait at 90s; the full timeout is only ever spent when no job runs
+    at all (returns None so the caller can flag it). Phase two then waits for
+    ``idle_wait`` seconds of *continuous* silence, restarting the countdown whenever a
+    new task shows up, so the gaps between chained jobs (backup -> prune -> GC -> sync)
+    never cause an early power-off. Returns the number of distinct tasks observed.
+    """
+    ext = config.backup.external
+    seen: set[str] = set()
+
+    def poll() -> bool:
+        if cancelled():
+            raise CycleCancelled("Run cancelled")
+        tasks = pbs.active_tasks()
+        seen.update(upid for t in tasks if (upid := t.get("upid")))
+        return bool(tasks)
+
+    deadline = clock() + ext.first_task_wait
+    while not poll():
+        if clock() >= deadline:
+            return None
+        sleep(_MONITOR_INTERVAL)
+
+    quiet_since: float | None = None
+    while True:
+        if poll():
+            quiet_since = None
+        else:
+            now = clock()
+            if quiet_since is None:
+                quiet_since = now
+            if now - quiet_since >= ext.idle_wait:
+                return len(seen)
+        sleep(_MONITOR_INTERVAL)
+
+
+def run_monitor_cycle(
+    config: Config, recorder: RunRecorder, deps: CycleDeps, *, power_off: bool = True
+) -> None:
+    """External-schedules mode: wake -> wait -> watch the jobs PVE/PBS start on their own
+    -> power off after a quiet period. Joulenap starts no backup/GC of its own here — it is
+    only the power manager around schedules that live on PVE/PBS (issue #27).
+
+    A watch that sees no task at all is still a SUCCESS run (the wake/power-off worked),
+    but it is logged and flagged in the notification so the user learns their external
+    schedule didn't fire. Sets the final run status itself."""
+    datastore: DatastoreStatus | None = None
+    try:
+        with recorder.step(StepName.WAKE):
+            deps.send_wol(config)
+
+        with recorder.step(StepName.WAIT):
+            if not _wait_for_pbs(config, recorder, deps):
+                raise CycleAbort(
+                    f"PBS {config.pbs.host}:{config.pbs.port} not reachable after "
+                    f"{config.pbs.wol_retries + 1} wake attempt(s) of "
+                    f"{config.pbs.wait_timeout}s each"
+                )
+
+        with recorder.step(StepName.MONITOR) as step:
+            with deps.build_pbs(config) as pbs:
+                observed = watch_external_tasks(pbs, config, cancelled=deps.cancelled)
+            if observed is None:
+                step.detail = "no tasks observed"
+                recorder.log(
+                    LogLevel.WARN,
+                    f"no PBS task appeared within {config.backup.external.first_task_wait}s "
+                    "— check the schedules on PVE/PBS; powering off",
+                )
+            else:
+                step.detail = f"{observed} task(s) observed"
+
+        # The external jobs (hopefully) wrote new snapshots — refresh the caches the
+        # dashboard serves while the PBS sleeps, exactly like the managed cycle does.
+        datastore = _read_datastore(config, recorder, deps)
+        _refresh_backup_cache(config, recorder, deps)
+        _finish_power(config, recorder, deps, power_off=power_off)
+
+        recorder.finish(RunStatus.SUCCESS)
+    except CycleCancelled:
+        # No notification: the user pressed Stop and is standing at the UI — a "backup
+        # aborted" push would just be noise about their own click.
+        _finish_cancelled(config, recorder, deps)
+        return
+    except CycleAbort as exc:
+        recorder.finish(RunStatus.ABORTED, error=str(exc))
+    except Exception as exc:  # connector failures: leave PBS on, mark failed
         recorder.finish(RunStatus.FAILURE, error=str(exc))
 
     _notify_result(config, recorder, deps, datastore)

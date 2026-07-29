@@ -86,6 +86,15 @@ backup:
     keep_weekly: 4
     keep_monthly: 6
     keep_yearly: 0
+  # External schedules mode: PVE/PBS run their own scheduled jobs (backup, prune, GC,
+  # sync); at the scheduled time Joulenap only wakes the PBS, watches its tasks, and
+  # powers it off once they have finished. With this on, Joulenap starts no backup/GC of
+  # its own — guest selection, retention and the gc/verify after-backup options are not
+  # used. Both timers are worst-case timeouts, not fixed delays.
+  external:
+    enabled: false
+    first_task_wait: 900    # wait at most N s for the first task to appear after wake-up
+    idle_wait: 300          # power off after N s of continuous task silence
 
 # --- Maintenance (run while PBS is awake, before power-off) ---
 maintenance:

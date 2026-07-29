@@ -72,7 +72,7 @@ export interface StatusResponse {
   schedule: string
   next_run: string | null
   job_running: boolean
-  running_kind?: 'cycle' | 'gc' | 'verify' | null
+  running_kind?: 'cycle' | 'gc' | 'verify' | 'monitor' | null
   running_run_id?: number | null
   pbs_online: boolean
   last_run: RunSummary | null
@@ -103,6 +103,13 @@ export interface RetentionConfig {
   keep_yearly: number
 }
 
+export interface ExternalConfig {
+  // "External schedules" mode: PVE/PBS run their own jobs; Joulenap wakes, watches, powers off.
+  enabled: boolean
+  first_task_wait: number
+  idle_wait: number
+}
+
 export interface BackupConfig {
   enabled: boolean
   schedule: string
@@ -111,6 +118,7 @@ export interface BackupConfig {
   min_free_percent: number
   guests: GuestsConfig
   retention: RetentionConfig
+  external: ExternalConfig
 }
 
 export interface MaintenanceConfig {

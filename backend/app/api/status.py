@@ -41,7 +41,7 @@ class StatusResponse(BaseModel):
     schedule: str
     next_run: datetime | None
     job_running: bool
-    running_kind: str | None = None  # "cycle" | "gc" | "verify" while a run is in flight
+    running_kind: str | None = None  # "cycle" | "gc" | "verify" | "monitor" while running
     running_run_id: int | None = None  # the in-flight run, so the UI can cancel exactly it
     pbs_online: bool
     last_run: RunSummary | None

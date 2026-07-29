@@ -94,6 +94,7 @@ const CONFIG: Config = {
     min_free_percent: 10,
     guests: { mode: 'include', list: [100, 102] },
     retention: { keep_last: 0, keep_daily: 7, keep_weekly: 4, keep_monthly: 6, keep_yearly: 0 },
+    external: { enabled: false, first_task_wait: 900, idle_wait: 300 },
   },
   maintenance: {
     gc: { enabled: true },
@@ -366,6 +367,10 @@ backup:
     keep_weekly: 4
     keep_monthly: 6
     keep_yearly: 0
+  external:
+    enabled: false
+    first_task_wait: 900
+    idle_wait: 300
 maintenance:
   gc:
     enabled: true
@@ -647,10 +652,10 @@ function mountDemoBanner(): void {
 if (DEMO) mountDemoBanner()
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '0.8.0-stub' },
+  'GET /health': { status: 'ok', version: '0.9.0-stub' },
   'GET /update': {
-    current: '0.8.0-stub',
-    latest: '0.8.0',
+    current: '0.9.0-stub',
+    latest: '0.9.0',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },

@@ -15,6 +15,10 @@ export interface SchedulerDraft {
   keepMonthly: number
   wakeTimeout: number
   wakeRetries: number
+  // External-schedules mode: PVE/PBS run their own jobs; Joulenap wakes, watches, powers off.
+  external: boolean
+  firstTaskWait: number
+  idleWait: number
 }
 
 interface Props {
@@ -77,9 +81,41 @@ export function SchedulerCard({ enabled, onToggleEnabled, toggleError, draft, pa
         </div>
       )}
 
+      <div style={{ display: 'inline-flex', border: `1px solid ${c.inputBorder}`, borderRadius: 8, overflow: 'hidden', marginBottom: 8 }}>
+        {(
+          [
+            ['modeScheduled', false],
+            ['modeExternal', true],
+          ] as const
+        ).map(([key, ext]) => {
+          const on = draft.external === ext
+          return (
+            <button
+              key={key}
+              onClick={() => patch({ external: ext })}
+              style={{
+                background: on ? c.accent : 'transparent',
+                color: on ? c.accentInk : c.textFaint,
+                border: 'none',
+                padding: '8px 16px',
+                fontSize: 12,
+                fontWeight: 600,
+                letterSpacing: '.03em',
+                cursor: 'pointer',
+              }}
+            >
+              {t(`dashboard.${key}`)}
+            </button>
+          )
+        })}
+      </div>
+      <span style={{ display: 'block', fontSize: 11, color: c.textFaint, lineHeight: 1.5, marginBottom: 16 }}>
+        {t(draft.external ? 'dashboard.modeExternalHelp' : 'dashboard.modeScheduledHelp')}
+      </span>
+
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 26, alignItems: 'flex-end', marginBottom: 18 }}>
         <label style={{ display: 'block', width: 148 }}>
-          <span style={label}>{t('dashboard.backupTime')}</span>
+          <span style={label}>{t(draft.external ? 'dashboard.wakeTime' : 'dashboard.backupTime')}</span>
           <input
             type="time"
             value={draft.time}
@@ -96,51 +132,94 @@ export function SchedulerCard({ enabled, onToggleEnabled, toggleError, draft, pa
           />
         </label>
 
-        <div>
-          <span style={label}>{t('dashboard.gc')}</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, height: 38 }}>
-            <Toggle on={draft.gcEnabled} onClick={() => patch({ gcEnabled: !draft.gcEnabled })} />
-            <span style={{ fontSize: 12, fontWeight: 600, color: draft.gcEnabled ? c.accent : c.textFaint }}>
-              {draft.gcEnabled ? t('dashboard.enabled') : t('dashboard.disabled')}
-            </span>
-          </div>
-        </div>
-
-        <div className="jn-sched-divider" style={{ background: c.border }} />
-
-        <div>
-          <span style={{ ...label, display: 'flex', alignItems: 'center', gap: 5 }}>
-            {t('dashboard.retention')}
-            <span
-              title={t('dashboard.retentionHelp')}
-              style={{ cursor: 'help', color: c.textFaint, fontSize: 11, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}
-            >
-              ⓘ
-            </span>
-          </span>
-          <div style={{ display: 'flex', gap: 10 }}>
-            {(
-              [
-                ['daily', 'keepDaily'],
-                ['weekly', 'keepWeekly'],
-                ['monthly', 'keepMonthly'],
-              ] as const
-            ).map(([lbl, key]) => (
-              <label key={key} style={{ display: 'block', width: 92 }}>
-                <span style={{ display: 'block', fontSize: 11, color: c.textDim, marginBottom: 5 }}>
-                  {t(`dashboard.${lbl}`)}
+        {!draft.external && (
+          <>
+            <div>
+              <span style={label}>{t('dashboard.gc')}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, height: 38 }}>
+                <Toggle on={draft.gcEnabled} onClick={() => patch({ gcEnabled: !draft.gcEnabled })} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: draft.gcEnabled ? c.accent : c.textFaint }}>
+                  {draft.gcEnabled ? t('dashboard.enabled') : t('dashboard.disabled')}
                 </span>
+              </div>
+            </div>
+
+            <div className="jn-sched-divider" style={{ background: c.border }} />
+
+            <div>
+              <span style={{ ...label, display: 'flex', alignItems: 'center', gap: 5 }}>
+                {t('dashboard.retention')}
+                <span
+                  title={t('dashboard.retentionHelp')}
+                  style={{ cursor: 'help', color: c.textFaint, fontSize: 11, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}
+                >
+                  ⓘ
+                </span>
+              </span>
+              <div style={{ display: 'flex', gap: 10 }}>
+                {(
+                  [
+                    ['daily', 'keepDaily'],
+                    ['weekly', 'keepWeekly'],
+                    ['monthly', 'keepMonthly'],
+                  ] as const
+                ).map(([lbl, key]) => (
+                  <label key={key} style={{ display: 'block', width: 92 }}>
+                    <span style={{ display: 'block', fontSize: 11, color: c.textDim, marginBottom: 5 }}>
+                      {t(`dashboard.${lbl}`)}
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={draft[key]}
+                      onChange={(e) => patch({ [key]: toInt(e.target.value) } as Partial<SchedulerDraft>)}
+                      style={numInput}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {draft.external &&
+          (
+            [
+              ['firstTaskWait', 'firstTaskWait'],
+              ['idleWait', 'idleWait'],
+            ] as const
+          ).map(([lbl, key]) => (
+            <label key={key} style={{ display: 'block', width: 172 }}>
+              <span style={{ ...label, display: 'flex', alignItems: 'center', gap: 5 }}>
+                {t(`dashboard.${lbl}`)}
+                <span
+                  title={t(`dashboard.${lbl}Help`)}
+                  style={{ cursor: 'help', color: c.textFaint, fontSize: 11, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}
+                >
+                  ⓘ
+                </span>
+              </span>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  background: c.inputBg,
+                  border: `1px solid ${c.inputBorder}`,
+                  borderRadius: 7,
+                  padding: '0 12px 0 0',
+                }}
+              >
                 <input
                   type="number"
                   min={0}
                   value={draft[key]}
                   onChange={(e) => patch({ [key]: toInt(e.target.value) } as Partial<SchedulerDraft>)}
-                  style={numInput}
+                  style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: c.text, padding: '9px 11px', fontFamily: mono, fontSize: 14 }}
                 />
-              </label>
-            ))}
-          </div>
-        </div>
+                <span style={{ fontFamily: mono, fontSize: 13, color: c.textFaint }}>{t('dashboard.seconds')}</span>
+              </div>
+            </label>
+          ))}
 
         <div className="jn-sched-divider" style={{ background: c.border }} />
 
@@ -187,7 +266,7 @@ export function SchedulerCard({ enabled, onToggleEnabled, toggleError, draft, pa
         </label>
       </div>
 
-      <span style={label}>{t('dashboard.backupDays')}</span>
+      <span style={label}>{t(draft.external ? 'dashboard.wakeDays' : 'dashboard.backupDays')}</span>
       <div className="jn-days">
         {DAY_KEYS.map((key, i) => {
           const on = draft.days[i]

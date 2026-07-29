@@ -5,10 +5,19 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0]
 
 ### Added
 
+- **External schedules mode.** For setups whose backup, prune, GC and sync jobs are already
+  scheduled natively on PVE/PBS: Joulenap can now act purely as the power manager — at the
+  scheduled time it wakes the PBS, watches the tasks the servers start on their own, and
+  powers it off once they have been quiet for a configurable window. Selected with a new
+  switch at the top of the Schedule card ("Scheduled by Joulenap" / "External schedules");
+  in external mode Joulenap starts no backup or GC of its own, and the run history records
+  the watch as its own run kind with the number of tasks observed. A wake where no job ever
+  appears still powers the PBS back off and says so in the notification, so a misfiring
+  PVE/PBS schedule is noticed instead of silently missed. (#27)
 - **Live demo build.** `npm run build:demo` emits a self-contained copy of the UI that answers
   its own API calls from fixtures, so it can be hosted as static files (joulenap.com/demo).
   It opens on the dashboard with no login, carries an orange banner making clear the data is
@@ -362,6 +371,7 @@ Backup Server, all from a web UI.
   redacted from API responses.
 
 [Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.8.0...HEAD
+[0.9.0]: https://github.com/Joulenap/joulenap/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Joulenap/joulenap/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Joulenap/joulenap/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Joulenap/joulenap/compare/v0.5.0...v0.6.0

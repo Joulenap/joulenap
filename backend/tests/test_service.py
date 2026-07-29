@@ -200,3 +200,22 @@ def test_a_stale_cancel_does_not_kill_the_next_run(temp_config, temp_db):
     second = service.run_backup()
     with session_scope() as session:
         assert session.get(Run, second).status == RunStatus.SUCCESS
+
+
+def test_run_backup_dispatches_to_the_watch_cycle_in_external_mode(temp_config, temp_db):
+    # Silence right away (idle_wait defaults would sleep; zero them for an instant pass).
+    deps, pve, pbs, power = make_deps()
+    store = ConfigStore.load_or_create()
+    store.config.backup.external.enabled = True
+    store.config.backup.external.first_task_wait = 0
+    store.config.backup.external.idle_wait = 0
+    service = JobService(store, deps=deps)
+
+    run_id = service.run_backup()
+
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.kind == RunKind.MONITOR
+        assert run.status == RunStatus.SUCCESS
+    assert pve.vzdump_args is None  # no vzdump was started by Joulenap
+    assert power.powered_off is True

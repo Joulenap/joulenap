@@ -56,6 +56,13 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "failure": "❌ Joulenap — verification failed",
             "aborted": "⚠️ Joulenap — verification aborted",
         },
+        # External-schedules mode: the watch cycle (wake -> watch PVE/PBS's own jobs ->
+        # power off).
+        "monitor": {
+            "success": "✅ Joulenap — PBS jobs finished",
+            "failure": "❌ Joulenap — watch cycle failed",
+            "aborted": "⚠️ Joulenap — watch cycle aborted",
+        },
         "missed": {
             "title": "⚠️ Joulenap — missed scheduled backup",
             "intro": "A scheduled backup was skipped because Joulenap was offline when it "
@@ -92,6 +99,9 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "phase_backup": "backup",
             "phase_gc": "GC",
             "phase_verify": "verify",
+            "phase_monitor": "watch",
+            "tasks_observed": "PBS jobs observed",
+            "no_tasks": "⚠️ No PBS job ran — check the schedules on PVE/PBS",
         },
     },
     "it": {
@@ -107,6 +117,11 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "success": "✅ Joulenap — verifica riuscita",
             "failure": "❌ Joulenap — verifica fallita",
             "aborted": "⚠️ Joulenap — verifica interrotta",
+        },
+        "monitor": {
+            "success": "✅ Joulenap — job PBS completati",
+            "failure": "❌ Joulenap — ciclo di controllo fallito",
+            "aborted": "⚠️ Joulenap — ciclo di controllo interrotto",
         },
         "missed": {
             "title": "⚠️ Joulenap — backup pianificato mancato",
@@ -142,6 +157,9 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "phase_backup": "backup",
             "phase_gc": "GC",
             "phase_verify": "verifica",
+            "phase_monitor": "controllo",
+            "tasks_observed": "Job PBS osservati",
+            "no_tasks": "⚠️ Nessun job PBS eseguito — controlla le pianificazioni su PVE/PBS",
         },
     },
 }
@@ -183,6 +201,7 @@ def _format_duration(seconds: float) -> str:
 #: wait, precheck and power-off are left out on purpose — see the label block's comment.
 _PHASE_LABEL = {
     StepName.BACKUP: "phase_backup",
+    StepName.MONITOR: "phase_monitor",
     StepName.GC: "phase_gc",
     StepName.VERIFY: "phase_verify",
 }
@@ -271,6 +290,17 @@ def build_run_message(
         if guests.failed:
             line += f" ({labels['failed']}: {', '.join(guests.failed)})"
         lines.append(line)
+    # External-schedules watch: the MONITOR step's detail is either "N task(s) observed"
+    # or "no tasks observed" (see run_monitor_cycle) — the count line for the former, the
+    # your-schedule-didn't-fire warning for the latter.
+    monitor = next((s for s in run.steps if s.name == StepName.MONITOR), None)
+    if monitor is not None and monitor.detail:
+        try:
+            observed = int(monitor.detail.split()[0])
+        except ValueError:
+            lines.append(labels["no_tasks"])
+        else:
+            lines.append(f"{labels['tasks_observed']}: {observed}")
     if datastore is not None:
         lines.append(
             f"{labels['datastore']}: {datastore.used_pct}% {labels['used']}, "

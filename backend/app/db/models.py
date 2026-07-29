@@ -49,6 +49,8 @@ class RunKind(StrEnum):
     GC = "gc"
     VERIFY = "verify"
     CYCLE = "cycle"  # full wake -> backup -> maintenance -> poweroff cycle
+    # External-schedules mode: wake -> watch the PBS's own scheduled jobs -> poweroff.
+    MONITOR = "monitor"
 
 
 class RunTrigger(StrEnum):
@@ -77,6 +79,8 @@ class StepName(StrEnum):
     WAIT = "wait"
     PRECHECK = "precheck"
     BACKUP = "backup"
+    # External-schedules mode: the watch phase (waiting for + following the PBS's own jobs).
+    MONITOR = "monitor"
     GC = "gc"
     VERIFY = "verify"
     POWEROFF = "poweroff"

@@ -5,6 +5,9 @@ import { c, panelStyle } from '../../theme'
 interface Props {
   status: StatusResponse | null
   error: string | null
+  // External-schedules mode (saved config): the primary button runs the watch cycle
+  // instead of a backup, and the GC button is hidden (PBS schedules GC itself).
+  external: boolean
   onBackup: () => void
   onGc: () => void
   onStop: () => void
@@ -45,7 +48,7 @@ function actionBtn(variant: 'primary' | 'ghost' | 'green' | 'red', enabled: bool
   return { ...base, background: 'transparent', color: c.text, border: `1px solid ${c.ghostBorder}` }
 }
 
-export function ManualPanel({ status, error, onBackup, onGc, onStop, onPowerOn, onPowerOff }: Props) {
+export function ManualPanel({ status, error, external, onBackup, onGc, onStop, onPowerOn, onPowerOff }: Props) {
   const { t } = useTranslation()
   const online = !!status?.pbs_online
   const busy = !!status?.job_running
@@ -66,7 +69,9 @@ export function ManualPanel({ status, error, onBackup, onGc, onStop, onPowerOn, 
       ? 'dashboard.stopGc'
       : runningKind === 'verify'
         ? 'dashboard.stopVerify'
-        : 'dashboard.stopBackup',
+        : runningKind === 'monitor'
+          ? 'dashboard.stopMonitor'
+          : 'dashboard.stopBackup',
   )
 
   const stopButton = (
@@ -85,15 +90,17 @@ export function ManualPanel({ status, error, onBackup, onGc, onStop, onPowerOn, 
               stopButton
             ) : (
               <button type="button" style={actionBtn('primary', canJob)} disabled={!canJob} onClick={onBackup}>
-                ▶ {t('dashboard.runBackup')}
+                ▶ {t(external ? 'dashboard.runMonitor' : 'dashboard.runBackup')}
               </button>
             )}
             {stopSlot === 'gc' && busy ? (
               stopButton
             ) : (
-              <button type="button" style={actionBtn('ghost', canJob)} disabled={!canJob} onClick={onGc}>
-                ⟳ {t('dashboard.runGc')}
-              </button>
+              !external && (
+                <button type="button" style={actionBtn('ghost', canJob)} disabled={!canJob} onClick={onGc}>
+                  ⟳ {t('dashboard.runGc')}
+                </button>
+              )
             )}
           </div>
         </div>

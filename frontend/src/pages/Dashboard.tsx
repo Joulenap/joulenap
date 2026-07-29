@@ -43,6 +43,9 @@ function draftFromConfig(cfg: Config): Draft {
     keepMonthly: cfg.backup.retention.keep_monthly,
     wakeTimeout: cfg.pbs.wait_timeout,
     wakeRetries: cfg.pbs.wol_retries,
+    external: cfg.backup.external.enabled,
+    firstTaskWait: cfg.backup.external.first_task_wait,
+    idleWait: cfg.backup.external.idle_wait,
     guestsMode:
       cfg.backup.guests.mode === 'all'
         ? 'general'
@@ -174,8 +177,9 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const apply = async () => {
     // Block Selective mode with no guests: it would save a schedule that wakes the PBS
     // and aborts every run without backing anything up (UX-8). Cleared on the next
-    // guest toggle / mode change (patch + toggleGuest reset err).
-    const guestErr = guestsSelectionError(draft.guestsMode, draft.selected.length)
+    // guest toggle / mode change (patch + toggleGuest reset err). Not checked in
+    // external-schedules mode, where Joulenap starts no vzdump of its own.
+    const guestErr = draft.external ? null : guestsSelectionError(draft.guestsMode, draft.selected.length)
     if (guestErr) {
       setErr(t(guestErr))
       return
@@ -199,6 +203,11 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     next.pbs.wait_timeout = draft.wakeTimeout
     next.pbs.wol_retries = draft.wakeRetries
     next.maintenance.gc.enabled = draft.gcEnabled
+    next.backup.external = {
+      enabled: draft.external,
+      first_task_wait: draft.firstTaskWait,
+      idle_wait: draft.idleWait,
+    }
     if (draft.guestsMode === 'general') {
       next.backup.guests.mode = 'all'
     } else if (draft.guestsMode === 'exclude') {
@@ -223,13 +232,17 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     }
   }
 
+  // The manual backup button fires whatever the *saved* config dispatches to — in
+  // external-schedules mode that's the watch cycle, and its confirm/label must say so.
+  const externalSaved = config.backup.external.enabled
+
   const runAction = (
-    key: 'backup' | 'gc' | 'on' | 'off',
+    key: 'backup' | 'monitor' | 'gc' | 'on' | 'off',
     fn: (keepOn: boolean) => Promise<unknown>,
     danger = false,
     icon = '▶',
   ) => {
-    const isJob = key === 'backup' || key === 'gc'
+    const isJob = key === 'backup' || key === 'monitor' || key === 'gc'
     // Default the switch to the PBS's current state: already-on stays on (e.g. woken for a
     // restore); asleep goes back to sleep after the job. The user can override either way.
     const initialKeepOn = !!status?.pbs_online
@@ -300,7 +313,8 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
         <ManualPanel
           status={status}
           error={actionErr}
-          onBackup={() => runAction('backup', (k) => api.runBackup(k), false, '▶')}
+          external={externalSaved}
+          onBackup={() => runAction(externalSaved ? 'monitor' : 'backup', (k) => api.runBackup(k), false, '▶')}
           onGc={() => runAction('gc', (k) => api.runGc(k), false, '⟳')}
           onStop={stopAction}
           onPowerOn={() => runAction('on', () => api.powerOn(), false, '⏻')}
@@ -322,17 +336,21 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
         error={err}
       />
 
-      <div className="jn-row-guests">
-        <GuestsPanel
-          guests={guests}
-          mode={draft.guestsMode}
-          onModeChange={(m) => patch({ guestsMode: m })}
-          selected={new Set(draft.selected)}
-          onToggleGuest={toggleGuest}
-          onRefresh={loadGuests}
-          refreshing={refreshing}
-          error={guestsErr}
-        />
+      {/* Guest selection is PVE's business in external-schedules mode — hide the panel
+          (driven by the draft so the card reacts to the toggle before Apply). */}
+      <div className="jn-row-guests" style={draft.external ? { gridTemplateColumns: '1fr' } : undefined}>
+        {!draft.external && (
+          <GuestsPanel
+            guests={guests}
+            mode={draft.guestsMode}
+            onModeChange={(m) => patch({ guestsMode: m })}
+            selected={new Set(draft.selected)}
+            onToggleGuest={toggleGuest}
+            onRefresh={loadGuests}
+            refreshing={refreshing}
+            error={guestsErr}
+          />
+        )}
         <HistoryCard logs={logs} />
       </div>
 

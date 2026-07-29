@@ -129,6 +129,20 @@ class RetentionConfig(_Base):
     keep_yearly: int = Field(default=0, ge=0)
 
 
+class ExternalConfig(_Base):
+    # "External schedules" mode: PVE/PBS run their own scheduled jobs (backup, prune, GC,
+    # sync); Joulenap only wakes the PBS at the scheduled time, watches its tasks, and
+    # powers it off once they have finished. Both knobs are *timeouts*, not fixed delays —
+    # see jobs/backup_cycle.watch_external_tasks.
+    enabled: bool = False
+    # Wait at most this many seconds for the first task to appear after wake-up; watching
+    # starts as soon as one does. If none appears, the PBS is powered off at expiry.
+    first_task_wait: int = Field(default=900, ge=0)
+    # Power off only after this many seconds of continuous task silence; the countdown
+    # restarts whenever a new task starts.
+    idle_wait: int = Field(default=300, ge=0)
+
+
 class BackupConfig(_Base):
     enabled: bool = True
     schedule: str = "0 4 * * *"
@@ -139,6 +153,7 @@ class BackupConfig(_Base):
     min_free_percent: int = Field(default=0, ge=0, le=100)
     guests: GuestsConfig = Field(default_factory=GuestsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    external: ExternalConfig = Field(default_factory=ExternalConfig)
 
 
 # --- maintenance -------------------------------------------------------------

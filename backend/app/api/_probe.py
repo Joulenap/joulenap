@@ -22,12 +22,17 @@ from ..db.models import Run, RunKind, RunStatus
 _PBS_PROBE_TIMEOUT = 1.0
 
 
+# The kinds that occupy the backup slot: the managed cycle, and the external-schedules
+# watch cycle (which *is* the backup run in that mode). A standalone GC or verify run
+# must never masquerade as the last backup.
+_BACKUP_KINDS = (RunKind.CYCLE, RunKind.MONITOR)
+
+
 def latest_cycle_run(session: Session) -> Run | None:
-    """Most recent backup *cycle* (manual or scheduled). Filtered to CYCLE so a
-    standalone manual GC run doesn't masquerade as the last backup."""
+    """Most recent backup-slot run (manual or scheduled), managed or external."""
     return session.scalars(
         select(Run)
-        .where(Run.kind == RunKind.CYCLE)
+        .where(Run.kind.in_(_BACKUP_KINDS))
         .order_by(Run.started_at.desc())
         .limit(1)
     ).first()
@@ -48,11 +53,11 @@ def running_run(session: Session) -> Run | None:
 
 
 def latest_finished_cycle_run(session: Session) -> Run | None:
-    """Most recent backup cycle that has finished (any terminal status), ignoring an
+    """Most recent backup-slot run that has finished (any terminal status), ignoring an
     in-progress RUNNING cycle — so a mid-backup dashboard shows the previous result."""
     return session.scalars(
         select(Run)
-        .where(Run.kind == RunKind.CYCLE, Run.status != RunStatus.RUNNING)
+        .where(Run.kind.in_(_BACKUP_KINDS), Run.status != RunStatus.RUNNING)
         .order_by(Run.started_at.desc())
         .limit(1)
     ).first()

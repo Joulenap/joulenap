@@ -31,7 +31,12 @@ def _last_finished_cycle_start(session) -> datetime | None:
     must not re-trigger a 'missed' alert on every restart while a failure persists."""
     run = session.scalars(
         select(Run)
-        .where(Run.kind == RunKind.CYCLE, Run.status != RunStatus.RUNNING)
+        # MONITOR serves the same scheduled slot in external-schedules mode, so it counts
+        # as "the backup ran" — otherwise every restart in that mode would cry "missed".
+        .where(
+            Run.kind.in_((RunKind.CYCLE, RunKind.MONITOR)),
+            Run.status != RunStatus.RUNNING,
+        )
         .order_by(Run.started_at.desc())
         .limit(1)
     ).first()

@@ -13,6 +13,8 @@ export function runningLabelKey(kind: StatusResponse['running_kind']): string {
       return 'status.gcRunning'
     case 'verify':
       return 'status.verifyRunning'
+    case 'monitor':
+      return 'status.monitorRunning'
     default:
       return 'status.running'
   }
@@ -31,6 +33,8 @@ export function runKindLabelKey(kind: string): string {
       return 'dashboard.kindGc'
     case 'verify':
       return 'dashboard.kindVerify'
+    case 'monitor':
+      return 'dashboard.kindMonitor'
     default:
       return 'dashboard.kindBackup'
   }
