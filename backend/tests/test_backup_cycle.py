@@ -696,3 +696,156 @@ def test_cancel_still_ends_the_run_when_the_remote_stop_fails(temp_config, temp_
             for e in session.scalars(select(LogEvent).where(LogEvent.run_id == run_id)).all()
         ]
     assert any("could not stop" in m for m in messages)
+
+
+# --- external-schedules (watch) cycle ----------------------------------------
+
+
+def _monitor_config(first_task_wait: int = 0, idle_wait: int = 0) -> Config:
+    cfg = _config()
+    cfg.backup.external.enabled = True
+    cfg.backup.external.first_task_wait = first_task_wait
+    cfg.backup.external.idle_wait = idle_wait
+    return cfg
+
+
+def _run_monitor(config: Config, deps) -> int:
+    from app.jobs.backup_cycle import run_monitor_cycle
+
+    with RunRecorder(RunKind.MONITOR, RunTrigger.SCHEDULED) as recorder:
+        run_monitor_cycle(config, recorder, deps)
+        return recorder.run_id
+
+
+def test_monitor_cycle_watches_tasks_and_powers_off(temp_db):
+    # Two tasks active at wake, then silence; idle_wait=0 -> power off at first quiet poll.
+    pbs = FakePbs(active_tasks_seq=[[{"upid": "A"}, {"upid": "B"}]])
+    deps, pve, _pbs, power = make_deps(pbs=pbs)
+
+    run_id = _run_monitor(_monitor_config(), deps)
+
+    status, steps = _load(run_id)
+    assert status == RunStatus.SUCCESS
+    assert steps == {
+        StepName.WAKE: StepStatus.SUCCESS,
+        StepName.WAIT: StepStatus.SUCCESS,
+        StepName.MONITOR: StepStatus.SUCCESS,
+        StepName.POWEROFF: StepStatus.SUCCESS,
+    }
+    assert power.powered_off is True
+    # The whole point of the mode: Joulenap starts nothing of its own.
+    assert pve.vzdump_args is None
+    assert pbs.gc_started is False
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        detail = {s.name: s.detail for s in run.steps}[StepName.MONITOR]
+    assert detail == "2 task(s) observed"
+
+
+def test_monitor_cycle_no_tasks_still_powers_off_and_warns(temp_db):
+    deps, _pve, _pbs, power = make_deps()  # active_tasks always empty
+
+    run_id = _run_monitor(_monitor_config(), deps)
+
+    status, steps = _load(run_id)
+    assert status == RunStatus.SUCCESS
+    assert steps[StepName.MONITOR] == StepStatus.SUCCESS
+    assert power.powered_off is True
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        detail = {s.name: s.detail for s in run.steps}[StepName.MONITOR]
+        messages = [
+            e.message
+            for e in session.scalars(select(LogEvent).where(LogEvent.run_id == run_id)).all()
+        ]
+    assert detail == "no tasks observed"
+    assert any("no PBS task appeared" in m for m in messages)
+
+
+def _fake_clock():
+    t = {"now": 0.0}
+
+    def clock() -> float:
+        return t["now"]
+
+    def sleep(seconds: float) -> None:
+        t["now"] += seconds
+
+    return t, clock, sleep
+
+
+def test_watch_first_task_ends_the_grace_wait_early():
+    from app.jobs.backup_cycle import watch_external_tasks
+
+    t, clock, sleep = _fake_clock()
+    pbs = FakePbs(active_tasks_seq=[[], [], [{"upid": "A"}]])
+
+    n = watch_external_tasks(
+        pbs,
+        _monitor_config(first_task_wait=900, idle_wait=0),
+        cancelled=lambda: False,
+        sleep=sleep,
+        clock=clock,
+    )
+
+    assert n == 1
+    assert t["now"] == 20.0  # ended when the task appeared, not after the full 900s
+
+
+def test_watch_quiet_countdown_resets_when_a_new_task_starts():
+    from app.jobs.backup_cycle import watch_external_tasks
+
+    t, clock, sleep = _fake_clock()
+    # Task A, a gap shorter than idle_wait, task B, then real silence.
+    pbs = FakePbs(active_tasks_seq=[[{"upid": "A"}], [], [{"upid": "B"}], [], [], []])
+
+    n = watch_external_tasks(
+        pbs,
+        _monitor_config(first_task_wait=0, idle_wait=15),
+        cancelled=lambda: False,
+        sleep=sleep,
+        clock=clock,
+    )
+
+    assert n == 2  # the gap after A did not power off before B ran
+
+
+def test_watch_returns_none_when_no_task_ever_appears():
+    from app.jobs.backup_cycle import watch_external_tasks
+
+    t, clock, sleep = _fake_clock()
+
+    n = watch_external_tasks(
+        FakePbs(),
+        _monitor_config(first_task_wait=25, idle_wait=300),
+        cancelled=lambda: False,
+        sleep=sleep,
+        clock=clock,
+    )
+
+    assert n is None
+    assert t["now"] >= 25.0
+
+
+def test_monitor_cycle_cancel_mid_watch_aborts(temp_db):
+    from app.jobs.backup_cycle import run_monitor_cycle
+
+    # Endless activity; the cancel probe fires on the second check.
+    calls = {"n": 0}
+
+    def cancelled() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    pbs = FakePbs(active_tasks_seq=[[{"upid": "A"}]])
+    deps, _pve, _pbs, power = make_deps(pbs=pbs)
+    deps.cancelled = cancelled
+
+    with RunRecorder(RunKind.MONITOR, RunTrigger.MANUAL) as recorder:
+        run_monitor_cycle(_monitor_config(first_task_wait=0, idle_wait=300), recorder, deps)
+        run_id = recorder.run_id
+
+    status, steps = _load(run_id)
+    assert status == RunStatus.ABORTED
+    assert steps[StepName.MONITOR] == StepStatus.FAILURE
+    assert power.powered_off is False  # cancel default: leave the PBS on

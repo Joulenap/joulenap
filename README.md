@@ -51,13 +51,15 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 ## Status
 
-**v0.8.0.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
+**v0.9.0.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
 notifications + setup wizard, packaged as a Docker image — with transport hardening (PBS TLS
 pinning + SSH host-key verification) and auth hardening (login rate-limit, session hardening).
-Includes run history with per-step detail, the ability to stop a job mid-run,
-[integrations](docs/INTEGRATIONS.md) for dashboards (Homepage/Homarr/Dashy/Glance) and Prometheus,
-persistent datastore usage shown even while the PBS is powered off, a per-channel notification
-test report, and a responsive UI that works on a phone.
+Includes an external-schedules mode (PVE/PBS run their own jobs; Joulenap wakes the PBS, watches
+the tasks and powers it off when they finish), run history with per-step detail, the ability to
+stop a job mid-run, [integrations](docs/INTEGRATIONS.md) for dashboards
+(Homepage/Homarr/Dashy/Glance) and Prometheus, persistent datastore usage shown even while the
+PBS is powered off, a per-channel notification test report, and a responsive UI that works on a
+phone.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and API.
 
 ## Quick start (Docker)

@@ -94,6 +94,7 @@ class FakePbs:
         fail_datastore: bool = False,
         gc_log_lines: list[str] | None = None,
         verify_log_lines: list[str] | None = None,
+        active_tasks_seq: list[list[dict]] | None = None,
     ):
         self.fail_task = fail_task
         self.gc_started = False
@@ -108,6 +109,8 @@ class FakePbs:
         self._used = used
         self._avail = avail
         self._snapshots = snapshots or {}
+        # Each active_tasks() call pops the next entry; empty (idle) once exhausted.
+        self.active_tasks_seq = active_tasks_seq or []
 
     def __enter__(self) -> FakePbs:
         return self
@@ -155,6 +158,9 @@ class FakePbs:
 
     def latest_backups(self) -> dict[int, int]:
         return dict(self._snapshots)
+
+    def active_tasks(self) -> list[dict]:
+        return self.active_tasks_seq.pop(0) if self.active_tasks_seq else []
 
 
 class FakePower:
