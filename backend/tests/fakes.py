@@ -8,6 +8,7 @@ from app.connectors.errors import ConnectorError, TaskCancelled, TaskError
 from app.connectors.pbs import DatastoreStatus, NodeLoad
 from app.connectors.pve import Guest
 from app.jobs.deps import CycleDeps
+from app.jobs.lease import LeaseDeps
 
 
 class UnreachablePve:
@@ -172,6 +173,59 @@ class FakePower:
         if self.fail:
             raise RuntimeError("poweroff failed")
         self.powered_off = True
+
+
+class FakeBox:
+    """A fake PBS box for the power lease: does it answer, and what did the lease do to it.
+
+    ``reachable`` is either a constant or a list of answers consumed one probe at a time
+    (the last one repeats), so a test can say "down, then up after the first wake".
+    """
+
+    def __init__(
+        self,
+        reachable: bool | list[bool] = True,
+        idle: bool = True,
+        idle_error: Exception | None = None,
+        poweroff_error: Exception | None = None,
+    ):
+        self._reachable = reachable
+        self.idle = idle
+        self.idle_error = idle_error
+        self.poweroff_error = poweroff_error
+        self.wol: list[str] = []  # pbs ids a magic packet was sent to, in order
+        self.waits: list[float] = []  # the timeout of every reachability probe
+        self.poweroffs: list[str] = []  # pbs ids actually powered off
+
+    def _answer(self) -> bool:
+        if isinstance(self._reachable, list):
+            return self._reachable.pop(0) if len(self._reachable) > 1 else self._reachable[0]
+        return self._reachable
+
+    def deps(self) -> LeaseDeps:
+        def wait_reachable(pbs, timeout, _should_cancel=None) -> bool:
+            self.waits.append(timeout)
+            return self._answer()
+
+        def send_wol(pbs) -> None:
+            self.wol.append(pbs.id)
+
+        def wait_idle(_pbs) -> bool:
+            if self.idle_error is not None:
+                raise self.idle_error
+            return self.idle
+
+        def poweroff(pbs) -> None:
+            if self.poweroff_error is not None:
+                raise self.poweroff_error
+            self.poweroffs.append(pbs.id)
+
+        return LeaseDeps(
+            send_wol=send_wol,
+            wait_reachable=wait_reachable,
+            wait_idle=wait_idle,
+            poweroff=poweroff,
+        )
 
 
 def make_deps(

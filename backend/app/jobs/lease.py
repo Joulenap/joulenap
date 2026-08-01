@@ -1,0 +1,254 @@
+"""Per-PBS power lease: who woke a backup server, and who may put it back to sleep.
+
+With per-route schedules several routes can target the same PBS minutes apart, so no single
+cycle can decide when the box goes back to sleep. The lease centralises that decision: the
+first holder wakes it (or finds it already awake), every holder releases when its route is
+done, and the *last* release powers it off — unless a queued route still needs the box, the
+run failed, or the user asked to keep it on.
+
+It is also the single place that knows about an unmanaged PBS (``managed_power: false``):
+there, acquiring is a reachability check and releasing does nothing, so cycles stay
+oblivious to the difference.
+"""
+
+from __future__ import annotations
+
+import logging
+import ssl
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from ..config import PbsDevice
+from ..connectors import net, tls
+from ..connectors.pbs import PbsClient
+from ..connectors.power import PbsPower
+from ..connectors.wol import send_magic_packet
+
+log = logging.getLogger("joulenap.lease")
+
+
+class PbsUnreachableError(RuntimeError):
+    """The PBS never answered: it could not be woken, or it is an unmanaged box that is off."""
+
+
+# --- device-shaped connector calls -------------------------------------------
+# jobs/deps.py has the same four operations bound to the 0.9 single-PBS ``Config``. These
+# take the device a route points at; the Config-shaped originals die with the old cycle.
+
+
+def _send_wol(pbs: PbsDevice) -> None:
+    # Scope the packet to the PBS's subnet-directed broadcast (see net.wol_target) rather
+    # than blasting the whole network.
+    dest, source_ip = net.wol_target(pbs.host, pbs.wol_broadcast_iface)
+    send_magic_packet(pbs.mac, broadcast=dest, source_ip=source_ip)
+
+
+def _wait_reachable(
+    pbs: PbsDevice, timeout: float, should_cancel: Callable[[], bool] | None = None
+) -> bool:
+    # timeout=0 is a single probe: one connect attempt, no sleep.
+    return net.wait_until_reachable(
+        pbs.host, pbs.port, timeout=timeout, should_cancel=should_cancel
+    )
+
+
+def _wait_idle(pbs: PbsDevice) -> bool:
+    verify: bool | ssl.SSLContext = False
+    if pbs.fingerprint:
+        verify = tls.pinned_ssl_context(pbs.host, pbs.port, pbs.fingerprint)
+    with PbsClient(
+        host=pbs.host,
+        datastore=pbs.datastore,
+        token_id=pbs.api_token_id,
+        token_secret=pbs.api_token_secret,
+        port=pbs.port,
+        verify=verify,
+    ) as client:
+        return client.wait_until_idle(timeout=pbs.poweroff_task_wait)
+
+
+def _poweroff(pbs: PbsDevice) -> None:
+    PbsPower(host=pbs.host, user=pbs.ssh_user, key_path=pbs.ssh_key_path).poweroff()
+
+
+@dataclass
+class LeaseDeps:
+    """The four power operations, bundled so tests can inject fakes (like CycleDeps)."""
+
+    send_wol: Callable[[PbsDevice], None]
+    # (device, timeout seconds, cancel probe) -> reachable. Untyped args because the fakes
+    # take fewer of them; the production implementation is ``_wait_reachable`` above.
+    wait_reachable: Callable[..., bool]
+    wait_idle: Callable[[PbsDevice], bool]
+    poweroff: Callable[[PbsDevice], None]
+
+    @classmethod
+    def default(cls) -> LeaseDeps:
+        return cls(
+            send_wol=_send_wol,
+            wait_reachable=_wait_reachable,
+            wait_idle=_wait_idle,
+            poweroff=_poweroff,
+        )
+
+
+@dataclass
+class LeaseState:
+    """How many runs currently hold a PBS, and whether it was already up when the first
+    one arrived (``was_awake`` means "skip the Wake-on-LAN", nothing more — a box Joulenap
+    found awake is still powered off at the end, or a failed power-off would leave it on
+    forever)."""
+
+    holders: int = 0
+    was_awake: bool = False
+
+
+class PowerLease:
+    """Refcounted wake/power-off, one entry per PBS id.
+
+    ponytail: the refcount lives in this process's memory, which is correct while Joulenap
+    runs as a single instance (the whole app assumes that). Two instances against one PBS
+    would need the lease in SQLite with a TTL — or just don't run two.
+    """
+
+    def __init__(
+        self,
+        deps: LeaseDeps,
+        *,
+        pending_pbs_ids: Callable[[], set[str]] | None = None,
+        cancelled: Callable[[], bool] | None = None,
+    ):
+        self._deps = deps
+        # Which PBS devices the *queued* runs still need. Injected so the lease never has to
+        # know about the queue or the config.
+        self._pending = pending_pbs_ids or (lambda: set())
+        self._cancelled = cancelled or (lambda: False)
+        self._lock = threading.Lock()
+        self._state: dict[str, LeaseState] = {}
+
+    def state(self, pbs_id: str) -> LeaseState:
+        """A snapshot of one device's lease — introspection for the API/UI."""
+        with self._lock:
+            held = self._state.get(pbs_id)
+            return LeaseState(held.holders, held.was_awake) if held else LeaseState()
+
+    def acquire(self, pbs: PbsDevice) -> bool:
+        """Make sure ``pbs`` is up and count this run as a holder. Returns ``was_awake``.
+
+        Raises :class:`PbsUnreachableError` if the box never answers; the holder is only
+        registered on success, so a failed acquire needs no release.
+        """
+        with self._lock:
+            held = self._state.get(pbs.id)
+            if held is not None and held.holders:
+                held.holders += 1
+                log.info("PBS %s already awake and leased by %d run(s)", pbs.id, held.holders)
+                return held.was_awake
+
+        # Nobody holds it, so this run decides whether the box needs waking. Done outside the
+        # lock: a wake takes minutes and must not block another PBS's lease or the UI's
+        # ``state()`` read.
+        was_awake = self._bring_up(pbs)
+
+        with self._lock:
+            # setdefault + increment, not a plain assignment: two first-acquires racing on the
+            # same box would otherwise each write holders=1 and the first release would power
+            # it off under the second.
+            held = self._state.setdefault(pbs.id, LeaseState(was_awake=was_awake))
+            held.holders += 1
+        return was_awake
+
+    def release(self, pbs: PbsDevice, *, power_off: bool = True) -> bool:
+        """Drop this run's hold and power the box down if it is now safe to. Returns whether
+        it actually powered off.
+
+        ``power_off`` is the caller's policy (a failed run leaves the PBS on for inspection,
+        a manual run honours the "power off when finished" toggle). The lease adds the
+        conditions the caller cannot see: no other holder, and no *queued* route that still
+        needs this box.
+        """
+        with self._lock:
+            held = self._state.get(pbs.id)
+            if held is None or not held.holders:
+                log.warning("Release of an unheld lease on PBS %s — ignoring", pbs.id)
+                return False
+            held.holders -= 1
+            remaining = held.holders
+            if not remaining:
+                del self._state[pbs.id]
+
+        if remaining:
+            log.info("PBS %s still held by %d run(s); leaving it on", pbs.id, remaining)
+            return False
+        if not power_off:
+            return False
+        if not pbs.managed_power:
+            # An always-on / cloud-hosted PBS: Joulenap never touches its power.
+            return False
+        if pbs.id in self._pending():
+            log.info("PBS %s is needed by a queued route; leaving it on", pbs.id)
+            return False
+        return self._power_off(pbs)
+
+    # --- internals -----------------------------------------------------------
+
+    def _bring_up(self, pbs: PbsDevice) -> bool:
+        """Get the box answering, waking it if we are allowed to. Returns ``was_awake``."""
+        if self._deps.wait_reachable(pbs, 0, self._cancelled):
+            return True
+        if not pbs.managed_power:
+            raise PbsUnreachableError(
+                f"PBS '{pbs.id}' ({pbs.host}:{pbs.port}) is not reachable, and Joulenap does "
+                "not manage its power (managed_power: false) so it cannot wake it — turn the "
+                "box on, or enable managed power for this device."
+            )
+
+        # Total wake attempts = wol_retries + 1: a dropped packet or a slow boot shouldn't
+        # fail the whole run.
+        attempts = pbs.wol_retries + 1
+        for attempt in range(1, attempts + 1):
+            self._deps.send_wol(pbs)
+            if self._deps.wait_reachable(pbs, pbs.wait_timeout, self._cancelled):
+                return False
+            # A cancelled wait returns False exactly like a timeout, so check *why* before
+            # burning the remaining attempts on a run the user already stopped.
+            if self._cancelled():
+                raise PbsUnreachableError(f"Cancelled while waiting for PBS '{pbs.id}'")
+            if attempt < attempts:
+                log.warning(
+                    "PBS %s still down after wake attempt %d/%d (%ds); re-sending Wake-on-LAN",
+                    pbs.id,
+                    attempt,
+                    attempts,
+                    pbs.wait_timeout,
+                )
+        raise PbsUnreachableError(
+            f"PBS '{pbs.id}' ({pbs.host}:{pbs.port}) not reachable after {attempts} wake "
+            f"attempt(s) of {pbs.wait_timeout}s each"
+        )
+
+    def _power_off(self, pbs: PbsDevice) -> bool:
+        """Wait for the box to go idle, then shut it down. Never raises: the run's data is
+        already safe, so a failed power-off costs energy, not correctness."""
+        if pbs.poweroff_task_wait > 0:
+            try:
+                idle = self._deps.wait_idle(pbs)
+            except Exception as exc:  # noqa: BLE001 — a flaky check must not keep it awake
+                log.warning("Could not check PBS %s tasks (%s); powering off anyway", pbs.id, exc)
+                idle = True
+            if not idle:
+                log.warning(
+                    "PBS %s still running a task after %ds; leaving it on rather than "
+                    "interrupting it",
+                    pbs.id,
+                    pbs.poweroff_task_wait,
+                )
+                return False
+        try:
+            self._deps.poweroff(pbs)
+        except Exception as exc:  # noqa: BLE001 — best effort, see the docstring
+            log.warning("Power-off of PBS %s failed, box left on: %s", pbs.id, exc)
+            return False
+        log.info("Powered off PBS %s", pbs.id)
+        return True
