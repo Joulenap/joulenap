@@ -8,6 +8,7 @@ and we can write it back atomically when the UI applies changes or the wizard sa
 from __future__ import annotations
 
 import errno
+import logging
 import os
 from copy import deepcopy
 from pathlib import Path
@@ -16,7 +17,9 @@ from typing import Any, List, Literal  # noqa: UP035  (List is intentional, see 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import paths
+from . import config_migrate, paths
+
+log = logging.getLogger(__name__)
 
 # Field names whose values are secrets and must be masked before leaving the backend
 # (e.g. GET /api/config). Matched by key name anywhere in the config tree.
@@ -275,9 +278,22 @@ class RouteSchedule(_Base):
     days: List[bool] = Field(  # noqa: UP006
         default_factory=lambda: [True] * 7, min_length=7, max_length=7
     )
+    # Escape hatch for a schedule time+days cannot express — a day-of-month or month
+    # pattern, a step value, a weekday range. Migrating a 0.9 cron keeps it here verbatim
+    # rather than approximating it. When set it WINS over time/days (which keep their
+    # defaults and are ignored), and the UI shows it read-only, like 0.9's advanced-schedule
+    # lock. A standard 5-field crontab string.
+    cron: str = ""
 
     @model_validator(mode="after")
     def _check_days(self) -> RouteSchedule:
+        if self.cron:
+            if len(self.cron.split()) != 5:
+                raise ValueError(
+                    f"schedule.cron '{self.cron}' is not a 5-field crontab string "
+                    "(minute hour day-of-month month day-of-week)."
+                )
+            return self  # time/days are unused when a raw cron is pinned
         if not any(self.days):
             raise ValueError(
                 "schedule.days selects no day, so the route would never run — "
@@ -299,6 +315,9 @@ class RouteOptions(_Base):
     gc: bool = True
     # Quick verify of just this run's new snapshots while the PBS is still awake.
     verify_after: bool = False
+    # Verify routes only: re-verify snapshots whose last verification is older than this
+    # many days, so a verify route stays mostly incremental. 0 = re-verify everything.
+    reverify_days: int = Field(default=30, ge=0)
 
 
 class Route(_Base):
@@ -531,7 +550,43 @@ def load_config(path: Path | None = None) -> Config:
     if not isinstance(raw, dict):
         raise ValueError(f"Config at {p} must be a YAML mapping, got {type(raw).__name__}.")
     _drop_legacy_keys(raw)
+    if config_migrate.needs_migration(raw):
+        migrated = _migrate_0_9(raw, p)
+        if migrated is not None:
+            return migrated
     return Config.model_validate(raw)
+
+
+def _migrate_0_9(raw: dict[str, Any], path: Path) -> Config | None:
+    """Convert a 0.9 config to the route model, back it up and save it.
+
+    Returns ``None`` — meaning "carry on with the config as it is on disk" — if anything at
+    all goes wrong. A failed migration must never stop the app from booting (BE-B1), and it
+    costs nothing to defer: the 0.9 sections are still what the app reads, and the next
+    start will try again.
+    """
+    try:
+        cfg = Config.model_validate(config_migrate.migrate(raw))
+    except Exception as exc:  # noqa: BLE001 — any failure here degrades to "don't migrate"
+        log.warning(
+            "config: could not convert %s to the 1.0 route model (%s); starting on the "
+            "existing config and leaving it untouched",
+            path,
+            exc,
+        )
+        return None
+    config_migrate.write_backup(path)
+    try:
+        save_config(cfg, path)
+        log.info("config: migrated %s to the 1.0 route model (%d route(s))", path, len(cfg.routes))
+    except OSError as exc:
+        log.warning(
+            "config: migrated config could not be written to %s (%s); running with it in "
+            "memory and retrying on the next start",
+            path,
+            exc,
+        )
+    return cfg
 
 
 def restrict_secret_file(path: Path) -> None:

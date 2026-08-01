@@ -118,6 +118,10 @@ routes: []
 #     schedule:
 #       time: "04:00"
 #       days: [true, true, true, true, true, true, true]   # Mon..Sun
+#       # Escape hatch for a schedule time+days cannot express (a day-of-month or month
+#       # pattern, a step value, a weekday range). A 5-field crontab string; when set it
+#       # wins over time/days, and the UI shows it read-only.
+#       # cron: "0 4 1 * *"
 #     retention:              # applied on the target
 #       keep_last: 0
 #       keep_daily: 7
@@ -130,6 +134,8 @@ routes: []
 #       min_free_percent: 0   # abort if the target datastore has less than this % free (0 = disabled)
 #       gc: true              # garbage-collect the target once this route is done
 #       verify_after: false   # quick verify of this run's new snapshots, before power-off
+#       reverify_days: 30     # verify routes only: skip snapshots verified in the last N
+#                             # days, so the route stays incremental (0 = verify everything)
 #
 #   # A sync route copies snapshots from one PBS to another (pull or push).
 #   - id: offsite
