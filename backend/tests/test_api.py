@@ -289,7 +289,7 @@ def test_guests_include_cached_last_backup(app_ctx):
     )
     epoch = 1_700_000_000
     with session_scope() as session:
-        upsert_last_backups(session, {100: epoch})
+        upsert_last_backups(session, "", "", {100: epoch})  # TODO(M05): real ids
 
     guests = client.get("/api/guests").json()
     assert guests[0]["last_backup"] is not None
@@ -538,7 +538,7 @@ def test_resolve_datastore_live_upserts_and_returns_live(temp_db):
     view = resolve_datastore("backup", DatastoreStatus(total=10, used=4, avail=6))
     assert (view.total, view.used) == (10, 4)
     with session_scope() as s:
-        row = get_datastore_stat(s, "backup")
+        row = get_datastore_stat(s, "", "backup")
     assert row is not None and row.used == 4  # live reading was persisted
 
 
@@ -548,7 +548,7 @@ def test_resolve_datastore_offline_uses_cache(temp_db):
     from app.db.datastore_stats import upsert_datastore_stat
 
     with session_scope() as s:
-        upsert_datastore_stat(s, "backup", 8, 2)
+        upsert_datastore_stat(s, "", "backup", 8, 2)
     view = resolve_datastore("backup", None)
     assert (view.total, view.used, view.used_pct) == (8, 2, 25.0)
 
@@ -563,7 +563,7 @@ def test_status_datastore_from_cache_when_offline(app_ctx):
     client, _app = app_ctx
     with session_scope() as s:
         from app.db.datastore_stats import upsert_datastore_stat
-        upsert_datastore_stat(s, "backup", 8_000_000_000, 2_000_000_000)
+        upsert_datastore_stat(s, "", "backup", 8_000_000_000, 2_000_000_000)
 
     body = client.get("/api/status").json()
     assert body["datastore"] is not None
@@ -712,7 +712,7 @@ def test_dashboard_datastore_from_cache_when_offline(app_ctx):
     key = _enable_api_key(app)
     with session_scope() as s:  # session_scope already imported at top of test_api.py
         from app.db.datastore_stats import upsert_datastore_stat
-        upsert_datastore_stat(s, "backup", 8_000_000_000, 2_000_000_000)
+        upsert_datastore_stat(s, "", "backup", 8_000_000_000, 2_000_000_000)
 
     body = client.get("/api/dashboard", headers={"X-API-Key": key}).json()
     assert body["datastore_used_pct"] == 25.0
@@ -735,7 +735,7 @@ def test_dashboard_upserts_and_returns_live_when_pbs_online(app_ctx, monkeypatch
     # the live reading was persisted to the cache (write-on-GET)
     from app.db.datastore_stats import get_datastore_stat
     with session_scope() as s:
-        row = get_datastore_stat(s, "backup")
+        row = get_datastore_stat(s, "", "backup")
     assert row is not None and row.used == 2_000_000_000
 
 

@@ -95,13 +95,15 @@ def resolve_datastore(datastore: str, live: DatastoreStatus | None) -> Datastore
     it is safe to call from a request handler and the values are detached (no lazy load)."""
     with session_scope() as session:
         if live is not None:
-            upsert_datastore_stat(session, datastore, live.total, live.used)
+            # TODO(M05): the pbs id of the device this datastore belongs to. Reads below use
+            # the same placeholder, so the cache stays self-consistent until routes drive it.
+            upsert_datastore_stat(session, "", datastore, live.total, live.used)
             return DatastoreView(live.total, live.used, live.used_pct)
         # Reached both when the PBS is off and when it's reachable but the live
         # datastore read failed (probe_pbs swallowed a ConnectorError) — in the
         # latter case pbs_state still reports "online" since that field is
         # reachability-only, while the numbers here fall back to the cache.
-        row = get_datastore_stat(session, datastore)
+        row = get_datastore_stat(session, "", datastore)  # TODO(M05): real pbs id
         if row is None:
             return None
         return DatastoreView(row.total, row.used, row.used_pct)

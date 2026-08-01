@@ -41,11 +41,21 @@ class RunRecorder:
         kind: RunKind,
         trigger: RunTrigger,
         *,
+        route_id: str | None = None,
+        route_name: str | None = None,
         session_factory: Callable[[], Session] = make_session,
     ):
+        # TODO(M07): the scheduler passes the route that fired; until then every run is
+        # route-less, which is also the right answer for a manual one-off.
         self._session = session_factory()
         try:
-            self.run = Run(kind=kind, trigger=trigger, status=RunStatus.RUNNING)
+            self.run = Run(
+                kind=kind,
+                trigger=trigger,
+                status=RunStatus.RUNNING,
+                route_id=route_id,
+                route_name=route_name,
+            )
             self._session.add(self.run)
             self._session.commit()
         except Exception:

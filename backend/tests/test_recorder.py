@@ -62,3 +62,27 @@ def test_run_has_no_dead_summary_columns():
     assert not hasattr(Run, "bytes_total")
     assert not hasattr(Run, "guests_failed")
     assert hasattr(Run, "guests_ok")  # the one that IS used stays
+    assert hasattr(Run, "route_id") and hasattr(Run, "route_name")
+
+
+def test_a_run_records_the_route_it_came_from(temp_db):
+    with RunRecorder(
+        RunKind.CYCLE, RunTrigger.SCHEDULED, route_id="nightly", route_name="Nightly backup"
+    ) as rec:
+        rec.finish(RunStatus.SUCCESS)
+        run_id = rec.run_id
+
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.route_id == "nightly" and run.route_name == "Nightly backup"
+
+
+def test_a_run_without_a_route_is_allowed(temp_db):
+    # A manual one-off has no route, and so does every run recorded before 1.0.
+    with RunRecorder(RunKind.GC, RunTrigger.MANUAL) as rec:
+        rec.finish(RunStatus.SUCCESS)
+        run_id = rec.run_id
+
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.route_id is None and run.route_name is None

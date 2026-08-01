@@ -256,7 +256,7 @@ def test_success_cycle_caches_datastore_stat(temp_db):
     assert status == RunStatus.SUCCESS
 
     with session_scope() as s:
-        row = get_datastore_stat(s, "backup")
+        row = get_datastore_stat(s, "", "backup")
     assert row is not None
     assert row.total == 8_000_000_000
     assert row.used == 2_000_000_000

@@ -59,7 +59,11 @@ def init_db(db_file: Path | None = None) -> None:
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     # Import models so they're registered on Base.metadata before create_all.
     from . import models  # noqa: F401
+    from .upgrade import upgrade_schema
 
+    # Order matters: upgrade_schema patches tables create_all would leave alone, and may
+    # drop a cache table whose key changed — create_all then recreates it in the same call.
+    upgrade_schema(_engine)
     Base.metadata.create_all(_engine)
 
 

@@ -295,7 +295,9 @@ def _cache_datastore_stat(config: Config, recorder: RunRecorder, ds: DatastoreSt
     sleeps. Best-effort: a cache-write failure must never fail the cycle."""
     try:
         with session_scope() as session:
-            upsert_datastore_stat(session, config.pbs.datastore, ds.total, ds.used)
+            # TODO(M05): the route's target pbs id. api/_probe reads with the same
+            # placeholder, so the cache stays self-consistent until routes drive the cycle.
+            upsert_datastore_stat(session, "", config.pbs.datastore, ds.total, ds.used)
     except Exception as exc:
         recorder.log(LogLevel.WARN, f"could not cache datastore usage: {exc}")
 
@@ -311,7 +313,7 @@ def _refresh_backup_cache(config: Config, recorder: RunRecorder, deps: CycleDeps
         with deps.build_pbs(config) as pbs:
             latest = pbs.latest_backups()
         with session_scope() as session:
-            upsert_last_backups(session, latest)
+            upsert_last_backups(session, "", "", latest)  # TODO(M05): source pve, target pbs
     except Exception as exc:
         recorder.log(LogLevel.WARN, f"could not refresh last-backup cache: {exc}")
         return

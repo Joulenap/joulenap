@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from app.db import session_scope
 from app.db.guest_backups import get_last_backups, upsert_last_backups
+from app.db.models import GuestBackup
 
 
 def _utc(epoch: int) -> datetime:
@@ -15,7 +16,9 @@ def _utc(epoch: int) -> datetime:
 
 def test_upsert_inserts_and_reads_back(temp_db):
     with session_scope() as s:
-        written = upsert_last_backups(s, {100: 1_700_000_000, 101: 1_700_000_500})
+        written = upsert_last_backups(
+            s, "pve-01", "pbs-01", {100: 1_700_000_000, 101: 1_700_000_500}
+        )
     assert written == 2
 
     with session_scope() as s:
@@ -26,16 +29,18 @@ def test_upsert_inserts_and_reads_back(temp_db):
 
 def test_upsert_advances_changed_time_only(temp_db):
     with session_scope() as s:
-        upsert_last_backups(s, {100: 1_700_000_000})
+        upsert_last_backups(s, "pve-01", "pbs-01", {100: 1_700_000_000})
 
     with session_scope() as s:
         # 100 unchanged, 101 new -> only one write.
-        written = upsert_last_backups(s, {100: 1_700_000_000, 101: 1_700_000_500})
+        written = upsert_last_backups(
+            s, "pve-01", "pbs-01", {100: 1_700_000_000, 101: 1_700_000_500}
+        )
     assert written == 1
 
     with session_scope() as s:
         # 100 advances to a newer time -> one write.
-        written = upsert_last_backups(s, {100: 1_700_009_999})
+        written = upsert_last_backups(s, "pve-01", "pbs-01", {100: 1_700_009_999})
     assert written == 1
     with session_scope() as s:
         assert get_last_backups(s)[100] == _utc(1_700_009_999)
@@ -43,8 +48,34 @@ def test_upsert_advances_changed_time_only(temp_db):
 
 def test_get_last_backups_filters_by_vmid(temp_db):
     with session_scope() as s:
-        upsert_last_backups(s, {100: 1_700_000_000, 101: 1_700_000_500, 102: 1_700_001_000})
+        upsert_last_backups(
+            s, "pve-01", "pbs-01", {100: 1_700_000_000, 101: 1_700_000_500, 102: 1_700_001_000}
+        )
 
     with session_scope() as s:
         cached = get_last_backups(s, [100, 102, 999])
     assert set(cached) == {100, 102}  # 999 absent, 101 not requested
+
+
+def test_the_same_vmid_on_two_pves_is_two_guests(temp_db):
+    # vmids collide across PVEs, so (pve, vmid, pbs) is the key — not vmid alone.
+    with session_scope() as s:
+        upsert_last_backups(s, "pve-01", "pbs-01", {100: 1_700_000_000})
+        written = upsert_last_backups(s, "pve-02", "pbs-01", {100: 1_700_009_999})
+    assert written == 1  # an insert, not an update of pve-01's row
+
+    with session_scope() as s:
+        rows = {(r.pve_id, r.vmid): r.last_backup for r in s.query(GuestBackup).all()}
+    assert rows[("pve-01", 100)] == _utc(1_700_000_000)
+    assert rows[("pve-02", 100)] == _utc(1_700_009_999)
+
+
+def test_one_guest_backed_up_to_two_pbs_keeps_both_rows(temp_db):
+    with session_scope() as s:
+        upsert_last_backups(s, "pve-01", "pbs-01", {100: 1_700_000_000})
+        upsert_last_backups(s, "pve-01", "pbs-02", {100: 1_700_009_999})
+
+    with session_scope() as s:
+        assert s.query(GuestBackup).count() == 2
+        # "when was this guest last backed up" is the newest across its targets.
+        assert get_last_backups(s)[100] == _utc(1_700_009_999)

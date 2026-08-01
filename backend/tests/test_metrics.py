@@ -129,7 +129,7 @@ def test_every_sample_family_is_declared(client):
 
 def upsert_last_backups_now(latest: dict[int, datetime]) -> None:
     with session_scope() as session:
-        upsert_last_backups(session, {v: int(ts.timestamp()) for v, ts in latest.items()})
+        upsert_last_backups(session, "", "", {v: int(ts.timestamp()) for v, ts in latest.items()})
 
 
 def test_reports_build_info_and_state(client):

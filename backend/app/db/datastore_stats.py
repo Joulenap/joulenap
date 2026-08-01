@@ -12,13 +12,17 @@ from sqlalchemy.orm import Session
 from .models import DatastoreStat
 
 
-def upsert_datastore_stat(session: Session, datastore: str, total: int, used: int) -> bool:
-    """Upsert cached usage for a datastore. Inserts a new row, advances an existing row whose
-    total/used changed, leaves an unchanged row alone. Returns whether a row was written. The
-    caller owns the transaction."""
-    row = session.get(DatastoreStat, datastore)
+def upsert_datastore_stat(
+    session: Session, pbs_id: str, datastore: str, total: int, used: int
+) -> bool:
+    """Upsert cached usage for one PBS's datastore. Inserts a new row, advances an existing
+    row whose total/used changed, leaves an unchanged row alone. Returns whether a row was
+    written. The caller owns the transaction."""
+    row = session.get(DatastoreStat, (pbs_id, datastore))
     if row is None:
-        session.add(DatastoreStat(datastore=datastore, total=total, used=used))
+        session.add(
+            DatastoreStat(pbs_id=pbs_id, datastore=datastore, total=total, used=used)
+        )
         return True
     if row.total != total or row.used != used:
         row.total = total
@@ -27,5 +31,5 @@ def upsert_datastore_stat(session: Session, datastore: str, total: int, used: in
     return False
 
 
-def get_datastore_stat(session: Session, datastore: str) -> DatastoreStat | None:
-    return session.get(DatastoreStat, datastore)
+def get_datastore_stat(session: Session, pbs_id: str, datastore: str) -> DatastoreStat | None:
+    return session.get(DatastoreStat, (pbs_id, datastore))
