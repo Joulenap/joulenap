@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, List, Literal  # noqa: UP035  (List is intentional, see below)
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import paths
 
@@ -156,6 +156,204 @@ class BackupConfig(_Base):
     external: ExternalConfig = Field(default_factory=ExternalConfig)
 
 
+# --- devices and routes ------------------------------------------------------
+#
+# The v1.0 model. A **route** is "sources -> target + schedule" and covers every reason
+# Joulenap ever wakes a PBS, in four kinds:
+#
+#   backup    one or more PVE sources -> a PBS target        (vzdump)
+#   sync      one PBS source          -> another PBS target  (remote + sync job)
+#   external  no source               -> a PBS target        (watch its own scheduled tasks)
+#   verify    no source               -> a PBS target        (verify its snapshots)
+#
+# Devices are listed once under ``pves``/``pbss`` and referenced by id, so two routes onto
+# the same PBS share its credentials, its wake settings and its power lease.
+
+
+class PveDevice(_Base):
+    """One Proxmox VE endpoint — a standalone node or a cluster (which proxies its nodes).
+
+    There is deliberately no ``node`` field: nodes are discovered at runtime via the API,
+    which is also what tells us whether this entry is a cluster. And no display name: the
+    id *is* the name shown in the UI.
+    """
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    host: str = ""
+    port: int = Field(default=8006, ge=1, le=65535)
+    verify_tls: bool = False
+    api_token_id: str = ""
+    api_token_secret: str = ""
+    # pbs id -> the storage id THIS pve uses for that PBS (Datacenter > Storage). Each PVE
+    # names the same PBS however it likes, so the mapping belongs to the PVE, not the route.
+    # Filled in by discovery/the wizard.
+    storages: dict[str, str] = Field(default_factory=dict)
+
+
+class PbsExternalConfig(_Base):
+    """Watch timeouts for External routes onto this PBS — how slow *this* box is.
+
+    Both are worst-case timeouts, not fixed delays (see jobs/backup_cycle.watch_external_tasks).
+    """
+
+    # Wait at most this many seconds for the first task to appear after wake-up; watching
+    # starts as soon as one does. If none appears, the PBS is powered off at expiry.
+    first_task_wait: int = Field(default=900, ge=0)
+    # Power off only after this many seconds of continuous task silence; the countdown
+    # restarts whenever a new task starts.
+    idle_wait: int = Field(default=300, ge=0)
+
+
+class PbsDevice(_Base):
+    """One Proxmox Backup Server, with everything needed to wake it and put it back to sleep."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    host: str = ""
+    port: int = Field(default=8007, ge=1, le=65535)
+    datastore: str = ""
+    fingerprint: str = ""
+    api_token_id: str = ""
+    api_token_secret: str = ""
+    # False = an always-on PBS (a VM, or a cloud-hosted one): Joulenap schedules routes
+    # against it but never sends WoL and never powers it off, so mac/wol/ssh go unused.
+    managed_power: bool = True
+    mac: str = ""
+    wol_broadcast_iface: str = ""
+    wait_timeout: int = Field(default=180, ge=0)  # per wake attempt
+    # Extra Wake-on-LAN re-sends if the PBS doesn't come up within wait_timeout.
+    # Total wake attempts = wol_retries + 1.
+    wol_retries: int = Field(default=2, ge=0)
+    # Before powering off, wait up to this many seconds for any running PBS task to finish
+    # so a clean shutdown never interrupts it (0 = power off immediately, no guard).
+    poweroff_task_wait: int = Field(default=600, ge=0)
+    ssh_user: str = "root"
+    ssh_key_path: str = "/app/data/id_ed25519"
+    external: PbsExternalConfig = Field(default_factory=PbsExternalConfig)
+
+    @model_validator(mode="after")
+    def _check_power_fields(self) -> PbsDevice:
+        # Only once the device is real (a host is set) — a half-filled entry mid-wizard
+        # must still be saveable.
+        if self.managed_power and self.host:
+            missing = [f for f in ("mac", "ssh_user", "ssh_key_path") if not getattr(self, f)]
+            if missing:
+                raise ValueError(
+                    f"pbs '{self.id}': managed_power is on, so {', '.join(missing)} must be set "
+                    "(Joulenap wakes it by MAC and powers it off over SSH). Use "
+                    "managed_power: false for an always-on or cloud-hosted PBS."
+                )
+        return self
+
+
+class RouteGuests(_Base):
+    """Which guests of one source PVE a backup route covers."""
+
+    mode: Literal["all", "include"] = "all"
+    # A newly created VM/CT is backed up automatically in "all" mode but NOT in "include"
+    # mode — that list is explicit, so add new guests to it yourself.
+    # ``typing.List`` (not ``list[int]``) avoids the field name shadowing the builtin
+    # during Python 3.14 deferred annotation eval.
+    list: List[int] = Field(default_factory=list)  # noqa: UP006
+
+
+class RouteSource(_Base):
+    """One PVE source of a backup route, with its own guest selection.
+
+    Guests are per-source on purpose: vmids collide across PVEs, so a flat list on the
+    route could not say which 100 it meant.
+    """
+
+    pve: str
+    guests: RouteGuests = Field(default_factory=RouteGuests)
+
+
+class RouteSchedule(_Base):
+    """When the route runs: a time of day plus the weekdays it applies to."""
+
+    time: str = Field(default="04:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    # Monday..Sunday, exactly 7 flags.
+    days: List[bool] = Field(  # noqa: UP006
+        default_factory=lambda: [True] * 7, min_length=7, max_length=7
+    )
+
+    @model_validator(mode="after")
+    def _check_days(self) -> RouteSchedule:
+        if not any(self.days):
+            raise ValueError(
+                "schedule.days selects no day, so the route would never run — "
+                "set enabled: false to pause a route instead."
+            )
+        return self
+
+
+class RouteOptions(_Base):
+    """Per-route tuning. The first three apply to backup routes; the last two to any route
+    that leaves the PBS awake (they run before power-off)."""
+
+    mode: Literal["snapshot", "suspend", "stop"] = "snapshot"
+    bwlimit: int = Field(default=0, ge=0)  # KiB/s, 0 = unlimited
+    # Pre-flight guard: abort before vzdump if the target datastore has less than this
+    # percentage free (0 = disabled). Avoids backing up onto a near-full datastore.
+    min_free_percent: int = Field(default=0, ge=0, le=100)
+    # Garbage-collect the target datastore once the route's work is done.
+    gc: bool = True
+    # Quick verify of just this run's new snapshots while the PBS is still awake.
+    verify_after: bool = False
+
+
+class Route(_Base):
+    """One scheduled flow of backup data between devices."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    name: str = ""
+    color: str = Field(default="#f5a524", pattern=r"^#[0-9a-fA-F]{6}$")
+    enabled: bool = True
+    # Per-route notification filter; the channels themselves stay global (notifications:).
+    notify: bool = True
+    # Stored, not inferred: the UI derives the kind from the devices you pick, but config
+    # is the source of truth and the cycle branches on it.
+    kind: Literal["backup", "sync", "external", "verify"]
+    sources: List[RouteSource] = Field(default_factory=list)  # noqa: UP006  (backup only)
+    source_pbs: str = ""  # sync only
+    target: str  # pbs id
+    schedule: RouteSchedule = Field(default_factory=RouteSchedule)
+    retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    sync_direction: Literal["pull", "push"] = "pull"
+    options: RouteOptions = Field(default_factory=RouteOptions)
+
+    @model_validator(mode="after")
+    def _check_kind(self) -> Route:
+        # options.mode/bwlimit/min_free_percent are inert on non-backup kinds and are left
+        # alone rather than rejected, so the UI's single route form can post one shape.
+        if self.kind == "backup":
+            if not self.sources:
+                raise ValueError(
+                    f"route '{self.id}': a backup route needs at least one source pve."
+                )
+            if self.source_pbs:
+                raise ValueError(f"route '{self.id}': source_pbs belongs to sync routes only.")
+        elif self.kind == "sync":
+            if self.sources:
+                raise ValueError(
+                    f"route '{self.id}': a sync route has no pve sources — its source is "
+                    "another PBS, set via source_pbs."
+                )
+            if not self.source_pbs:
+                raise ValueError(f"route '{self.id}': a sync route needs source_pbs.")
+            if self.source_pbs == self.target:
+                raise ValueError(
+                    f"route '{self.id}': source_pbs and target are the same pbs "
+                    f"('{self.target}') — a sync route needs two different ones."
+                )
+        else:  # external | verify
+            if self.sources or self.source_pbs:
+                raise ValueError(
+                    f"route '{self.id}': a {self.kind} route takes no sources — it only "
+                    "wakes its target and works there."
+                )
+        return self
+
+
 # --- maintenance -------------------------------------------------------------
 
 
@@ -236,11 +434,69 @@ class NotificationsConfig(_Base):
 
 class Config(_Base):
     app: AppConfig = Field(default_factory=AppConfig)
+    # v1.0 route model. Empty on a fresh install: the wizard adds devices, the user adds
+    # routes. Field order here is the key order save_config() writes.
+    pves: List[PveDevice] = Field(default_factory=list)  # noqa: UP006
+    pbss: List[PbsDevice] = Field(default_factory=list)  # noqa: UP006
+    routes: List[Route] = Field(default_factory=list)  # noqa: UP006
+    # The 0.9 single-PVE/single-PBS model, still live while the cycle, scheduler and API
+    # are ported route by route. pve/pbs/backup go away with the backup cycle; the gc and
+    # verify halves of maintenance go away with the sync/external/verify cycles.
     pve: PveConfig = Field(default_factory=PveConfig)
     pbs: PbsConfig = Field(default_factory=PbsConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
+
+    @model_validator(mode="after")
+    def _check_references(self) -> Config:
+        """Cross-check the route graph: ids are unique, references resolve, and a backup
+        route's target is actually reachable from every one of its sources.
+
+        Nothing fires while the three lists are empty, which is the fresh-install state.
+        """
+        _require_unique_ids("pves", [d.id for d in self.pves])
+        _require_unique_ids("pbss", [d.id for d in self.pbss])
+        _require_unique_ids("routes", [r.id for r in self.routes])
+
+        pves = {d.id: d for d in self.pves}
+        pbss = {d.id: d for d in self.pbss}
+        for route in self.routes:
+            target = pbss.get(route.target)
+            if target is None:
+                raise ValueError(_unknown(route, "target", route.target, "pbs", pbss))
+            if route.source_pbs and route.source_pbs not in pbss:
+                raise ValueError(_unknown(route, "source_pbs", route.source_pbs, "pbs", pbss))
+            for source in route.sources:
+                pve = pves.get(source.pve)
+                if pve is None:
+                    raise ValueError(_unknown(route, "source", source.pve, "pve", pves))
+                if route.kind == "backup" and route.target not in pve.storages:
+                    raise ValueError(
+                        f"route '{route.id}': pve '{source.pve}' has no storage mapping for "
+                        f"pbs '{route.target}' — add it under pves[{source.pve}].storages as "
+                        "the storage name that PVE uses for that PBS (Datacenter > Storage)."
+                    )
+            if route.kind == "external" and not target.managed_power:
+                raise ValueError(
+                    f"route '{route.id}': an External route watches a PBS Joulenap wakes, but "
+                    f"pbs '{route.target}' has managed_power: false — there is nothing to wake "
+                    "or power off, and PVE/PBS already own those schedules."
+                )
+        return self
+
+
+def _require_unique_ids(section: str, ids: list[str]) -> None:
+    seen: set[str] = set()
+    for value in ids:
+        if value in seen:
+            raise ValueError(f"{section}: duplicate id '{value}' — ids must be unique.")
+        seen.add(value)
+
+
+def _unknown(route: Route, field: str, value: str, kind: str, known: dict[str, Any]) -> str:
+    names = ", ".join(sorted(known)) or "none configured"
+    return f"route '{route.id}': {field} '{value}' is not a known {kind} id (have: {names})."
 
 
 # --- load / save / redact ----------------------------------------------------
