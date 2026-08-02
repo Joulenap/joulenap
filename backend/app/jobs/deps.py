@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from ..config import Config
+from ..config import Config, PbsDevice, PveDevice
 from ..connectors import net, tls
 from ..connectors.pbs import DatastoreStatus, PbsClient
 from ..connectors.power import PbsPower
@@ -47,6 +47,37 @@ def _build_pbs(config: Config) -> PbsClient:
         token_id=p.api_token_id,
         token_secret=p.api_token_secret,
         port=p.port,
+        verify=verify,
+    )
+
+
+# --- device-shaped connectors (the v1.0 route model) -------------------------
+# The two above are bound to the 0.9 single-PVE/PBS Config; a route points at devices from
+# ``pves[]``/``pbss[]`` instead. ponytail: both shapes coexist while the 0.9 cycle, the
+# wizard and the status routers still run on the flat sections — M07 deletes the pair above.
+
+
+def _connect_pve(pve: PveDevice) -> PveClient:
+    # No node: a route lists guests cluster-wide and names the node per vzdump call.
+    return PveClient(
+        host=pve.host,
+        token_id=pve.api_token_id,
+        token_secret=pve.api_token_secret,
+        port=pve.port,
+        verify_tls=pve.verify_tls,
+    )
+
+
+def _connect_pbs(pbs: PbsDevice) -> PbsClient:
+    verify: bool | ssl.SSLContext = False
+    if pbs.fingerprint:
+        verify = tls.pinned_ssl_context(pbs.host, pbs.port, pbs.fingerprint)
+    return PbsClient(
+        host=pbs.host,
+        datastore=pbs.datastore,
+        token_id=pbs.api_token_id,
+        token_secret=pbs.api_token_secret,
+        port=pbs.port,
         verify=verify,
     )
 
@@ -104,6 +135,11 @@ class CycleDeps:
     # (config, run, datastore, guests, next_at) -> None. Untyped args because the test fakes
     # take fewer of them; the production implementation is ``_notify`` above.
     notify: Callable[..., None]
+    # The same two connectors, built from a route's devices instead of the flat 0.9 config.
+    # Defaulted so every existing CycleDeps(...) construction keeps working; the config-shaped
+    # pair above goes away with its last consumers in M07.
+    connect_pve: Callable[[PveDevice], PveClient] = _connect_pve
+    connect_pbs: Callable[[PbsDevice], PbsClient] = _connect_pbs
     # True once the user has asked to stop the in-flight run. Wired by JobService to its own
     # cancel event and read live, so the cycle can check it without knowing about the service.
     # Default: nothing ever cancels (tests and direct callers that don't care).

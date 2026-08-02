@@ -144,7 +144,9 @@ class RunStep(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
-    name: Mapped[str] = mapped_column(String(16))
+    # A StepName value, optionally suffixed with what it applied to: a backup route records
+    # one step per source PVE, ``backup:pve-alpha``.
+    name: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), default=StepStatus.RUNNING)
 
     started_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=_utcnow)
@@ -188,7 +190,7 @@ class TaskLogLine(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
-    step: Mapped[str] = mapped_column(String(16))  # StepName value (backup/gc/verify)
+    step: Mapped[str] = mapped_column(String(64))  # RunStep.name (e.g. gc, backup:pve-alpha)
     source: Mapped[str] = mapped_column(String(8))  # "pve" | "pbs"
     line_no: Mapped[int] = mapped_column()  # the task's own 1-based line number
     text: Mapped[str] = mapped_column(Text)

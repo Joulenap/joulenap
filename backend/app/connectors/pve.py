@@ -27,6 +27,10 @@ class Guest:
     name: str
     type: str  # "qemu" (VM) or "lxc" (CT)
     status: str  # "running" | "stopped" | ...
+    # Which cluster node holds it. Empty from the per-node listing (the caller knows the
+    # node already); filled in by :meth:`PveClient.list_cluster_guests`, which is what lets
+    # a route group its vzdump calls per node.
+    node: str = ""
 
     @property
     def is_ct(self) -> bool:
@@ -51,9 +55,12 @@ class PveClient:
     def __init__(
         self,
         host: str,
-        node: str,
         token_id: str,
         token_secret: str,
+        # A route's PVE device has no node (nodes are discovered at runtime): the node-scoped
+        # endpoints below are the 0.9 path and the wizard's, and the task endpoints read the
+        # node from the UPID instead.
+        node: str = "",
         port: int = 8006,
         verify_tls: bool = False,
         timeout: float = 30.0,
@@ -110,6 +117,32 @@ class PveClient:
         guests.sort(key=lambda g: g.vmid)
         return guests
 
+    def list_cluster_guests(self) -> list[Guest]:
+        """Every VM/CT this endpoint knows about, each tagged with the node holding it.
+
+        One call covers a whole cluster — the endpoint proxies its nodes — and works just as
+        well against a standalone node, which the API simply reports as a one-node cluster.
+        Templates are dropped: they are never backed up, so counting them would inflate the
+        guest tally and naming one explicitly would fail the vzdump task.
+        """
+        rows = self._api.request("GET", "/cluster/resources", params={"type": "vm"}) or []
+        guests: list[Guest] = []
+        for r in rows:
+            if r.get("template") or r.get("vmid") is None:
+                continue
+            kind = r.get("type") or ""
+            guests.append(
+                Guest(
+                    vmid=int(r["vmid"]),
+                    name=r.get("name") or f"{kind}-{r['vmid']}",
+                    type=kind,
+                    status=r.get("status", "unknown"),
+                    node=r.get("node", ""),
+                )
+            )
+        guests.sort(key=lambda g: g.vmid)
+        return guests
+
     # --- backup --------------------------------------------------------------
 
     def vzdump(
@@ -121,10 +154,13 @@ class PveClient:
         mode: str = "snapshot",
         prune_backups: str | None = None,
         bwlimit: int = 0,
+        node: str = "",
     ) -> str:
         """Start a vzdump backup; returns the task UPID to poll with :meth:`wait_task`.
 
-        Either pass ``vmids`` (explicit selection) or ``all_guests=True``.
+        Either pass ``vmids`` (explicit selection) or ``all_guests=True``. ``node`` picks the
+        cluster node to run it on (a backup route starts one task per node); it defaults to
+        the client's own node.
         """
         params: dict[str, Any] = {"storage": storage, "mode": mode}
         if all_guests:
@@ -135,12 +171,24 @@ class PveClient:
             params["prune-backups"] = prune_backups
         if bwlimit:
             params["bwlimit"] = bwlimit
-        return self._api.request("POST", f"/nodes/{self.node}/vzdump", data=params)
+        return self._api.request("POST", f"/nodes/{node or self.node}/vzdump", data=params)
 
     # --- tasks ---------------------------------------------------------------
 
+    def _task_node(self, upid: str) -> str:
+        """The node a task runs on, read from its own UPID (``UPID:<node>:<pid>:…``).
+
+        One client can drive tasks on several nodes (a cluster route starts one vzdump per
+        node), so the node has to come from the task rather than from the client. Falls back
+        to the client's node if the string isn't a UPID.
+        """
+        parts = upid.split(":")
+        if len(parts) > 2 and parts[0] == "UPID" and parts[1]:
+            return parts[1]
+        return self.node
+
     def task_status(self, upid: str) -> dict[str, Any]:
-        return self._api.request("GET", f"/nodes/{self.node}/tasks/{upid}/status")
+        return self._api.request("GET", f"/nodes/{self._task_node(upid)}/tasks/{upid}/status")
 
     def task_log(self, upid: str, start: int = 0, limit: int = 5000) -> list[LogLine]:
         """Fetch task-log lines starting at offset ``start``, as ``(line_no, text)`` pairs.
@@ -150,7 +198,7 @@ class PveClient:
         """
         data = self._api.request(
             "GET",
-            f"/nodes/{self.node}/tasks/{upid}/log",
+            f"/nodes/{self._task_node(upid)}/tasks/{upid}/log",
             params={"start": start, "limit": limit},
         )
         return [(int(e["n"]), e.get("t") or "") for e in (data or [])]
@@ -161,7 +209,7 @@ class PveClient:
         Without this a cancelled backup would keep running on the PVE host after Joulenap
         stopped watching it, and the next run would collide with it.
         """
-        self._api.request("DELETE", f"/nodes/{self.node}/tasks/{upid}")
+        self._api.request("DELETE", f"/nodes/{self._task_node(upid)}/tasks/{upid}")
 
     def wait_task(
         self,

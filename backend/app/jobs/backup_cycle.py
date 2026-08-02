@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from ..config import Config
+from ..config import Config, PbsDevice, Route, RouteGuests, RouteSource
 from ..connectors.errors import TaskCancelled
 from ..connectors.pbs import DatastoreStatus
 from ..connectors.pve import Guest, build_prune_string
@@ -63,7 +63,7 @@ def _guest_watcher(summary: GuestSummary, names: dict[int, str]):
     return watch
 
 
-def _tailer(recorder: RunRecorder, step: StepName, source: str, watch=None):
+def _tailer(recorder: RunRecorder, step: str, source: str, watch=None):
     """A ``wait_task(on_log=...)`` callback that persists each task-log batch.
 
     Best-effort: a failure to store a log line must never fail an otherwise-fine backup,
@@ -106,7 +106,7 @@ def _wait_or_stop(
     upid: str,
     recorder: RunRecorder,
     deps: CycleDeps,
-    step: StepName,
+    step: str,
     source: str,
     watch: Callable[[list[tuple[int, str]]], None] | None = None,
 ) -> None:
@@ -652,3 +652,298 @@ def _notify_result(
         deps.notify(config, recorder.run, datastore, guests, deps.next_run())
     except Exception as exc:
         recorder.log(LogLevel.WARN, f"notification failed: {exc}")
+
+
+# --- v1.0 route cycle --------------------------------------------------------
+#
+# One run executes one **backup route**: N source PVEs (each possibly a cluster) -> one PBS
+# target. Wake and power-off are deliberately absent — ``JobService._execute`` takes a
+# :class:`~.lease.PowerLease` on the target around the job (M04), so the cycle starts with
+# the box already awake and ends without touching its power. Everything else below mirrors
+# the 0.9 cycle above, which it replaces once the flat ``pve:``/``pbs:``/``backup:`` config
+# sections and their other consumers are gone (M06/M07).
+
+
+def _find_device(devices, device_id: str):
+    return next((d for d in devices if d.id == device_id), None)
+
+
+def _guests_by_node(selection: RouteGuests, guests: list[Guest]) -> dict[str, list[int]]:
+    """Group the guests this source wants by the cluster node holding them — a route runs
+    one vzdump per node, and only on nodes that actually have something to back up."""
+    wanted = None if selection.mode == "all" else set(selection.list)
+    picked: dict[str, list[int]] = {}
+    for guest in guests:
+        if wanted is None or guest.vmid in wanted:
+            picked.setdefault(guest.node, []).append(guest.vmid)
+    return picked
+
+
+def _route_backup_source(
+    config: Config,
+    route: Route,
+    source: RouteSource,
+    recorder: RunRecorder,
+    deps: CycleDeps,
+    summary: GuestSummary,
+    step,
+) -> set[int]:
+    """Back up one source PVE onto the route's target: one vzdump per cluster node.
+
+    Returns the vmids this source covered, so the last-backup cache can attribute each guest
+    to the PVE it came from. Raises on failure — the caller records that against this
+    source's step and moves on to the next source.
+    """
+    pve = _find_device(config.pves, source.pve)
+    if pve is None:
+        raise CycleAbort(f"source pve '{source.pve}' no longer exists")
+    storage = pve.storages.get(route.target)
+    if not storage:
+        raise CycleAbort(
+            f"pve '{pve.id}' has no storage mapping for pbs '{route.target}' "
+            "(Datacenter > Storage)"
+        )
+
+    prune = build_prune_string(route.retention.model_dump())
+    step_name = f"{StepName.BACKUP.value}:{source.pve}"
+    upids: list[str] = []
+    covered: set[int] = set()
+
+    with deps.connect_pve(pve) as client:
+        # One cluster-wide listing feeds all three needs: the per-node grouping, the guest
+        # tally and the {vmid: name} map the notification names failed guests with.
+        guests = client.list_cluster_guests()
+        names = {g.vmid: g.name for g in guests}
+        per_node = _guests_by_node(source.guests, guests)
+        # "all" stays vzdump's own ``all`` flag rather than the vmids we just listed, so PVE
+        # keeps deciding: a guest marked *exclude from backup* is honoured, and one created
+        # since the listing is still covered.
+        all_guests = source.guests.mode == "all"
+        if not all_guests:
+            missing = sorted(set(source.guests.list) - {g.vmid for g in guests})
+            if missing:
+                recorder.log(
+                    LogLevel.WARN,
+                    f"pve '{pve.id}': selected guest(s) {missing} are not on it "
+                    "(deleted, a template, or migrated away); skipping them",
+                )
+        if not per_node:
+            raise CycleAbort(f"pve '{pve.id}': no guests selected for backup")
+
+        for node, vmids in per_node.items():
+            upid = client.vzdump(
+                storage,
+                node=node,
+                vmids=None if all_guests else vmids,
+                all_guests=all_guests,
+                mode=route.options.mode,
+                prune_backups=prune,
+                bwlimit=route.options.bwlimit,
+            )
+            upids.append(upid)
+            step.detail = ", ".join(upids)
+            # Counted before the wait: a task that dies still set out to back these up.
+            summary.total += len(vmids)
+            done_before = summary.ok
+            _wait_or_stop(
+                client,
+                upid,
+                recorder,
+                deps,
+                step_name,
+                "pve",
+                _guest_watcher(summary, names),
+            )
+            # The task exited OK, so every guest it covered was backed up whatever the log
+            # parse made of it — a vzdump wording change must never report "0/14" on a good
+            # run. Only on success, so a failed node doesn't advertise guests as backed up.
+            summary.ok = done_before + len(vmids)
+            covered |= set(vmids)
+    return covered
+
+
+def _route_preflight(
+    route: Route, target: PbsDevice, recorder: RunRecorder, deps: CycleDeps
+) -> None:
+    """Abort before any vzdump if the target datastore is below the route's free-space floor.
+
+    No-op when ``min_free_percent`` is 0 (the default), so the step only appears when the
+    user opted in. An abort here leaves the PBS on for inspection (the lease's failure
+    policy), matching the other failure paths.
+    """
+    threshold = route.options.min_free_percent
+    if threshold <= 0:
+        return
+    with recorder.step(StepName.PRECHECK) as step:
+        with deps.connect_pbs(target) as pbs:
+            ds = pbs.datastore_status()
+        _cache_route_datastore(target, recorder, ds)
+        step.detail = f"{ds.avail_pct:.1f}% free ({ds.avail / 1_000_000_000:.0f} GB)"
+        if ds.avail_pct < threshold:
+            raise CycleAbort(
+                f"PBS '{target.id}' datastore {target.datastore!r} only {ds.avail_pct:.1f}% "
+                f"free (need >= {threshold}%); skipping backup"
+            )
+
+
+def _route_gc_step(target: PbsDevice, recorder: RunRecorder, deps: CycleDeps) -> None:
+    """Garbage-collect the route's target datastore while the PBS is still awake."""
+    with recorder.step(StepName.GC) as step:
+        with deps.connect_pbs(target) as pbs:
+            upid = pbs.start_gc()
+            step.detail = upid
+            _wait_or_stop(pbs, upid, recorder, deps, StepName.GC.value, "pbs")
+
+
+def _route_verify_step(
+    target: PbsDevice, recorder: RunRecorder, deps: CycleDeps, *, outdated_after: int | None
+) -> None:
+    """Verify snapshots on the route's target. ``outdated_after=None`` -> only never-verified
+    (i.e. this run's new) snapshots; an int -> also re-verify ones older than that many days
+    (0 -> everything), which is what a Verify route will ask for (M06)."""
+    with recorder.step(StepName.VERIFY) as step:
+        with deps.connect_pbs(target) as pbs:
+            if outdated_after is not None and outdated_after <= 0:
+                upid = pbs.start_verify(ignore_verified=False)
+            else:
+                upid = pbs.start_verify(ignore_verified=True, outdated_after=outdated_after)
+            step.detail = upid
+            _wait_or_stop(pbs, upid, recorder, deps, StepName.VERIFY.value, "pbs")
+
+
+def _cache_route_datastore(
+    target: PbsDevice, recorder: RunRecorder, ds: DatastoreStatus
+) -> None:
+    """Persist the target's usage so the UI can show it while the PBS sleeps. Best-effort:
+    a cache-write failure must never fail the run."""
+    try:
+        with session_scope() as session:
+            upsert_datastore_stat(session, target.id, target.datastore, ds.total, ds.used)
+    except Exception as exc:
+        recorder.log(LogLevel.WARN, f"could not cache datastore usage: {exc}")
+
+
+def _route_read_datastore(
+    target: PbsDevice, recorder: RunRecorder, deps: CycleDeps
+) -> DatastoreStatus | None:
+    """Read the target's usage for the notification, while it is still awake. Best-effort:
+    a read failure only costs the notification its usage line."""
+    try:
+        with deps.connect_pbs(target) as pbs:
+            ds = pbs.datastore_status()
+    except Exception as exc:
+        recorder.log(LogLevel.WARN, f"could not read datastore usage: {exc}")
+        return None
+    recorder.log(LogLevel.INFO, f"PBS '{target.id}' datastore {ds.used_pct}% used")
+    _cache_route_datastore(target, recorder, ds)
+    return ds
+
+
+def _refresh_route_backup_cache(
+    target: PbsDevice,
+    covered: dict[str, set[int]],
+    recorder: RunRecorder,
+    deps: CycleDeps,
+) -> None:
+    """Cache each guest's latest snapshot time per (source pve, target pbs), so the dashboard
+    can show last-backup dates once the PBS sleeps again.
+
+    One datastore lists snapshots by vmid with no idea which PVE they came from, so each
+    source claims the vmids it actually backed up. Two PVEs sharing a vmid both get a row
+    with the same time — that is a real PBS namespace collision, not something to fix here.
+    Best-effort: the backup already succeeded, so a read/write failure is logged and dropped.
+    """
+    try:
+        with deps.connect_pbs(target) as pbs:
+            latest = pbs.latest_backups()
+        cached = 0
+        with session_scope() as session:
+            for pve_id, vmids in covered.items():
+                mine = {vmid: ts for vmid, ts in latest.items() if vmid in vmids}
+                upsert_last_backups(session, pve_id, target.id, mine)
+                cached += len(mine)
+    except Exception as exc:
+        recorder.log(LogLevel.WARN, f"could not refresh last-backup cache: {exc}")
+        return
+    recorder.log(LogLevel.INFO, f"cached last-backup times for {cached} guest(s)")
+
+
+def run_route_backup(
+    config: Config, route: Route, recorder: RunRecorder, deps: CycleDeps
+) -> None:
+    """Execute one backup route, recording each step. Sets the final run status itself.
+
+    Sources run in order and are isolated from each other: one unreachable PVE fails the run
+    but the remaining sources still get their backup, because a shared target and a shared
+    wake window are exactly what makes a multi-source route worth having.
+    """
+    datastore: DatastoreStatus | None = None
+    # Owned here, not by the per-source step: a guest failing takes the whole vzdump task
+    # down and unwinds that frame, and the failed run is exactly the one whose tally we want.
+    guests = GuestSummary()
+    covered: dict[str, set[int]] = {}
+    failed: list[str] = []
+    try:
+        target = _find_device(config.pbss, route.target)
+        if target is None:
+            raise CycleAbort(f"route '{route.id}': target pbs '{route.target}' no longer exists")
+
+        _route_preflight(route, target, recorder, deps)
+
+        for source in route.sources:
+            # A cancel that lands between sources must not start the next one — the task
+            # waits check the flag themselves, this covers the gaps between them.
+            if deps.cancelled():
+                raise CycleCancelled("Run cancelled")
+            try:
+                with recorder.step(StepName.BACKUP, label=source.pve) as step:
+                    covered[source.pve] = _route_backup_source(
+                        config, route, source, recorder, deps, guests, step
+                    )
+            except CycleCancelled:
+                raise
+            except Exception as exc:
+                # The step row already carries the failure; keep going so one broken source
+                # doesn't cost the others their backup.
+                failed.append(source.pve)
+                recorder.log(LogLevel.ERROR, f"source '{source.pve}' failed: {exc}")
+        recorder.run.guests_ok = guests.ok
+
+        if deps.cancelled():
+            raise CycleCancelled("Run cancelled")
+
+        # GC and verify still run when a source failed: the PBS is awake and the snapshots
+        # the other sources wrote are real.
+        if route.options.gc:
+            _route_gc_step(target, recorder, deps)
+        else:
+            recorder.skip_step(StepName.GC, "GC disabled for this route")
+
+        if deps.cancelled():
+            raise CycleCancelled("Run cancelled")
+
+        if route.options.verify_after:
+            _route_verify_step(target, recorder, deps, outdated_after=None)
+        else:
+            recorder.skip_step(StepName.VERIFY, "verify disabled for this route")
+
+        datastore = _route_read_datastore(target, recorder, deps)
+        _refresh_route_backup_cache(target, covered, recorder, deps)
+
+        if failed:
+            recorder.finish(
+                RunStatus.FAILURE, error=f"backup failed for source(s): {', '.join(failed)}"
+            )
+        else:
+            recorder.finish(RunStatus.SUCCESS)
+    except CycleCancelled:
+        # No notification: the user pressed Stop and is standing at the UI — a "backup
+        # aborted" push would just be noise about their own click.
+        recorder.finish(RunStatus.ABORTED, error="Cancelled by user")
+        return
+    except CycleAbort as exc:
+        recorder.finish(RunStatus.ABORTED, error=str(exc))
+    except Exception as exc:  # connector/task failures: the lease leaves the PBS on
+        recorder.finish(RunStatus.FAILURE, error=str(exc))
+
+    _notify_result(config, recorder, deps, datastore, guests)

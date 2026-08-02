@@ -74,17 +74,19 @@ class RunRecorder:
         self._session.add(LogEvent(run_id=self.run.id, level=level, message=message))
         self._session.commit()
 
-    def task_log(self, step: StepName, source: str, lines: list[tuple[int, str]]) -> None:
+    def task_log(self, step: str, source: str, lines: list[tuple[int, str]]) -> None:
         """Append a batch of raw task-log lines for the live Task-log panel.
 
         ``lines`` is a list of ``(line_no, text)`` pairs from the PVE/PBS task tailer;
-        committed per batch so an in-flight task streams to ``GET /api/tasklog``.
+        committed per batch so an in-flight task streams to ``GET /api/tasklog``. ``step`` is
+        the owning :class:`RunStep`'s name — a plain :class:`StepName` works, and so does the
+        ``backup:<pve-id>`` form a multi-source route records.
         """
         for line_no, text in lines:
             self._session.add(
                 TaskLogLine(
                     run_id=self.run.id,
-                    step=step.value,
+                    step=step,
                     source=source,
                     line_no=line_no,
                     text=text,
@@ -95,20 +97,25 @@ class RunRecorder:
     # --- steps ---------------------------------------------------------------
 
     @contextmanager
-    def step(self, name: StepName) -> Iterator[RunStep]:
+    def step(self, name: StepName, label: str | None = None) -> Iterator[RunStep]:
         """Run a step: persisted RUNNING on entry, SUCCESS on clean exit, FAILURE (and
-        re-raised) on exception. The yielded row can carry a ``detail`` (e.g. task UPID)."""
-        step = RunStep(run_id=self.run.id, name=name, status=StepStatus.RUNNING)
+        re-raised) on exception. The yielded row can carry a ``detail`` (e.g. task UPID).
+
+        ``label`` qualifies a step that happens more than once in a run — a backup route
+        records one per source PVE, named ``backup:pve-alpha``.
+        """
+        full = f"{name.value}:{label}" if label else name.value
+        step = RunStep(run_id=self.run.id, name=full, status=StepStatus.RUNNING)
         self._session.add(step)
         self._session.commit()
-        self.log(LogLevel.INFO, f"{name.value}: started")
+        self.log(LogLevel.INFO, f"{full}: started")
         try:
             yield step
         except Exception as exc:
             step.status = StepStatus.FAILURE
             step.finished_at = _utcnow()
             step.detail = str(exc)
-            self.log(LogLevel.ERROR, f"{name.value}: {exc}")
+            self.log(LogLevel.ERROR, f"{full}: {exc}")
             self._session.commit()
             raise
         else:
@@ -118,7 +125,7 @@ class RunRecorder:
             # setting step.status = FAILURE and returning normally.
             if step.status == StepStatus.RUNNING:
                 step.status = StepStatus.SUCCESS
-                self.log(LogLevel.OK, f"{name.value}: done")
+                self.log(LogLevel.OK, f"{full}: done")
             self._session.commit()
 
     def skip_step(self, name: StepName, detail: str | None = None) -> None:

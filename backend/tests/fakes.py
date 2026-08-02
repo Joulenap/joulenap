@@ -23,6 +23,9 @@ class UnreachablePve:
     def list_guests(self):
         raise ConnectorError("connection refused")
 
+    def list_cluster_guests(self):
+        raise ConnectorError("connection refused")
+
 
 class FakePve:
     def __init__(
@@ -34,7 +37,8 @@ class FakePve:
         self.guests = guests or []
         self.fail_task = fail_task
         self.log_lines = log_lines or []
-        self.vzdump_args: dict | None = None
+        self.vzdump_args: dict | None = None  # the last call (0.9 single-vzdump cycle)
+        self.vzdump_calls: list[dict] = []  # every call, in order (a route backs up per node)
         self.stopped: list[str] = []  # upids passed to stop_task
 
     def __enter__(self) -> FakePve:
@@ -46,6 +50,9 @@ class FakePve:
     def list_guests(self) -> list[Guest]:
         return self.guests
 
+    def list_cluster_guests(self) -> list[Guest]:
+        return self.guests
+
     def vzdump(
         self,
         storage,
@@ -55,6 +62,7 @@ class FakePve:
         mode="snapshot",
         prune_backups=None,
         bwlimit=0,
+        node="",
     ) -> str:
         self.vzdump_args = {
             "storage": storage,
@@ -63,8 +71,12 @@ class FakePve:
             "mode": mode,
             "prune_backups": prune_backups,
             "bwlimit": bwlimit,
+            "node": node,
         }
-        return "UPID:pve:backup"
+        self.vzdump_calls.append(self.vzdump_args)
+        # A real UPID names the node the task runs on, which is how the client routes its
+        # task calls — and how a per-node test tells the tasks apart.
+        return f"UPID:{node or 'pve'}:backup"
 
     def wait_task(
         self, upid: str, poll_interval=None, on_log=None, should_cancel=None, **_
@@ -237,7 +249,16 @@ def make_deps(
     pbs_idle: bool | Callable[[], bool] = True,
     wol=None,
     notify=None,
+    pves: dict[str, object] | None = None,
+    pbss: dict[str, object] | None = None,
 ) -> tuple[CycleDeps, FakePve, FakePbs, FakePower]:
+    """Build a :class:`CycleDeps` wired to in-memory fakes.
+
+    ``pve``/``pbs``/``power`` serve the 0.9 config-shaped builders. ``pves``/``pbss`` map a
+    *device id* to its fake for the route-shaped ``connect_pve``/``connect_pbs``; a route
+    test with several sources gives one entry per device, and everything else falls back to
+    the single fake so no existing caller changes.
+    """
     pve = pve or FakePve()
     pbs = pbs or FakePbs()
     power = power or FakePower()
@@ -255,5 +276,7 @@ def make_deps(
         wait_reachable=lambda _c, _cancel=None: wait(),
         wait_pbs_idle=lambda _c: idle(),
         notify=notify or (lambda *_a: None),
+        connect_pve=lambda device: (pves or {}).get(device.id, pve),
+        connect_pbs=lambda device: (pbss or {}).get(device.id, pbs),
     )
     return deps, pve, pbs, power
