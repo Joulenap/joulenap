@@ -31,7 +31,7 @@ from ..db.models import LogLevel, RunKind, RunStatus, RunTrigger, StepName, Step
 from ..db.prune import PruneResult, prune_history
 from ..notify.messages import RunContext
 from .deps import CycleDeps
-from .lease import LeaseDeps, PbsUnreachableError, PowerLease
+from .lease import LeaseDeps, PbsUnreachableError, PowerLease, ReleaseOutcome
 from .recorder import RunRecorder
 from .route_cycle import RUN_KINDS, run_pbs_maintenance, run_route
 
@@ -276,6 +276,11 @@ class JobService:
             finally:
                 with self._state_lock:
                     self._current = None
+                    # Cleared with it, or a stop aimed at the run that just ended would pass
+                    # cancel()'s guard and land on the next one (or be swallowed): _start
+                    # sets the new id only after the DB insert, leaving a window where the
+                    # stale id still matches while another run holds the lock.
+                    self._current_run_id = None
 
     def _execute(self, item: QueuedRun) -> None:
         """Take the run's power leases, do its job, release them, then notify.
@@ -314,9 +319,10 @@ class JobService:
                 # The cycle sets the run's final status itself and hands back what to say
                 # about it (None = cancelled, say nothing).
                 ctx = item.job(config, subject, recorder, self.deps)
-                self._release_all(item, held, recorder)
+                left_on = self._release_all(item, held, recorder)
                 held = []
                 if ctx is not None:
+                    ctx.left_on = left_on
                     self._notify(ctx, recorder)
         finally:
             # Only reached with leases still held when the job raised out of the block.
@@ -364,30 +370,38 @@ class JobService:
 
     def _release_all(
         self, item: QueuedRun, devices: list[PbsDevice], recorder: RunRecorder | None
-    ) -> None:
-        """Drop every lease this run holds, recording each power-off decision.
+    ) -> list[str]:
+        """Drop every lease this run holds, recording each power-off decision. Returns the
+        ids of the boxes genuinely left burning power, for the notification's warning.
 
         Devices are released independently: a sync route holds two leases and each box may
-        have a different answer (another holder, a queued route, unmanaged power).
+        have a different answer (another holder, a queued route, unmanaged power) — which
+        is why the warning cannot be a single fact about the run.
         ``recorder=None`` is the crash path — the leases must still be dropped, but the run
         row is already being finalised, so there is nothing left to record against.
         """
         succeeded = recorder is not None and recorder.run.status == RunStatus.SUCCESS
         power_off = self._power_off_policy(item, succeeded=succeeded)
         multi = len(devices) > 1
+        left_on: list[str] = []
         for device in devices:
             if recorder is None:
-                self.lease.release(device, power_off=power_off)
+                if self.lease.release(device, power_off=power_off) is ReleaseOutcome.LEFT_ON:
+                    left_on.append(device.id)
                 continue
             with recorder.step(StepName.POWEROFF, label=device.id if multi else None) as step:
-                if self.lease.release(device, power_off=power_off):
+                outcome = self.lease.release(device, power_off=power_off)
+                step.detail = str(outcome)
+                if outcome is ReleaseOutcome.POWERED_OFF:
                     continue
                 # Not a failure: leaving the box on is the *correct* outcome after a failed
-                # run, for an unmanaged device, or while another route still needs it. The
-                # notification's "PBS left powered on" warning keys on this step not being
-                # SUCCESS, so the user still hears about it when it costs them power.
+                # run, for an unmanaged device, or while another route still needs it — the
+                # detail says which. Only LEFT_ON costs the user power with nobody left to
+                # fix it, so only that one earns the notification's warning.
                 step.status = StepStatus.SKIPPED
-                step.detail = "left powered on"
+                if outcome is ReleaseOutcome.LEFT_ON:
+                    left_on.append(device.id)
+        return left_on
 
     def _notify(self, ctx: RunContext, recorder: RunRecorder) -> None:
         """Send the result notification. A delivery failure is logged, never fatal — the run

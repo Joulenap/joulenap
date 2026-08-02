@@ -275,6 +275,23 @@ def test_cancel_is_refused_when_nothing_is_running(temp_config, temp_db):
     assert service.cancel(run_id) is False
 
 
+def test_a_finished_run_stops_being_the_cancellable_one(temp_config, temp_db):
+    """``cancel`` takes a run id precisely so a click landing between two runs can't hit the
+    wrong one — but the id was only ever *assigned*, never cleared, so it kept naming the
+    finished run. ``_start`` sets the new id after acquiring the lock and doing the DB
+    insert, so in that window ``is_running`` is already True while the stale id still
+    matches: the stop would be swallowed, or set the cancel flag on a run the user never
+    targeted, which then aborts on its first poll."""
+    service, _box = _service()
+    service.run_route("nightly")
+    _drain(service)
+    with session_scope() as session:
+        run_id = session.scalars(select(Run)).one().id
+
+    assert service._current_run_id is None
+    assert service.cancel(run_id) is False
+
+
 def test_a_stale_cancel_does_not_kill_the_next_run(temp_config, temp_db):
     # Cancel arrives moments before the run ends on its own; the flag must not leak into
     # the run that starts next.

@@ -87,16 +87,27 @@ def migrate(raw: dict[str, Any]) -> dict[str, Any]:
 def write_backup(path: Path) -> None:
     """Copy the pre-migration config beside itself as the rollback parachute.
 
+    Written whether the migration succeeded or was refused: a refused one leaves the app
+    running on an empty config, and the next save from the Advanced tab would overwrite
+    the 0.9 original with it.
+
     An existing backup is never overwritten: the first migration wins, so re-running this
     can't lose the true 0.9 original. A backup that can't be written (read-only mount) is
-    logged, not fatal — the migration only *adds* sections, so the old ones stay as the
-    in-file fallback either way.
+    logged, not fatal — the same mount stops the migrated config from being saved too, so
+    the file on disk stays 0.9 either way.
     """
     bak = path.with_name(path.name + BACKUP_SUFFIX)
     if bak.exists():
         return
+    # Local import: config.py imports this module, so a top-level one would be circular.
+    from .config import restrict_secret_file
+
     try:
         shutil.copyfile(path, bak)
+        # copyfile copies contents, not mode bits, so the copy would land 0644 under a
+        # container's default umask — holding every API token, secret_key, password hash,
+        # SMTP password and bot token, indefinitely (an existing .bak is never overwritten).
+        restrict_secret_file(bak)
         log.info("config: saved a pre-migration copy at %s", bak)
     except OSError as exc:
         log.warning("config: could not write %s (%s) — migrating anyway", bak, exc)

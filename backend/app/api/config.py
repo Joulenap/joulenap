@@ -11,7 +11,6 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ValidationError
 
 from ..config import (
@@ -25,7 +24,7 @@ from ..config import (
 from ..connectors.errors import WolError
 from ..connectors.wol import normalize_mac
 from ..core.config_store import ConfigStore
-from ._config_edit import check_route_crons
+from ._config_edit import check_route_crons, validation_error
 from .deps import Scheduler, get_config_store, get_scheduler, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["config"])
@@ -66,9 +65,8 @@ def _apply_config(
     try:
         new_config = Config.model_validate(merged)
     except ValidationError as exc:
-        # 422 to mirror FastAPI's own body-validation responses (literal avoids the
-        # deprecated HTTP_422_UNPROCESSABLE_ENTITY constant name).
-        raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors())) from exc
+        # 422 to mirror FastAPI's own body-validation responses.
+        raise validation_error(exc) from exc
 
     # Reject a newly-set unparseable route cron before it can be persisted (BE-B1): the
     # route would silently never fire, which is the failure mode hardest to notice.

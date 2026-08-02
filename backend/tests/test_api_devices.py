@@ -161,6 +161,45 @@ def test_delete_404s_on_an_unknown_device(app_ctx):
     assert client.delete("/api/devices/pbss/nope").status_code == 404
 
 
+def test_a_validation_failure_does_not_echo_the_config_back(app_ctx):
+    """A config-level cross-check raises at loc=(), so pydantic attaches the *whole*
+    validated config as the error's ``input`` — every API token, the secret key, the
+    password hash, the SMTP and bot tokens — and the 422 shipped it to the browser."""
+    client, app = app_ctx
+    client.post(
+        "/api/routes",
+        json={"id": "watch", "kind": "external", "target": "pbs-02", "schedule": {"time": "03:00"}},
+    )
+    # An External route watches a box Joulenap wakes, so making that box unmanaged is
+    # exactly the cross-check that fires.
+    r = client.put("/api/devices/pbss/pbs-02", json={"id": "pbs-02", "host": "192.0.2.21",
+                                                    "datastore": "offsite",
+                                                    "api_token_id": "root@pam!joulenap",
+                                                    "api_token_secret": REDACTED,
+                                                    "managed_power": False})
+    assert r.status_code == 422
+    assert "managed_power" in r.text  # the reason still reaches the user
+    stored = app.state.config_store.config
+    for secret in (
+        stored.app.secret_key,
+        stored.app.auth.password_hash,
+        *[d.api_token_secret for d in stored.pves],
+        *[d.api_token_secret for d in stored.pbss],
+    ):
+        assert secret and secret not in r.text
+
+
+def test_create_rejects_the_redaction_placeholder(app_ctx):
+    """A body copy-pasted from GET /api/devices carries ***REDACTED*** as the token. Storing
+    it verbatim is invisible — GET re-masks it (it is non-empty) — until a connection test
+    fails with a 502 that gives no hint the stored token is the placeholder text itself."""
+    client, app = app_ctx
+    r = client.post("/api/devices/pbss", json={**NEW_PBS, "api_token_secret": REDACTED})
+    assert r.status_code == 422
+    assert "api_token_secret" in r.text
+    assert [d.id for d in app.state.config_store.config.pbss] == ["pbs-01", "pbs-02"]
+
+
 # --- test ---------------------------------------------------------------------
 
 
@@ -226,6 +265,25 @@ def test_power_off_409s_while_a_run_holds_the_box(app_ctx):
     r = client.post("/api/devices/pbss/pbs-01/power", json={"action": "poweroff"})
     assert r.status_code == 409
     assert "pbs-01" in r.json()["detail"]
+
+
+def test_power_off_409s_while_a_run_holds_the_single_run_lock(app_ctx):
+    """The lease check alone was a check-then-act: a scheduled route could start in the gap,
+    find the box still up (so no wake), and begin vzdump — then the SSH poweroff, which has
+    no idle-wait and no refcount check, cut it off mid-backup. Holding the same lock a run
+    holds for its whole life is what closes that window."""
+    client, app = app_ctx
+    box = FakeBox()
+    service = _inject(app, box)
+    service._lock.acquire()  # stand in for a run in flight; no lease taken yet
+    try:
+        r = client.post("/api/devices/pbss/pbs-01/power", json={"action": "poweroff"})
+    finally:
+        service._lock.release()
+
+    assert r.status_code == 409
+    assert "in progress" in r.json()["detail"]
+    assert box.poweroffs == []  # the SSH command never ran
 
 
 def test_power_409s_on_an_unmanaged_device(app_ctx):
@@ -296,7 +354,10 @@ def test_verify_queues_a_verify_run(app_ctx):
 
     assert pbs.verify_started is True
     # An ad-hoc verify checks everything, rather than pacing itself like a Verify route.
-    assert pbs.verify_args["outdated_after"] is None
+    # "Everything" reaches PBS as ignore-verified: 0. The bug was asking for
+    # outdated_after=None, which means "only never-verified" — skipping precisely the old
+    # snapshots the user clicked the button about.
+    assert pbs.verify_args["ignore_verified"] is False
 
 
 def test_maintenance_works_on_an_always_on_box(app_ctx):

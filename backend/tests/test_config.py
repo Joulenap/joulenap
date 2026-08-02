@@ -231,6 +231,31 @@ def test_a_new_device_keeps_the_secret_it_was_sent():
     assert out["pbss"][0]["api_token_secret"] == "brand-new"
 
 
+def test_renaming_a_device_id_rejects_its_unresolvable_placeholder():
+    """The Advanced tab shows ``id: pbs-01`` with ``api_token_secret: ***REDACTED***``. Fix a
+    typo in the id and save: nothing matches by id any more, so the placeholder used to
+    resolve to "" — 200 OK, credential gone, nothing on screen to suggest it."""
+    cfg = Config()
+    cfg.pbss = [PbsDevice(id="pbs-01", api_token_secret="first", managed_power=False)]
+    incoming = {"pbss": [{"id": "pbs01", "api_token_secret": cfgmod.REDACTED}]}
+    with pytest.raises(cfgmod.RedactionError, match="api_token_secret"):
+        restore_secrets(incoming, cfg)
+
+
+def test_a_placeholder_with_nothing_stored_is_rejected():
+    # Same guard one level up: restore_secrets_from({}) is what a *create* resolves against.
+    with pytest.raises(cfgmod.RedactionError):
+        cfgmod.restore_secrets_from({"api_token_secret": cfgmod.REDACTED}, {})
+
+
+def test_an_empty_string_still_clears_a_secret():
+    # The escape hatch the rejection points at: "" means clear, and must keep working.
+    cfg = Config()
+    cfg.pbss = [PbsDevice(id="pbs-01", api_token_secret="first", managed_power=False)]
+    out = restore_secrets({"pbss": [{"id": "pbs-01", "api_token_secret": ""}]}, cfg)
+    assert out["pbss"][0]["api_token_secret"] == ""
+
+
 def test_session_defaults():
     s = Config().app.session
     assert s.https_only is False and s.max_age_days == 14

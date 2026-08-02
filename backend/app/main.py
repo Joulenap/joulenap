@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__
+from . import config as config_mod
 from .api import api_router
 from .api import metrics as metrics_api
 from .config import Config
@@ -26,6 +27,7 @@ from .core.config_store import ConfigStore
 from .core.ratelimit import LoginRateLimiter
 from .core.scheduler import Scheduler
 from .db import init_db, session_scope
+from .db.models import LogEvent, LogLevel
 from .db.startup import sweep_orphaned_runs
 from .jobs import JobService
 from .notify import NotificationService
@@ -59,6 +61,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     with session_scope() as session:
         swept = sweep_orphaned_runs(session)
         interrupted_alerts = [build_interrupted_message(store.config, run) for run in swept]
+        # The config was loaded before the DB existed, so a refused 0.9 migration can only
+        # reach the activity log from here. Run-less row: it belongs to no cycle.
+        if config_mod.MIGRATION_ERROR:
+            session.add(LogEvent(level=LogLevel.ERROR, message=config_mod.MIGRATION_ERROR))
     if swept:
         log.warning("Marked %d interrupted run(s) as failed at startup", len(swept))
     service = JobService(store)

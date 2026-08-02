@@ -187,7 +187,7 @@ def _route(route_id: str = "nightly", name: str = "Nightly", **overrides) -> Rou
     )
 
 
-def _msg(config, run, datastore=None, guests=None, next_at=None, route=None):
+def _msg(config, run, datastore=None, guests=None, next_at=None, route=None, left_on=()):
     """``build_run_message`` with the old positional tail, so these tests stay readable.
 
     The production seam is a single :class:`RunContext`; spelling that out at ~25 call sites
@@ -201,6 +201,7 @@ def _msg(config, run, datastore=None, guests=None, next_at=None, route=None):
             datastore=datastore,
             guests=guests,
             next_at=next_at,
+            left_on=list(left_on),
         )
     )
 
@@ -271,6 +272,7 @@ def test_run_message_field_order():
         ds,
         GuestSummary(total=2, ok=1, failed=["web01"]),
         datetime(2026, 6, 29, 4, 0, tzinfo=UTC),
+        left_on=["pbs-01"],
     )
     assert [line.split(":")[0] for line in body.splitlines()] == [
         "Trigger",
@@ -359,51 +361,23 @@ def _woke() -> RunStep:
     return RunStep(name=StepName.WAIT, status=StepStatus.SUCCESS)
 
 
-def test_run_message_flags_pbs_left_on_when_poweroff_failed():
-    run = _run(RunStatus.SUCCESS)
-    run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.FAILURE)]
-    _title, body = _msg(Config(), run)
-    assert "left powered on" in body
-
-
-def test_run_message_flags_pbs_left_on_when_poweroff_skipped():
-    run = _run(RunStatus.SUCCESS)
-    run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.SKIPPED)]
-    _title, body = _msg(Config(), run)
-    assert "left powered on" in body
-
-
-def test_run_message_no_pbs_line_when_poweroff_succeeded():
-    run = _run(RunStatus.SUCCESS)
-    run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.SUCCESS)]
-    _title, body = _msg(Config(), run)
-    assert "left powered on" not in body
-
-
-def test_run_message_flags_pbs_left_on_when_backup_fails_after_wake():
-    # Failure after the PBS woke: no POWEROFF step at all, box is left on for inspection.
+def test_run_message_flags_the_boxes_the_run_left_awake():
+    # A finished run doesn't guess from its own timeline: JobService hands it the ids of the
+    # boxes still burning power (RunContext.left_on), because only the lease knows whether
+    # "not powered off" meant an always-on box, one another run still holds, or a real
+    # left-on. Which reason applies is decided (and tested) in tests/test_queue.py.
     run = _run(RunStatus.FAILURE, error="vzdump failed")
     run.steps = [_woke(), RunStep(name=StepName.BACKUP, status=StepStatus.FAILURE)]
-    _title, body = _msg(Config(), run)
+    _title, body = _msg(Config(), run, left_on=["pbs-01"])
     assert "left powered on" in body
 
 
-def test_run_message_flags_pbs_left_on_when_aborted_after_wake():
-    # An abort after wake (e.g. free-space preflight) also leaves the box on.
-    run = _run(RunStatus.ABORTED, error="datastore too full")
-    run.steps = [_woke(), RunStep(name=StepName.PRECHECK, status=StepStatus.FAILURE)]
-    _title, body = _msg(Config(), run)
-    assert "left powered on" in body
-
-
-def test_run_message_no_pbs_line_when_wait_timed_out():
-    # Aborted before the PBS came up (WAIT failed): the box never turned on, so no warning.
-    run = _run(RunStatus.ABORTED, error="PBS not reachable")
-    run.steps = [
-        RunStep(name=StepName.WAKE, status=StepStatus.SUCCESS),
-        RunStep(name=StepName.WAIT, status=StepStatus.FAILURE),
-    ]
-    _title, body = _msg(Config(), run)
+def test_run_message_no_pbs_line_when_nothing_was_left_awake():
+    # A SKIPPED power-off is not evidence on its own — an always-on PBS records exactly
+    # this on every successful run, and used to be warned about every night.
+    run = _run(RunStatus.SUCCESS)
+    run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.SKIPPED)]
+    _title, body = _msg(Config(), run, left_on=[])
     assert "left powered on" not in body
 
 
@@ -499,6 +473,49 @@ def test_interrupted_message_flags_pbs_left_on_when_it_had_woken():
     assert "interrupted by a restart" in title
     assert "Interrupted — Joulenap restarted" in body
     assert "left powered on" in body
+
+
+def test_interrupted_message_ignores_a_box_joulenap_never_powers():
+    # A crash cannot leave an always-on PBS "burning power" — it was on before and after.
+    cfg = Config.model_validate(
+        {
+            "pbss": [{"id": "pbs-01", "host": "192.0.2.20", "managed_power": False}],
+            "routes": [{"id": "nightly", "kind": "verify", "target": "pbs-01"}],
+        }
+    )
+    run = _run(RunStatus.FAILURE, error="Interrupted")
+    run.route_id = "nightly"
+    run.steps = [
+        RunStep(name=StepName.WAIT, status=StepStatus.SUCCESS),
+        RunStep(name=StepName.BACKUP, status=StepStatus.FAILURE),
+    ]
+    _title, body = build_interrupted_message(cfg, run)
+    assert "left powered on" not in body
+
+
+def test_interrupted_message_pairs_wake_and_power_off_per_device():
+    """A sync route holds two boxes. One powering off must not hide the other staying up —
+    the old rule ORed both steps across the whole run and went silent."""
+    cfg = Config.model_validate(
+        {
+            "pbss": [
+                {"id": "pbs-01", "host": "192.0.2.20", "mac": "00:11:22:33:44:55"},
+                {"id": "pbs-02", "host": "192.0.2.21", "mac": "00:11:22:33:44:66"},
+            ],
+            "routes": [
+                {"id": "off", "kind": "sync", "source_pbs": "pbs-01", "target": "pbs-02"}
+            ],
+        }
+    )
+    run = _run(RunStatus.FAILURE, error="Interrupted")
+    run.route_id = "off"
+    run.steps = [
+        RunStep(name="wait:pbs-01", status=StepStatus.SUCCESS),
+        RunStep(name="wait:pbs-02", status=StepStatus.SUCCESS),
+        RunStep(name="poweroff:pbs-02", status=StepStatus.SUCCESS),
+    ]
+    _title, body = build_interrupted_message(cfg, run)
+    assert "left powered on" in body  # pbs-01 is still up
 
 
 def test_interrupted_message_no_pbs_line_when_it_never_woke():

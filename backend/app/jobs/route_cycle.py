@@ -265,9 +265,11 @@ def run_pbs_maintenance(
         if action == "gc":
             _route_gc_step(pbs, recorder, deps)
         elif action == "verify":
-            # Everything, not just the recently-changed: an ad-hoc verify is a deliberate
-            # "check this box now", and reverify_days is a per-route pacing knob.
-            _route_verify_step(pbs, recorder, deps, outdated_after=None)
+            # 0 means "everything" — see _route_verify_step. An ad-hoc verify is a deliberate
+            # "check this box now" after a restore or a disk scare, so it must re-read the
+            # older snapshots too; None would mean "only never-verified", i.e. skip exactly
+            # the ones the user is worried about. reverify_days is the per-route pacing knob.
+            _route_verify_step(pbs, recorder, deps, outdated_after=0)
         else:
             raise CycleAbort(f"unsupported maintenance action '{action}'")
         return _route_read_datastore(pbs, recorder, deps)

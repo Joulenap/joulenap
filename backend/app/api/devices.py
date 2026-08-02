@@ -17,15 +17,14 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ValidationError
 
-from ..config import PbsDevice, PveDevice, redact, restore_secrets_from
+from ..config import PbsDevice, PveDevice, RedactionError, redact, restore_secrets_from
 from ..connectors.errors import ConnectorError, WolError
 from ..core.config_store import ConfigStore
 from ..db.models import RunTrigger
 from ..jobs import AlreadyRunningError
-from ._config_edit import save_section
+from ._config_edit import save_section, validation_error
 from .deps import (
     JobService,
     Scheduler,
@@ -101,7 +100,12 @@ def create_device(
     scheduler: Scheduler = Depends(get_scheduler),
 ) -> dict[str, Any]:
     section, model = _kind(kind)
-    device = _validate(model, body)
+    # Against an empty stored mapping: a *new* device has no secrets to restore, so any
+    # ***REDACTED*** in the body — a "duplicate this device" action, or a body copy-pasted
+    # from GET /api/devices — fails loudly here instead of being stored as the literal
+    # placeholder, which GET then re-masks so the corruption is invisible until a
+    # connection test fails with a 502 that gives no hint why.
+    device = _validate(model, _resolve(body, {}))
     if any(d.id == device.id for d in getattr(store.config, section)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=f"Device '{device.id}' already exists"
@@ -124,7 +128,7 @@ def update_device(
     index = _find(store, section, device_id)
     # Resolve ***REDACTED*** against *this* device's stored values: the client only ever
     # echoes back a secret it didn't change.
-    device = _validate(model, restore_secrets_from(body, _dump(store, section)[index]))
+    device = _validate(model, _resolve(body, _dump(store, section)[index]))
     devices = _dump(store, section)
     devices[index] = device.model_dump(mode="python")
     save_section(store, scheduler, section, devices)
@@ -238,19 +242,27 @@ def power(
             ) from exc
         return PowerResult(ok=True)
 
-    # Power-off. The lease is the authority on "is anything using this box": a run holding
-    # it would be cut off mid-vzdump.
-    # ponytail: a run could still take the lease in the gap between this check and the SSH
-    # command. Harmless in practice — the lease probes the box, finds it down and wakes it
-    # again — and closing it properly means holding the lease from here, which would let a
-    # failed HTTP request strand it.
-    if job_service.lease.state(pbs_id).holders:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"A run is using '{pbs_id}'; cannot power it off",
-        )
+    # Power-off, under the single-run lock. `exclusive()` exists for exactly this: a run
+    # holds that lock for its whole life, so while we hold it none can start — and
+    # `power_off_now` has no idle-wait and no refcount check by design ("a click means
+    # now"). Without the lock the check is a check-then-act: a scheduled route starts in
+    # the gap, `_bring_up` probes, finds the box still up, skips the Wake-on-LAN, vzdump
+    # begins, and the SSH poweroff lands mid-backup. The lease's own self-healing can't
+    # help there — the probe has already happened.
+    # ponytail: the lock is held for the seconds an SSH connect takes, so a scheduled run
+    # firing in that window waits its turn instead of being rejected. Fine for a button.
     try:
-        job_service.lease.power_off_now(device)
+        with job_service.exclusive():
+            # Belt and braces: a lease is only ever taken inside the lock we now hold, so
+            # this cannot fire in production — but it names the box when it does.
+            if job_service.lease.state(pbs_id).holders:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"A run is using '{pbs_id}'; cannot power it off",
+                )
+            job_service.lease.power_off_now(device)
+    except AlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return PowerResult(ok=True)
@@ -304,10 +316,19 @@ def run_maintenance(
 # --- helpers -----------------------------------------------------------------
 
 
+def _resolve(body: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
+    """Fill in the ***REDACTED*** placeholders the client echoed back, 422 if one can't be
+    resolved. ``stored`` is the device being edited, or ``{}`` for a create."""
+    try:
+        return restore_secrets_from(body, stored)
+    except RedactionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _validate(model: type[PveDevice] | type[PbsDevice], body: dict[str, Any]):
     """Validate a device body by hand rather than as a typed parameter: the handlers are
     shared between the two kinds, so which model applies is only known at call time."""
     try:
         return model.model_validate(body)
     except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors())) from exc
+        raise validation_error(exc) from exc

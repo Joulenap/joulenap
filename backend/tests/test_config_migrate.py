@@ -7,12 +7,14 @@ quietly disappearing from a real user's config.
 
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 import pytest
 import yaml
 
-from app import config_migrate
+from app import config, config_migrate
 from app.config import REDACTED, Config, load_config, save_config
 
 FIXTURE = Path(__file__).parent / "fixtures" / "config-0.9.yaml"
@@ -21,6 +23,7 @@ BAK = "config.yaml" + config_migrate.BACKUP_SUFFIX
 
 def _write(tmp_path: Path, **overrides) -> Path:
     """Drop the 0.9 fixture into tmp_path, deep-merging any section overrides."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
     raw = yaml.safe_load(FIXTURE.read_text(encoding="utf-8"))
     for section, values in overrides.items():
         for key, value in values.items():
@@ -163,7 +166,36 @@ def test_a_config_that_cannot_be_converted_is_left_alone(tmp_path: Path, monkeyp
     # dropped at load, so the app boots on defaults rather than failing to start.
     assert cfg.routes == []
     assert path.read_text(encoding="utf-8") == original
-    assert not (tmp_path / BAK).exists()
+    # ...but the parachute still opens: the app is now running on an empty config, and the
+    # next save from the Advanced tab would overwrite the only 0.9 config the user has.
+    assert (tmp_path / BAK).read_text(encoding="utf-8") == original
+
+
+def test_a_refused_migration_is_reported_not_just_logged(tmp_path: Path):
+    # An empty config is indistinguishable from a fresh install, so the reason has to
+    # outlive the log line: GET /api/status and the activity log both read this.
+    path = _write(tmp_path, backup={"bwlimit": -1})
+    cfg = load_config(path)
+    assert (cfg.pves, cfg.pbss, cfg.routes) == ([], [], [])
+    assert config.MIGRATION_ERROR is not None
+    assert "bwlimit" in config.MIGRATION_ERROR
+    assert str(path) in config.MIGRATION_ERROR
+
+
+def test_a_later_good_load_clears_the_reported_error(tmp_path: Path):
+    load_config(_write(tmp_path, backup={"bwlimit": -1}))
+    assert config.MIGRATION_ERROR is not None
+    load_config(_write(tmp_path / "fixed", backup={}))
+    assert config.MIGRATION_ERROR is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_the_backup_is_owner_only(tmp_path: Path):
+    # It holds every API token, secret_key, password hash, SMTP and bot token — and is
+    # never overwritten, so a 0644 copy would sit there forever.
+    path = _write(tmp_path)
+    load_config(path)
+    assert stat.S_IMODE((tmp_path / BAK).stat().st_mode) == 0o600
 
 
 def test_an_unwritable_config_still_boots(tmp_path: Path, monkeypatch):

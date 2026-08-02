@@ -38,6 +38,13 @@ SECRET_KEYS: frozenset[str] = frozenset(
 
 REDACTED = "***REDACTED***"
 
+#: Why the 0.9 -> 1.0 migration was refused on the last :func:`load_config`, or ``None``.
+#: A failed migration boots on a config with no devices and no routes, which looks exactly
+#: like a fresh install — so the reason has to outlive the log line: ``GET /api/status``
+#: reports it to the UI and startup writes it to the activity log. Process-wide because the
+#: fact is process-wide; every load clears it and decides again.
+MIGRATION_ERROR: str | None = None
+
 
 class _Base(BaseModel):
     # Reject unknown keys so typos in config.yaml surface as clear validation errors.
@@ -460,6 +467,8 @@ def load_config(path: Path | None = None) -> Config:
         raise FileNotFoundError(
             f"Config file not found at {p}. Copy config.example.yaml to config.yaml."
         )
+    global MIGRATION_ERROR
+    MIGRATION_ERROR = None  # re-decided below; a reload after a fix must clear it
     with p.open("r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
     if not isinstance(raw, dict):
@@ -479,19 +488,28 @@ def _migrate_0_9(raw: dict[str, Any], path: Path) -> Config | None:
     """Convert a 0.9 config to the route model, back it up and save it.
 
     Returns ``None`` — meaning "carry on with the config as it is on disk" — if anything at
-    all goes wrong. A failed migration must never stop the app from booting (BE-B1), and it
-    costs nothing to defer: the 0.9 sections are still what the app reads, and the next
-    start will try again.
+    all goes wrong. A failed migration must never stop the app from booting (BE-B1).
+
+    But it is not a harmless deferral any more: in 0.9 the app kept running on the old
+    sections, while in 1.0 nothing reads them, so the fallback boots a config with no
+    devices and no routes — indistinguishable from a fresh install, with every schedule
+    silently gone. Hence :data:`MIGRATION_ERROR` (surfaced by ``GET /api/status`` and the
+    activity log) and the ``.bak``: the user can still rewrite ``config.yaml`` from the
+    Advanced tab while running empty, and without the copy that would destroy the only
+    0.9 config they have.
     """
     try:
         cfg = Config.model_validate(config_migrate.migrate(raw))
     except Exception as exc:  # noqa: BLE001 — any failure here degrades to "don't migrate"
-        log.warning(
-            "config: could not convert %s to the 1.0 route model (%s); starting on the "
-            "existing config and leaving it untouched",
-            path,
-            exc,
+        global MIGRATION_ERROR
+        MIGRATION_ERROR = (
+            f"Could not convert {path} to the 1.0 route model: {exc}. Joulenap started "
+            "with no devices and no routes — nothing is scheduled and no backup will run "
+            "until this is fixed. The file is untouched; a copy is at "
+            f"{path.name}{config_migrate.BACKUP_SUFFIX}."
         )
+        log.error("config: %s", MIGRATION_ERROR)
+        config_migrate.write_backup(path)
         return None
     config_migrate.write_backup(path)
     try:
@@ -661,7 +679,7 @@ def _restore_in_place(node: Any, current: Any) -> Any:
         for key, value in node.items():
             cur = current.get(key) if isinstance(current, dict) else None
             if key in SECRET_KEYS:
-                node[key] = _unmask(value, cur)
+                node[key] = _unmask(value, cur, key)
             else:
                 _restore_in_place(value, cur)
     elif isinstance(node, list):
@@ -687,7 +705,15 @@ def _match(item: Any, current: Any, index: int) -> Any:
     return current[index] if index < len(current) else None
 
 
-def _unmask(value: Any, current: Any) -> Any:
+def _unmask(value: Any, current: Any, key: str = "") -> Any:
+    """Resolve one secret field: ``REDACTED`` -> the stored value, anything else verbatim.
+
+    An unresolvable placeholder is an **error**, never an empty string. ``current`` is None
+    when the incoming item has no stored counterpart — a device whose ``id`` was renamed in
+    the YAML editor, or one being created — and the client is then echoing back a mask over
+    a secret we do not have. Turning that into ``""`` validates fine, returns 200, and
+    leaves the credential gone with nothing on screen to suggest it.
+    """
     if isinstance(value, list):
         # List secrets (custom_urls) are write-only and all-or-nothing to avoid the
         # index-positional corruption of the old per-entry masking:
@@ -701,7 +727,9 @@ def _unmask(value: Any, current: Any) -> Any:
         if not value:
             return []
         if all(v == REDACTED for v in value):
-            return list(current) if isinstance(current, list) else []
+            if not isinstance(current, list):
+                raise _unresolvable(key)
+            return list(current)
         if any(v == REDACTED for v in value):
             raise RedactionError(
                 "custom_urls must be sent in full (all real values) or left unchanged "
@@ -709,5 +737,17 @@ def _unmask(value: Any, current: Any) -> Any:
             )
         return value
     if value == REDACTED:
-        return current if current is not None else ""
+        if current is None:
+            raise _unresolvable(key)
+        return current
     return value
+
+
+def _unresolvable(key: str) -> RedactionError:
+    field = f"'{key}'" if key else "a secret"
+    return RedactionError(
+        f"{field} was sent as {REDACTED} but there is no stored value to restore it from. "
+        "This happens when an entry's id is renamed (the old entry's secrets don't follow "
+        "the new id) or when a new one is created from a copy. Send the real value, or an "
+        "empty string to clear it."
+    )

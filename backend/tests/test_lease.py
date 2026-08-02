@@ -6,7 +6,7 @@ import pytest
 from fakes import FakeBox
 
 from app.config import PbsDevice
-from app.jobs.lease import PbsUnreachableError, PowerLease
+from app.jobs.lease import PbsUnreachableError, PowerLease, ReleaseOutcome
 
 
 def make_pbs(**over) -> PbsDevice:
@@ -84,7 +84,7 @@ def test_unmanaged_pbs_is_only_probed():
     pbs = make_pbs(managed_power=False, mac="")
 
     assert lease.acquire(pbs) is True
-    assert lease.release(pbs) is False  # never powered off
+    assert lease.release(pbs) is ReleaseOutcome.UNMANAGED  # never Joulenap's to power
     assert box.wol == []
     assert box.poweroffs == []
 
@@ -108,7 +108,7 @@ def test_last_holder_powers_the_box_off():
     pbs = make_pbs()
 
     lease.acquire(pbs)
-    assert lease.release(pbs) is True
+    assert lease.release(pbs) is ReleaseOutcome.POWERED_OFF
     assert box.poweroffs == ["pbs1"]
     assert lease.state("pbs1").holders == 0
 
@@ -120,9 +120,9 @@ def test_release_with_another_holder_leaves_the_box_on():
 
     lease.acquire(pbs)
     lease.acquire(pbs)
-    assert lease.release(pbs) is False
+    assert lease.release(pbs) is ReleaseOutcome.STILL_NEEDED
     assert box.poweroffs == []
-    assert lease.release(pbs) is True
+    assert lease.release(pbs) is ReleaseOutcome.POWERED_OFF
 
 
 def test_a_queued_route_on_the_same_pbs_keeps_it_on():
@@ -131,7 +131,7 @@ def test_a_queued_route_on_the_same_pbs_keeps_it_on():
     pbs = make_pbs()
 
     lease.acquire(pbs)
-    assert lease.release(pbs) is False
+    assert lease.release(pbs) is ReleaseOutcome.STILL_NEEDED
     assert box.poweroffs == []
 
 
@@ -141,7 +141,7 @@ def test_power_off_false_leaves_the_box_on():
     pbs = make_pbs()
 
     lease.acquire(pbs)
-    assert lease.release(pbs, power_off=False) is False
+    assert lease.release(pbs, power_off=False) is ReleaseOutcome.LEFT_ON
     assert box.poweroffs == []
 
 
@@ -151,7 +151,7 @@ def test_a_busy_pbs_is_not_interrupted():
     pbs = make_pbs()
 
     lease.acquire(pbs)
-    assert lease.release(pbs) is False
+    assert lease.release(pbs) is ReleaseOutcome.LEFT_ON
     assert box.poweroffs == []
 
 
@@ -162,7 +162,7 @@ def test_a_failing_idle_check_fails_open():
     pbs = make_pbs()
 
     lease.acquire(pbs)
-    assert lease.release(pbs) is True
+    assert lease.release(pbs) is ReleaseOutcome.POWERED_OFF
     assert box.poweroffs == ["pbs1"]
 
 
@@ -172,7 +172,7 @@ def test_the_idle_check_is_skipped_when_the_wait_is_zero():
     pbs = make_pbs(poweroff_task_wait=0)
 
     lease.acquire(pbs)
-    assert lease.release(pbs) is True
+    assert lease.release(pbs) is ReleaseOutcome.POWERED_OFF
 
 
 def test_a_failed_power_off_is_swallowed():
@@ -182,7 +182,7 @@ def test_a_failed_power_off_is_swallowed():
     pbs = make_pbs()
 
     lease.acquire(pbs)
-    assert lease.release(pbs) is False
+    assert lease.release(pbs) is ReleaseOutcome.LEFT_ON
     assert box.poweroffs == []
 
 
@@ -190,7 +190,7 @@ def test_releasing_an_unheld_lease_is_ignored():
     box = FakeBox()
     lease = PowerLease(box.deps())
 
-    assert lease.release(make_pbs()) is False
+    assert lease.release(make_pbs()) is ReleaseOutcome.LEFT_ON
     assert lease.state("pbs1").holders == 0
     assert box.poweroffs == []
 

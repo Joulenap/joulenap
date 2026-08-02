@@ -18,6 +18,7 @@ import ssl
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 from ..config import PbsDevice
 from ..connectors import net, tls
@@ -30,6 +31,21 @@ log = logging.getLogger("joulenap.lease")
 
 class PbsUnreachableError(RuntimeError):
     """The PBS never answered: it could not be woken, or it is an unmanaged box that is off."""
+
+
+class ReleaseOutcome(StrEnum):
+    """What became of a box when a run dropped its lease.
+
+    Only :attr:`LEFT_ON` means "still burning power, and nothing is going to fix that" —
+    the others are boxes Joulenap either put to sleep, never powers, or will power off at
+    the end of the run that still holds them. The value doubles as the POWEROFF step's
+    detail in the run timeline.
+    """
+
+    POWERED_OFF = "powered off"
+    STILL_NEEDED = "left on: still needed by another run"
+    UNMANAGED = "left on: Joulenap does not manage this box's power"
+    LEFT_ON = "left powered on"
 
 
 # --- device-shaped connector calls -------------------------------------------
@@ -180,37 +196,48 @@ class PowerLease:
             held.holders += 1
         return was_awake
 
-    def release(self, pbs: PbsDevice, *, power_off: bool = True) -> bool:
-        """Drop this run's hold and power the box down if it is now safe to. Returns whether
-        it actually powered off.
+    def release(self, pbs: PbsDevice, *, power_off: bool = True) -> ReleaseOutcome:
+        """Drop this run's hold and power the box down if it is now safe to. Returns *why*
+        the box ended up in the state it did.
 
         ``power_off`` is the caller's policy (a failed run leaves the PBS on for inspection,
         a manual run honours the "power off when finished" toggle). The lease adds the
         conditions the caller cannot see: no other holder, and no *queued* route that still
         needs this box.
+
+        Four outcomes rather than a bool because only two of them cost the user power, and
+        the lease is the only place that can tell them apart — a caller re-deriving "was
+        that a real 'left on'?" would have to duplicate every condition below.
         """
         with self._lock:
             held = self._state.get(pbs.id)
             if held is None or not held.holders:
                 log.warning("Release of an unheld lease on PBS %s — ignoring", pbs.id)
-                return False
+                # A bug, not a policy: say "left on" so it is at least visible.
+                return ReleaseOutcome.LEFT_ON
             held.holders -= 1
             remaining = held.holders
             if not remaining:
                 del self._state[pbs.id]
 
+        # Order matters for the *reason*, not for the action — every branch below stops the
+        # power-off equally. The caller's policy is checked last on purpose: "this run
+        # doesn't want to power off" is only the real explanation once the box is one we
+        # could have powered off and nobody else needs it.
         if remaining:
             log.info("PBS %s still held by %d run(s); leaving it on", pbs.id, remaining)
-            return False
-        if not power_off:
-            return False
+            return ReleaseOutcome.STILL_NEEDED
         if not pbs.managed_power:
             # An always-on / cloud-hosted PBS: Joulenap never touches its power.
-            return False
+            return ReleaseOutcome.UNMANAGED
         if pbs.id in self._pending():
             log.info("PBS %s is needed by a queued route; leaving it on", pbs.id)
-            return False
-        return self._power_off(pbs)
+            return ReleaseOutcome.STILL_NEEDED
+        if not power_off:
+            return ReleaseOutcome.LEFT_ON
+        # False here is a busy box we declined to cut off, or a poweroff that errored — both
+        # leave it burning power.
+        return ReleaseOutcome.POWERED_OFF if self._power_off(pbs) else ReleaseOutcome.LEFT_ON
 
     # --- internals -----------------------------------------------------------
 

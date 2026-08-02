@@ -58,6 +58,11 @@ class RunContext:
     guests: GuestSummary | None = None
     #: When this route next fires, for the "Next scheduled run" line.
     next_at: datetime | None = None
+    #: PBS ids this run left awake and burning power, with nothing queued to shut them
+    #: down. Filled in by ``JobService`` after the leases are released: it is the only
+    #: place that knows *why* a box stayed on, and only some of the reasons cost energy
+    #: (an always-on box, or one another run still holds, cost nothing).
+    left_on: list[str] = field(default_factory=list)
 
 
 # event keys: success | failure | aborted | test
@@ -279,25 +284,52 @@ def _step_is(step: RunStep, name: StepName) -> bool:
     return step.name.split(":", 1)[0] == name.value
 
 
-def _pbs_left_on(run: Run) -> bool:
-    """True if the cycle woke a PBS but never powered it back off — so a box is still
-    burning energy and the user should check it.
+def _step_label(step: RunStep) -> str | None:
+    """The device a step names (``poweroff:pbs-02`` -> ``pbs-02``), or None when unlabelled
+    — a single-device run doesn't repeat which box it means."""
+    _, _, label = step.name.partition(":")
+    return label or None
 
-    The rule: a WAIT step succeeded (a PBS actually came up) **and** no POWEROFF step
-    succeeded. That single condition covers every "left on" case uniformly:
 
-      * success but power-off failed / was skipped (PBS busy) — POWEROFF present, not SUCCESS;
-      * failure after the PBS woke (vzdump/GC/verify errored) — no POWEROFF step at all;
-      * abort after wake (preflight free-space, no guests selected) — no POWEROFF step.
+def _pbs_left_on(config: Config, run: Run) -> bool:
+    """True if a PBS came up and nothing ever powered it back off — a box still burning
+    energy that the user should go and check.
 
-    An abort *before* the box came up (wake/wait timeout) leaves the WAIT step non-SUCCESS, so
-    the PBS is off and this correctly returns False — hence why it keys on WAIT, not on the
-    run status."""
-    woke = any(_step_is(s, StepName.WAIT) and s.status == StepStatus.SUCCESS for s in run.steps)
-    powered_off = any(
-        _step_is(s, StepName.POWEROFF) and s.status == StepStatus.SUCCESS for s in run.steps
-    )
-    return woke and not powered_off
+    Only for a run a restart interrupted: there the run row is all there is, and no
+    POWEROFF step was ever reached. A run that *finished* knows the answer exactly and
+    reports it through ``RunContext.left_on``, because "was it left on?" depends on facts
+    the timeline doesn't carry (whether another queued route still needs the box).
+
+    Two things the steps alone get wrong, both introduced by this same release:
+
+      * an **unmanaged** box (``managed_power: false``) is never Joulenap's to power down,
+        so a run against one must not warn — hence taking ``config``;
+      * a run holding **several** leases needs the WAIT and POWEROFF steps paired *per
+        device*, or one box's successful power-off hides another's that stayed up.
+
+    An abort *before* the box came up leaves the WAIT step non-SUCCESS, so the PBS is off
+    and this correctly returns False — hence why it keys on WAIT, not on the run status.
+    """
+    managed = {p.id for p in config.pbss if p.managed_power}
+    route = next((r for r in config.routes if r.id == run.route_id), None)
+    # An unlabelled step belongs to the run's only box — a route's target (a sync route
+    # labels both sides). An ad-hoc GC/verify records neither a label nor a route, so its
+    # box cannot be named: warn rather than stay silent about a box that may be awake.
+    default = route.target if route else None
+    powered_off = {
+        _step_label(s)
+        for s in run.steps
+        if _step_is(s, StepName.POWEROFF) and s.status == StepStatus.SUCCESS
+    }
+    for step in run.steps:
+        if not _step_is(step, StepName.WAIT) or step.status != StepStatus.SUCCESS:
+            continue
+        pbs_id = _step_label(step) or default
+        if pbs_id is not None and pbs_id not in managed:
+            continue
+        if _step_label(step) not in powered_off:
+            return True
+    return False
 
 
 #: Route kinds, for the body's ``Route:`` line. Localized because the kind is a user-facing
@@ -368,7 +400,9 @@ def build_run_message(ctx: RunContext) -> tuple[str, str]:
     if run.error:
         lines.append(f"{labels['error']}: {run.error}")
 
-    if _pbs_left_on(run):
+    # From the service, not from the steps: a finished run knows exactly which boxes it
+    # left burning power, and only those warrant the warning.
+    if ctx.left_on:
         lines.append(labels["pbs_left_on"])
 
     if next_at is not None:
@@ -432,15 +466,15 @@ def build_interrupted_message(config: Config, run: Run) -> tuple[str, str]:
     """``(title, body)`` for a run that a restart interrupted (swept to FAILURE at startup,
     BE-R2), in the configured language.
 
-    Adds the "PBS left powered on" warning when the box had actually woken before the crash
-    (WAIT succeeded, no POWEROFF) — the whole point of the alert: a normally-off box that a
-    crash left awake and burning power."""
+    Adds the "PBS left powered on" warning when a box Joulenap powers had actually woken
+    before the crash (WAIT succeeded, no matching POWEROFF) — the whole point of the alert:
+    a normally-off box that a crash left awake and burning power."""
     pack = _pack(config.app.language)
     labels = pack["_labels"]
     lines = [pack["interrupted"]["intro"]]
     if run.error:
         lines.append(f"{labels['error']}: {run.error}")
-    if _pbs_left_on(run):
+    if _pbs_left_on(config, run):
         lines.append(labels["pbs_left_on"])
         # This alert has no Duration line (the run's own span would span the whole downtime,
         # not the work), so the one interval worth reporting is how long the box has been

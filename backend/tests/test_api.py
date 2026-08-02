@@ -12,6 +12,7 @@ import pytest
 from fakes import FakeBox, FakePve, UnreachablePve, make_deps
 from fastapi.testclient import TestClient
 
+from app import config
 from app.config import load_config
 from app.connectors.pve import Guest
 from app.db import session_scope
@@ -104,6 +105,14 @@ def test_status_lists_the_next_run_of_every_armed_route(app_ctx):
     # Soonest first: the rail renders them in order.
     times = [r["at"] for r in body["next_runs"]]
     assert times == sorted(times)
+
+
+def test_status_reports_a_refused_config_migration(app_ctx, monkeypatch):
+    """An empty config looks exactly like a fresh install, so the UI has to be told why."""
+    client, _app = app_ctx
+    assert client.get("/api/status").json()["config_error"] is None
+    monkeypatch.setattr(config, "MIGRATION_ERROR", "routes.0.options.bwlimit: bad")
+    assert client.get("/api/status").json()["config_error"] == "routes.0.options.bwlimit: bad"
 
 
 def test_status_pill_says_paused_when_the_kill_switch_is_off(app_ctx):

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from .. import config as config_mod
 from ..core.config_store import ConfigStore
 from ..db import get_session
 from . import _probe
@@ -91,6 +92,10 @@ class StatusResponse(BaseModel):
     pves: list[PveState] = []
     pbss: list[PbsState] = []
     last_run: RunSummary | None = None
+    #: Set when the 0.9 -> 1.0 config migration was refused at startup: the config in use
+    #: has no devices and no routes, so the UI must say why instead of looking like a fresh
+    #: install. Rendered as a persistent banner under the header.
+    config_error: str | None = None
 
 
 @router.get("/status", response_model=StatusResponse)
@@ -139,6 +144,8 @@ def get_status(
         pves=[PveState(id=pve.id, online=pve_online.get(pve.id, False)) for pve in config.pves],
         pbss=[_pbs_state(pbs, pbs_probes, job_service) for pbs in config.pbss],
         last_run=RunSummary.of(last) if last else None,
+        # Read live, not captured at import: a reload after the user fixes the file clears it.
+        config_error=config_mod.MIGRATION_ERROR,
     )
 
 

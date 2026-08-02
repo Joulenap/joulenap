@@ -21,6 +21,25 @@ from ..core.config_store import ConfigStore
 from ..core.scheduler import Scheduler, validate_cron
 
 
+def validation_error(exc: ValidationError) -> HTTPException:
+    """A 422 carrying pydantic's error list — **without** the values that failed.
+
+    ``include_input=False`` is the whole point: a ``model_validator(mode="after")`` on
+    ``Config`` raises at ``loc=()``, so pydantic attaches the entire validated config as the
+    error's ``input``. Serialised, that ships every API token, ``app.secret_key``, the
+    password hash, the SMTP password and the bot token to the browser's network tab and any
+    proxy log in between. The config-level cross-checks (a route pointing at a device that
+    doesn't exist, an External route onto an unmanaged PBS) are ordinary user mistakes, so
+    this is a body users really do see. ``include_url`` only drops a docs link.
+
+    Every config-shaped 422 goes through here so a new endpoint inherits the safe default.
+    """
+    return HTTPException(
+        status_code=422,  # the literal avoids the deprecated HTTP_422_UNPROCESSABLE_ENTITY
+        detail=jsonable_encoder(exc.errors(include_input=False, include_url=False)),
+    )
+
+
 def save_section(
     store: ConfigStore, scheduler: Scheduler, section: str, value: list[dict[str, Any]]
 ) -> Config:
@@ -34,9 +53,8 @@ def save_section(
     try:
         new_config = Config.model_validate(raw)
     except ValidationError as exc:
-        # 422 mirrors FastAPI's own body-validation responses (the literal avoids the
-        # deprecated HTTP_422_UNPROCESSABLE_ENTITY constant name).
-        raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors())) from exc
+        # 422 mirrors FastAPI's own body-validation responses.
+        raise validation_error(exc) from exc
     check_route_crons(new_config, store.config)
     try:
         store.replace(new_config)

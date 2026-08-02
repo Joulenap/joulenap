@@ -12,8 +12,10 @@ from sqlalchemy import select
 from app.config import PbsDevice, PveDevice, Route, RouteSource
 from app.core.config_store import ConfigStore
 from app.db import session_scope
-from app.db.models import Run, RunKind, RunStatus, RunTrigger
+from app.db.models import Run, RunKind, RunStatus, RunTrigger, StepName, StepStatus
+from app.jobs.lease import ReleaseOutcome
 from app.jobs.service import AlreadyQueuedError, JobService, QueuedRun
+from app.notify.messages import RunContext
 
 
 def make_service(box: FakeBox | None = None) -> tuple[JobService, FakeBox]:
@@ -282,6 +284,101 @@ def test_an_unreachable_pbs_fails_the_run_without_running_the_job(temp_config, t
         run = session.scalars(select(Run)).one()
         assert run.status == RunStatus.FAILURE
         assert "not reachable" in (run.error or "")
+
+
+# --- what the run reports as left powered on ---------------------------------
+#
+# "PBS left powered on" is the notification's energy warning, so it must fire exactly when
+# a box is still awake with nothing left to shut it down. The lease is the only place that
+# can tell the reasons apart, and it hands its verdict to the message through
+# RunContext.left_on (tests/test_notify.py covers the rendering).
+
+
+def notifying_job(status=RunStatus.SUCCESS):
+    """A job that finishes with ``status`` and asks to be notified about it."""
+
+    def job(config, subject, recorder, _deps):
+        recorder.finish(status)
+        return RunContext(config=config, run=recorder.run)
+
+    return job
+
+
+def sent(service: JobService) -> list[RunContext]:
+    seen: list[RunContext] = []
+    service.deps.notify = seen.append
+    return seen
+
+
+def test_an_always_on_pbs_is_never_reported_as_left_on(temp_config, temp_db):
+    # The common false positive: a managed_power: false box records a SKIPPED power-off on
+    # *every* successful run, so the old step-based rule warned about it every single night.
+    service, box = make_service()
+    service._store.config.pbss[0].managed_power = False
+    seen = sent(service)
+
+    enqueue(service, "r1", notifying_job(), trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    assert box.poweroffs == []
+    assert seen[0].left_on == []
+
+
+def test_a_failed_run_reports_the_box_it_left_awake(temp_config, temp_db):
+    service, box = make_service()
+    seen = sent(service)
+
+    enqueue(service, "r1", notifying_job(RunStatus.FAILURE), trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    assert box.poweroffs == []  # left up for inspection
+    assert seen[0].left_on == ["pbs1"]
+
+
+def test_a_sync_route_reports_only_the_box_that_stayed_up(temp_config, temp_db):
+    # The old false negative: one box powering off hid the other one staying awake, because
+    # the rule ORed the steps across the whole run instead of pairing them per device.
+    service, box = make_service()
+    service._store.config.pbss[1].managed_power = False  # target pbs2 is always on
+    seen = sent(service)
+
+    enqueue(service, "sync", notifying_job(RunStatus.FAILURE), trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    assert box.poweroffs == []
+    assert seen[0].left_on == ["pbs1"]  # not pbs2: that one is never ours to power down
+
+
+def test_a_box_a_queued_route_still_needs_is_not_reported_as_left_on(temp_config, temp_db):
+    # It stays awake on purpose, and the run that follows will close it.
+    service, box = make_service()
+    seen = sent(service)
+    gate = Gate()
+
+    enqueue(service, "r1", gate.job, trigger=RunTrigger.SCHEDULED)
+    assert gate.started.wait(timeout=5)
+    enqueue(service, "r2", notifying_job(), trigger=RunTrigger.SCHEDULED)
+    gate.release.set()
+    drain(service)
+
+    assert box.poweroffs == ["pbs1"]  # only r2, the last holder, closed it
+    assert seen[0].left_on == []
+
+
+def test_the_power_off_step_records_why_the_box_stayed_up(temp_config, temp_db):
+    # The timeline says which of the three "not powered off" reasons applied, so the run
+    # detail view doesn't just show a bare SKIPPED.
+    service, _box = make_service()
+    service._store.config.pbss[0].managed_power = False
+
+    enqueue(service, "r1", ok_job, trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        step = next(s for s in run.steps if s.name == StepName.POWEROFF)
+        assert step.status == StepStatus.SKIPPED
+        assert step.detail == ReleaseOutcome.UNMANAGED
 
 
 def test_a_run_on_another_pbs_does_not_hold_the_first(temp_config, temp_db):
