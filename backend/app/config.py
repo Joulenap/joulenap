@@ -63,6 +63,10 @@ class AppConfig(_Base):
     language: str = "en"
     theme: Literal["dark", "light"] = "dark"
     port: int = Field(default=8080, ge=1, le=65535)
+    # Global scheduler kill-switch (Settings > Advanced). False arms nothing at all — no
+    # route ever fires on its schedule — while manual runs still work. Pausing a single
+    # route is `routes[].enabled: false`; this is the "stop everything" lever.
+    scheduler_enabled: bool = True
     # IANA timezone name (e.g. "Europe/Rome") the scheduler interprets cron times in.
     # Empty => fall back to the TZ env var, then UTC. An invalid name falls back to UTC
     # with a warning (see core/scheduler.resolve_timezone).
@@ -78,87 +82,6 @@ class AppConfig(_Base):
     session: SessionConfig = Field(default_factory=SessionConfig)
 
 
-# --- pve ---------------------------------------------------------------------
-
-
-class PveConfig(_Base):
-    host: str = ""
-    port: int = Field(default=8006, ge=1, le=65535)
-    node: str = ""
-    verify_tls: bool = False
-    api_token_id: str = ""
-    api_token_secret: str = ""
-    storage_id: str = ""
-
-
-# --- pbs ---------------------------------------------------------------------
-
-
-class PbsConfig(_Base):
-    host: str = ""
-    port: int = Field(default=8007, ge=1, le=65535)
-    datastore: str = ""
-    fingerprint: str = ""
-    api_token_id: str = ""
-    api_token_secret: str = ""
-    mac: str = ""
-    wol_broadcast_iface: str = ""
-    wait_timeout: int = Field(default=180, ge=0)  # per wake attempt
-    # Extra Wake-on-LAN re-sends if the PBS doesn't come up within wait_timeout.
-    # Total wake attempts = wol_retries + 1.
-    wol_retries: int = Field(default=2, ge=0)
-    # Before powering off, wait up to this many seconds for any running PBS task to finish
-    # so a clean shutdown never interrupts it (0 = power off immediately, no guard).
-    poweroff_task_wait: int = Field(default=600, ge=0)
-    ssh_user: str = "root"
-    ssh_key_path: str = "/app/data/id_ed25519"
-
-
-# --- backup ------------------------------------------------------------------
-
-
-class GuestsConfig(_Base):
-    mode: Literal["all", "include", "exclude"] = "all"
-    # Field name matches the YAML key. ``typing.List`` (not ``list[int]``) avoids the
-    # field name shadowing the builtin during Python 3.14 deferred annotation eval.
-    list: List[int] = Field(default_factory=list)  # noqa: UP006
-
-
-class RetentionConfig(_Base):
-    keep_last: int = Field(default=0, ge=0)
-    keep_daily: int = Field(default=7, ge=0)
-    keep_weekly: int = Field(default=4, ge=0)
-    keep_monthly: int = Field(default=6, ge=0)
-    keep_yearly: int = Field(default=0, ge=0)
-
-
-class ExternalConfig(_Base):
-    # "External schedules" mode: PVE/PBS run their own scheduled jobs (backup, prune, GC,
-    # sync); Joulenap only wakes the PBS at the scheduled time, watches its tasks, and
-    # powers it off once they have finished. Both knobs are *timeouts*, not fixed delays —
-    # see jobs/backup_cycle.watch_external_tasks.
-    enabled: bool = False
-    # Wait at most this many seconds for the first task to appear after wake-up; watching
-    # starts as soon as one does. If none appears, the PBS is powered off at expiry.
-    first_task_wait: int = Field(default=900, ge=0)
-    # Power off only after this many seconds of continuous task silence; the countdown
-    # restarts whenever a new task starts.
-    idle_wait: int = Field(default=300, ge=0)
-
-
-class BackupConfig(_Base):
-    enabled: bool = True
-    schedule: str = "0 4 * * *"
-    mode: Literal["snapshot", "suspend", "stop"] = "snapshot"
-    bwlimit: int = Field(default=0, ge=0)
-    # Pre-flight guard: abort before vzdump if the PBS datastore has less than this
-    # percentage free (0 = disabled). Avoids backing up onto a near-full datastore.
-    min_free_percent: int = Field(default=0, ge=0, le=100)
-    guests: GuestsConfig = Field(default_factory=GuestsConfig)
-    retention: RetentionConfig = Field(default_factory=RetentionConfig)
-    external: ExternalConfig = Field(default_factory=ExternalConfig)
-
-
 # --- devices and routes ------------------------------------------------------
 #
 # The v1.0 model. A **route** is "sources -> target + schedule" and covers every reason
@@ -171,6 +94,16 @@ class BackupConfig(_Base):
 #
 # Devices are listed once under ``pves``/``pbss`` and referenced by id, so two routes onto
 # the same PBS share its credentials, its wake settings and its power lease.
+
+
+class RetentionConfig(_Base):
+    """How many snapshots the target datastore keeps — vzdump's prune-backups, per route."""
+
+    keep_last: int = Field(default=0, ge=0)
+    keep_daily: int = Field(default=7, ge=0)
+    keep_weekly: int = Field(default=4, ge=0)
+    keep_monthly: int = Field(default=6, ge=0)
+    keep_yearly: int = Field(default=0, ge=0)
 
 
 class PveDevice(_Base):
@@ -376,25 +309,6 @@ class Route(_Base):
 # --- maintenance -------------------------------------------------------------
 
 
-class GcConfig(_Base):
-    # Simple on/off: when enabled, garbage collection runs after each backup, while
-    # the PBS is still awake, before power-off. GC has no schedule or power cycle of
-    # its own — it only ever piggybacks on the backup cycle.
-    enabled: bool = True
-
-
-class VerifyConfig(_Base):
-    # Quick verify after each backup cycle: re-read only this run's *new* snapshots while the
-    # PBS is already awake (already-verified data is skipped, so the extra awake-time is small).
-    after_backup: bool = False
-    # Periodic verification on its own wake -> verify -> power-off cycle.
-    enabled: bool = False  # scheduled verify on/off
-    schedule: str = "0 3 1 * *"  # cron; default 03:00 on the 1st of each month
-    # Re-verify snapshots whose last verification is older than this many days, so the
-    # scheduled verify stays mostly incremental. 0 = re-verify everything every run.
-    reverify_days: int = Field(default=30, ge=0)
-
-
 class HistoryConfig(_Base):
     # Auto-prune run history + activity-log rows older than this many days so the
     # SQLite DB under data/ can't grow without bound on a small disk. The prune runs
@@ -403,8 +317,8 @@ class HistoryConfig(_Base):
 
 
 class MaintenanceConfig(_Base):
-    gc: GcConfig = Field(default_factory=GcConfig)
-    verify: VerifyConfig = Field(default_factory=VerifyConfig)
+    # GC and verify are per-route options now (``routes[].options.gc`` / ``.verify_after``,
+    # and the Verify route kind); history retention has no route equivalent and stays here.
     history: HistoryConfig = Field(default_factory=HistoryConfig)
 
 
@@ -458,12 +372,6 @@ class Config(_Base):
     pves: List[PveDevice] = Field(default_factory=list)  # noqa: UP006
     pbss: List[PbsDevice] = Field(default_factory=list)  # noqa: UP006
     routes: List[Route] = Field(default_factory=list)  # noqa: UP006
-    # The 0.9 single-PVE/single-PBS model, still live while the cycle, scheduler and API
-    # are ported route by route. pve/pbs/backup go away with the backup cycle; the gc and
-    # verify halves of maintenance go away with the sync/external/verify cycles.
-    pve: PveConfig = Field(default_factory=PveConfig)
-    pbs: PbsConfig = Field(default_factory=PbsConfig)
-    backup: BackupConfig = Field(default_factory=BackupConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
 
@@ -531,11 +439,18 @@ def _drop_legacy_keys(raw: dict[str, Any]) -> None:
 
     Removed in 0.6.0: ``backup.guests.auto_include_new`` — it never had any effect. Include
     mode is an explicit list; ``all`` and ``exclude`` already cover newly created guests.
+
+    Removed in 1.0.0: the whole single-PVE/single-PBS model — ``pve:``/``pbs:``/``backup:``
+    and ``maintenance.gc``/``maintenance.verify``, replaced by ``pves``/``pbss``/``routes``
+    and the per-route options. ``config_migrate`` reads those keys to build the routes, so
+    this must run *after* the migration, never before it (see ``load_config``).
     """
-    backup = raw.get("backup")
-    guests = backup.get("guests") if isinstance(backup, dict) else None
-    if isinstance(guests, dict):
-        guests.pop("auto_include_new", None)
+    for key in ("pve", "pbs", "backup"):
+        raw.pop(key, None)
+    maintenance = raw.get("maintenance")
+    if isinstance(maintenance, dict):
+        maintenance.pop("gc", None)
+        maintenance.pop("verify", None)
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -549,11 +464,14 @@ def load_config(path: Path | None = None) -> Config:
         raw = yaml.safe_load(fh) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Config at {p} must be a YAML mapping, got {type(raw).__name__}.")
-    _drop_legacy_keys(raw)
+    # Migration first: it *reads* the 0.9 sections that _drop_legacy_keys removes, and
+    # needs_migration keys on their presence. Dropping first would silently skip every
+    # 0.9 migration and hand the user an empty config.
     if config_migrate.needs_migration(raw):
         migrated = _migrate_0_9(raw, p)
         if migrated is not None:
             return migrated
+    _drop_legacy_keys(raw)
     return Config.model_validate(raw)
 
 
@@ -724,8 +642,17 @@ def restore_secrets(incoming: dict[str, Any], current: Config) -> dict[str, Any]
     that placeholder back for any secret it didn't change. The contract per secret value:
     ``REDACTED`` → keep the stored value; ``""`` → clear it; anything else → set it new.
     """
+    return restore_secrets_from(incoming, current.model_dump(mode="python"))
+
+
+def restore_secrets_from(incoming: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
+    """:func:`restore_secrets` against any stored mapping, not just a whole ``Config``.
+
+    The device endpoints edit one device at a time and resolve its placeholders against that
+    device's own stored values, which is what makes reordering the device list harmless.
+    """
     merged = deepcopy(incoming)
-    _restore_in_place(merged, current.model_dump(mode="python"))
+    _restore_in_place(merged, stored)
     return merged
 
 
@@ -739,9 +666,25 @@ def _restore_in_place(node: Any, current: Any) -> Any:
                 _restore_in_place(value, cur)
     elif isinstance(node, list):
         for i, item in enumerate(node):
-            cur = current[i] if isinstance(current, list) and i < len(current) else None
-            _restore_in_place(item, cur)
+            _restore_in_place(item, _match(item, current, i))
     return node
+
+
+def _match(item: Any, current: Any, index: int) -> Any:
+    """Find ``item``'s counterpart in the stored list.
+
+    By ``id`` whenever both sides carry one — ``pves``/``pbss``/``routes`` are keyed lists,
+    and matching them positionally maps a ``***REDACTED***`` placeholder onto the *wrong*
+    device's stored secret as soon as the client reorders or shortens the list. Index is
+    the fallback for genuinely positional lists.
+    """
+    if not isinstance(current, list):
+        return None
+    if isinstance(item, dict) and "id" in item:
+        return next(
+            (c for c in current if isinstance(c, dict) and c.get("id") == item["id"]), None
+        )
+    return current[index] if index < len(current) else None
 
 
 def _unmask(value: Any, current: Any) -> Any:

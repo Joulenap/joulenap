@@ -25,7 +25,7 @@ from ..config import (
 from ..connectors.errors import WolError
 from ..connectors.wol import normalize_mac
 from ..core.config_store import ConfigStore
-from ..core.scheduler import validate_cron
+from ._config_edit import check_route_crons
 from .deps import Scheduler, get_config_store, get_scheduler, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["config"])
@@ -70,40 +70,26 @@ def _apply_config(
         # deprecated HTTP_422_UNPROCESSABLE_ENTITY constant name).
         raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors())) from exc
 
-    # Reject a newly-set invalid cron schedule before it can be persisted (BE-B1): an
-    # unparseable string would 500 the rearm below and then brick every restart. Only
-    # *changed* values are checked so a legacy on-disk schedule carried through an
-    # unrelated edit doesn't lock the user out of saving (the rearm guards tolerate it).
+    # Reject a newly-set unparseable route cron before it can be persisted (BE-B1): the
+    # route would silently never fire, which is the failure mode hardest to notice.
     old = store.config
-    for label, new_val, old_val in (
-        ("backup.schedule", new_config.backup.schedule, old.backup.schedule),
-        (
-            "maintenance.verify.schedule",
-            new_config.maintenance.verify.schedule,
-            old.maintenance.verify.schedule,
-        ),
-    ):
-        if new_val and new_val != old_val:
-            try:
-                validate_cron(new_val)
-            except (ValueError, TypeError) as exc:
-                raise HTTPException(
-                    status_code=422, detail=f"Invalid {label} {new_val!r}: {exc}"
-                ) from exc
+    check_route_crons(new_config, old)
 
     # Reject a newly-set malformed WoL MAC before persisting (BE-C2), reusing the exact
-    # WoL parser so "fails at save" == "fails at wake time". Changed-only + non-empty, same
-    # as the cron block: an empty MAC is the wizard's unconfigured state, and a legacy bad
-    # MAC on disk carried through an unrelated edit stays saveable (fails later at wake, as
-    # today) rather than locking the user out of Settings. Not a pydantic validator, so it
-    # never runs at load time and can't brick startup (the BE-B1 lesson).
-    if new_config.pbs.mac and new_config.pbs.mac != old.pbs.mac:
-        try:
-            normalize_mac(new_config.pbs.mac)
-        except WolError as exc:
-            raise HTTPException(
-                status_code=422, detail=f"Invalid pbs.mac {new_config.pbs.mac!r}: {exc}"
-            ) from exc
+    # WoL parser so "fails at save" == "fails at wake time". Changed-only + non-empty: an
+    # empty MAC is the wizard's unconfigured state, and a legacy bad MAC on disk carried
+    # through an unrelated edit stays saveable (failing later at wake, as today) rather than
+    # locking the user out of Settings. Not a pydantic validator, so it never runs at load
+    # time and can't brick startup (the BE-B1 lesson).
+    old_macs = {p.id: p.mac for p in old.pbss}
+    for pbs in new_config.pbss:
+        if pbs.mac and pbs.mac != old_macs.get(pbs.id):
+            try:
+                normalize_mac(pbs.mac)
+            except WolError as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"pbs '{pbs.id}': invalid mac {pbs.mac!r}: {exc}"
+                ) from exc
 
     try:
         store.replace(new_config)

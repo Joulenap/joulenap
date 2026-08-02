@@ -21,11 +21,11 @@ from typing import TYPE_CHECKING, Any
 
 import apprise
 
-from ..config import Config, NotificationsConfig
-from ..db.models import Run, RunStatus
+from ..config import Config, NotificationsConfig, Route
+from ..db.models import RunStatus
 from .apprise_urls import Channel, build_channels
 from .messages import (
-    GuestSummary,
+    RunContext,
     build_missed_backup_message,
     build_run_message,
     build_test_message,
@@ -33,8 +33,6 @@ from .messages import (
 
 if TYPE_CHECKING:
     from datetime import datetime
-
-    from ..connectors.pbs import DatastoreStatus
 
 logger = logging.getLogger(__name__)
 
@@ -138,21 +136,21 @@ class NotificationService:
     def __init__(self, apprise_factory: Callable[[], Any] = apprise.Apprise):
         self._apprise_factory = apprise_factory
 
-    def send_run_result(
-        self,
-        config: Config,
-        run: Run,
-        datastore: DatastoreStatus | None = None,
-        guests: GuestSummary | None = None,
-        next_at: datetime | None = None,
-    ) -> NotifyReport:
-        """Notify the run outcome, honouring the on_success / on_failure routing toggles."""
+    def send_run_result(self, ctx: RunContext) -> NotifyReport:
+        """Notify the run outcome, honouring the per-route filter and the routing toggles."""
+        config, run = ctx.config, ctx.run
         n = config.notifications
+        # The per-route filter comes first so the skip reason names the actual cause: a user
+        # who muted one noisy route hasn't disabled success notifications globally.
+        if ctx.route is not None and not ctx.route.notify:
+            return NotifyReport(
+                sent=False, channels=0, skipped=True, reason=f"route '{ctx.route.id}' notify off"
+            )
         if run.status == RunStatus.SUCCESS and not n.on_success:
             return NotifyReport(sent=False, channels=0, skipped=True, reason="on_success disabled")
         if run.status in (RunStatus.FAILURE, RunStatus.ABORTED) and not n.on_failure:
             return NotifyReport(sent=False, channels=0, skipped=True, reason="on_failure disabled")
-        title, body = build_run_message(config, run, datastore, guests, next_at)
+        title, body = build_run_message(ctx)
         report = self._dispatch(build_channels(n), title, body, n)
         # A run notification has no UI: without this, a channel that silently stopped working
         # would never surface anywhere.
@@ -187,12 +185,21 @@ class NotificationService:
     def send_missed_backup(
         self,
         config: Config,
+        route: Route,
         missed_at: datetime,
         last_run_at: datetime | None,
         next_at: datetime | None,
     ) -> NotifyReport:
-        """Alert that a scheduled backup was skipped while the process was down (BE-R1)."""
-        title, body = build_missed_backup_message(config, missed_at, last_run_at, next_at)
+        """Alert that a scheduled route was skipped while the process was down (BE-R1).
+
+        Honours the route's own ``notify`` filter: a muted route stays muted even when the
+        news is that it didn't run.
+        """
+        if not route.notify:
+            return NotifyReport(
+                sent=False, channels=0, skipped=True, reason=f"route '{route.id}' notify off"
+            )
+        title, body = build_missed_backup_message(config, route, missed_at, last_run_at, next_at)
         return self.send_alert(config, title, body)
 
     def send_test(self, config: Config) -> NotifyReport:

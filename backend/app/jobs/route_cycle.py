@@ -15,12 +15,12 @@ from collections.abc import Callable
 
 from ..config import Config, PbsDevice, Route
 from ..connectors.pbs import DatastoreStatus
-from ..db.models import LogLevel, RunStatus, StepName
+from ..db.models import LogLevel, RunKind, RunStatus, StepName
+from ..notify.messages import RunContext
 from .backup_cycle import (
     CycleAbort,
     CycleCancelled,
     _find_device,
-    _notify_result,
     _refresh_route_backup_cache,
     _route_gc_step,
     _route_read_datastore,
@@ -34,6 +34,15 @@ from .recorder import RunRecorder
 
 # ``(config, route, target, recorder, deps) -> datastore status for the notification``.
 RouteBody = Callable[[Config, Route, PbsDevice, RunRecorder, CycleDeps], "DatastoreStatus | None"]
+
+#: What kind of run each route kind records. The queue needs this to open the run row
+#: before the cycle picks its branch, and history/metrics group on it.
+RUN_KINDS: dict[str, RunKind] = {
+    "backup": RunKind.CYCLE,
+    "sync": RunKind.SYNC,
+    "external": RunKind.MONITOR,
+    "verify": RunKind.VERIFY,
+}
 
 
 def _require_pbs(config: Config, pbs_id: str, route: Route) -> PbsDevice:
@@ -177,41 +186,90 @@ _BODIES: dict[str, RouteBody] = {
 }
 
 
-def _run_simple(config: Config, route: Route, recorder: RunRecorder, deps: CycleDeps) -> None:
-    """Run a single-target route body under the shared failure policy.
+def _run_body(
+    config: Config,
+    route: Route | None,
+    recorder: RunRecorder,
+    body: Callable[[], DatastoreStatus | None],
+) -> RunContext | None:
+    """Run a single-target body under the shared failure policy.
 
-    The three kinds here have one target, one outcome and no partial success, so they share
-    the whole envelope: a cancel is the user's own click (recorded, not notified), an abort
-    is a route that couldn't start, anything else is a failure — and the lease reads the
-    recorded status to decide whether the box stays on for inspection.
+    Every kind here has one target, one outcome and no partial success, so they share the
+    whole envelope: a cancel is the user's own click (recorded, not notified), an abort is a
+    run that couldn't start, anything else is a failure — and the lease reads the recorded
+    status to decide whether the box stays on for inspection.
+
+    Returns the context to notify with, or ``None`` when the user cancelled.
     """
     datastore: DatastoreStatus | None = None
     try:
-        body = _BODIES.get(route.kind)
-        if body is None:
-            raise CycleAbort(f"route '{route.id}': unsupported kind '{route.kind}'")
-        target = _require_pbs(config, route.target, route)
-        datastore = body(config, route, target, recorder, deps)
+        datastore = body()
         recorder.finish(RunStatus.SUCCESS)
     except CycleCancelled:
         # No notification: the user pressed Stop and is standing at the UI.
         recorder.finish(RunStatus.ABORTED, error="Cancelled by user")
-        return
+        return None
     except CycleAbort as exc:
         recorder.finish(RunStatus.ABORTED, error=str(exc))
     except Exception as exc:  # connector/task failures: the lease leaves the PBS on
         recorder.finish(RunStatus.FAILURE, error=str(exc))
 
-    _notify_result(config, recorder, deps, datastore)
+    return RunContext(config=config, run=recorder.run, route=route, datastore=datastore)
 
 
-def run_route(config: Config, route: Route, recorder: RunRecorder, deps: CycleDeps) -> None:
+def _simple_body(
+    config: Config, route: Route, recorder: RunRecorder, deps: CycleDeps
+) -> DatastoreStatus | None:
+    body = _BODIES.get(route.kind)
+    if body is None:
+        raise CycleAbort(f"route '{route.id}': unsupported kind '{route.kind}'")
+    target = _require_pbs(config, route.target, route)
+    return body(config, route, target, recorder, deps)
+
+
+def run_route(
+    config: Config, route: Route, recorder: RunRecorder, deps: CycleDeps
+) -> RunContext | None:
     """Execute one route of any kind. Sets the final run status itself.
 
     The single entry point the queue worker runs: everything that wakes a PBS is a route, so
     nothing else needs to know which flavour it is.
     """
     if route.kind == "backup":
-        run_route_backup(config, route, recorder, deps)
-        return
-    _run_simple(config, route, recorder, deps)
+        return run_route_backup(config, route, recorder, deps)
+    return _run_body(
+        config, route, recorder, lambda: _simple_body(config, route, recorder, deps)
+    )
+
+
+# --- ad-hoc maintenance ------------------------------------------------------
+
+
+def run_pbs_maintenance(
+    config: Config,
+    pbs: PbsDevice,
+    recorder: RunRecorder,
+    deps: CycleDeps,
+    *,
+    action: str,
+) -> RunContext | None:
+    """Run a one-off GC or verify on a PBS, outside any route.
+
+    The homepage's "Run GC" / "Run verify" buttons pick a *box*, not a route — you reach for
+    them after a restore or a disk scare, and inventing a throwaway route for that would put
+    a phantom entry in the topology. It reuses the route steps verbatim, so history reads
+    identically; only the route column is empty.
+    """
+
+    def body() -> DatastoreStatus | None:
+        if action == "gc":
+            _route_gc_step(pbs, recorder, deps)
+        elif action == "verify":
+            # Everything, not just the recently-changed: an ad-hoc verify is a deliberate
+            # "check this box now", and reverify_days is a per-route pacing knob.
+            _route_verify_step(pbs, recorder, deps, outdated_after=None)
+        else:
+            raise CycleAbort(f"unsupported maintenance action '{action}'")
+        return _route_read_datastore(pbs, recorder, deps)
+
+    return _run_body(config, None, recorder, body)

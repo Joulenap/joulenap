@@ -28,14 +28,85 @@ def temp_db(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(base, "_SessionLocal", None)
 
 
+#: The set-up starting state every API test runs against: two PVEs and two PBS devices with
+#: three routes over them — which is also the acceptance-criterion shape (3 routes, 2 PBS,
+#: so three cron jobs arm). Addresses are RFC 5737 TEST-NET and the tokens/MACs are
+#: placeholders; nothing here ever points at real infrastructure.
+DEVICES = {
+    "pves": [
+        {
+            "id": "pve-alpha",
+            "host": "192.0.2.10",
+            "api_token_id": "root@pam!joulenap",
+            "api_token_secret": "test-pve-secret",
+            "storages": {"pbs-01": "pbs", "pbs-02": "pbs-offsite"},
+        },
+        {
+            "id": "pve-beta",
+            "host": "192.0.2.11",
+            "api_token_id": "root@pam!joulenap",
+            "api_token_secret": "test-pve2-secret",
+            "storages": {"pbs-01": "pbs"},
+        },
+    ],
+    "pbss": [
+        {
+            "id": "pbs-01",
+            "host": "192.0.2.20",
+            "datastore": "backup",
+            "fingerprint": "aa:bb:cc:dd:ee:ff",
+            "api_token_id": "root@pam!joulenap",
+            "api_token_secret": "test-pbs-secret",
+            "mac": "00:11:22:33:44:55",
+            "wol_broadcast_iface": "eth0",
+        },
+        {
+            "id": "pbs-02",
+            "host": "192.0.2.21",
+            "datastore": "offsite",
+            "api_token_id": "root@pam!joulenap",
+            "api_token_secret": "test-pbs2-secret",
+            "mac": "00:11:22:33:44:66",
+        },
+    ],
+}
+
+ROUTES = [
+    {
+        "id": "nightly",
+        "name": "Nightly",
+        "kind": "backup",
+        "sources": [{"pve": "pve-alpha"}, {"pve": "pve-beta"}],
+        "target": "pbs-01",
+        "schedule": {"time": "02:00"},
+    },
+    {
+        "id": "lab",
+        "name": "Lab",
+        "kind": "backup",
+        "sources": [{"pve": "pve-alpha", "guests": {"mode": "include", "list": [100, 101]}}],
+        "target": "pbs-02",
+        "schedule": {"time": "04:00", "days": [False] * 5 + [True, False]},
+    },
+    {
+        "id": "offsite",
+        "name": "Offsite sync",
+        "kind": "sync",
+        "source_pbs": "pbs-01",
+        "target": "pbs-02",
+        "schedule": {"time": "05:00"},
+    },
+]
+
+
 @pytest.fixture
 def temp_config(tmp_path: Path, monkeypatch):
     """Write a fresh config.yaml from the example and route paths.config_path() to it.
 
-    The shipped example is intentionally *unconfigured* (blank host/token/mac) so a real
-    first run drops into the setup wizard. Tests want a set-up starting state, so we fill
-    in fake connection values here — RFC 5737 TEST-NET IPs and a placeholder MAC/token,
-    never real infrastructure — decoupling the suite from the example's leak-free contents.
+    The shipped example is intentionally *unconfigured* (no devices, no routes) so a real
+    first run drops into the setup wizard. Tests want a set-up starting state, so the
+    devices and routes above are filled in here — decoupling the suite from the example's
+    leak-free contents.
     """
     from app.config import load_config, save_config
 
@@ -46,17 +117,15 @@ def temp_config(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("JOULENAP_DATA_DIR", str(tmp_path / "data"))
 
     cfg = load_config(cfg_file)
-    cfg.pve.host = "192.0.2.10"
-    cfg.pve.node = "pve"
-    cfg.pve.api_token_id = "root@pam!joulenap"
-    cfg.pve.api_token_secret = "test-pve-secret"
-    cfg.pve.storage_id = "pbs"
-    cfg.pbs.host = "192.0.2.20"
-    cfg.pbs.datastore = "backup"
-    cfg.pbs.fingerprint = "aa:bb:cc:dd:ee:ff"
-    cfg.pbs.api_token_id = "root@pam!joulenap"
-    cfg.pbs.api_token_secret = "test-pbs-secret"
-    cfg.pbs.mac = "00:11:22:33:44:55"
-    cfg.pbs.wol_broadcast_iface = "eth0"
-    save_config(cfg, cfg_file)
+    save_config(with_devices(cfg), cfg_file)
     yield cfg_file
+
+
+def with_devices(cfg):
+    """Fill a config in place with the standard device/route fixture."""
+    from app.config import PbsDevice, PveDevice, Route
+
+    cfg.pves = [PveDevice.model_validate(d) for d in DEVICES["pves"]]
+    cfg.pbss = [PbsDevice.model_validate(d) for d in DEVICES["pbss"]]
+    cfg.routes = [Route.model_validate(r) for r in ROUTES]
+    return cfg

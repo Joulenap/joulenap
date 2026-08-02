@@ -92,19 +92,34 @@ def test_ssh_install_passes_through(client, monkeypatch):
     assert captured["host"] == "pbs.local" and captured["user"] == "root"
 
 
-def test_reset_clears_connection_but_keeps_tuning(client):
-    before = client.get("/api/config").json()
-    # The example config ships a configured PVE/PBS, so we start from a set-up state.
-    assert before["pve"]["host"] and before["pbs"]["host"]
-    schedule = before["backup"]["schedule"]
+def test_wol_test_sends_a_packet_for_a_mac_not_yet_saved(client, monkeypatch):
+    # The wizard tests a MAC it has just detected, before there is a device to hang it on —
+    # so this takes the MAC in the body rather than reading one out of the config.
+    sent: list[tuple] = []
+    monkeypatch.setattr(
+        "app.core.wizard.send_magic_packet",
+        lambda mac, broadcast=None, source_ip=None: sent.append((mac, broadcast)),
+    )
+    monkeypatch.setattr(
+        "app.connectors.net.wol_target", lambda host, iface: ("192.0.2.255", "192.0.2.5")
+    )
 
-    assert client.post("/api/wizard/reset").json() == {"ok": True}
+    resp = client.post(
+        "/api/wizard/wol/test", json={"mac": "00:11:22:33:44:55", "host": "192.0.2.20"}
+    )
 
-    after = client.get("/api/config").json()
-    # Connection identity is wiped...
-    assert after["pve"]["host"] == "" and after["pve"]["api_token_id"] == ""
-    assert after["pbs"]["host"] == "" and after["pbs"]["mac"] == ""
-    assert after["pbs"]["datastore"] == "" and after["pbs"]["fingerprint"] == ""
-    # ...but tuning the wizard didn't own is preserved.
-    assert after["backup"]["schedule"] == schedule
-    assert after["pve"]["port"] == before["pve"]["port"]
+    assert resp.status_code == 200 and resp.json()["sent"] is True
+    assert sent == [("00:11:22:33:44:55", "192.0.2.255")]
+
+
+def test_wol_test_falls_back_to_the_global_broadcast_without_a_host(client, monkeypatch):
+    sent: list[tuple] = []
+    monkeypatch.setattr(
+        "app.core.wizard.send_magic_packet",
+        lambda mac, broadcast=None, source_ip=None: sent.append((mac, broadcast)),
+    )
+
+    resp = client.post("/api/wizard/wol/test", json={"mac": "00:11:22:33:44:55"})
+
+    assert resp.status_code == 200
+    assert sent == [("00:11:22:33:44:55", "255.255.255.255")]

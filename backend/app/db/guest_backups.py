@@ -8,11 +8,21 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import GuestBackup
+
+
+class GuestBackupRow(NamedTuple):
+    """One cached "this PVE's guest N was last backed up to that PBS at T"."""
+
+    pve_id: str
+    vmid: int
+    pbs_id: str
+    last_backup: datetime
 
 
 def upsert_last_backups(
@@ -47,8 +57,8 @@ def get_last_backups(
 
     A guest can now be backed up by several routes onto different PBSs, so a vmid may have
     more than one row; the newest wins, which is what "when was this guest last backed up"
-    means to the dashboard. TODO(M07): the guest panel wants the breakdown per (pve, pbs),
-    not just the newest — that needs a richer return shape and callers that know their ids.
+    means when you only have one line to say it on. Use :func:`list_last_backups` when the
+    per-(pve, pbs) breakdown matters.
     """
     stmt = select(GuestBackup)
     if vmids is not None:
@@ -62,3 +72,21 @@ def get_last_backups(
         if current is None or row.last_backup > current:
             out[row.vmid] = row.last_backup
     return out
+
+
+def list_last_backups(session: Session, pve_id: str | None = None) -> list[GuestBackupRow]:
+    """Every cached row, optionally for one PVE, ordered by (pve, vmid, pbs).
+
+    The guest panel groups by PVE and shows which PBS(s) hold each guest's backup
+    (``pbs-01`` / ``pbs-01 +02``), and /metrics labels the freshness series the same way —
+    both need the rows, not the collapsed newest-per-vmid view.
+    """
+    stmt = select(GuestBackup).order_by(
+        GuestBackup.pve_id, GuestBackup.vmid, GuestBackup.pbs_id
+    )
+    if pve_id is not None:
+        stmt = stmt.where(GuestBackup.pve_id == pve_id)
+    return [
+        GuestBackupRow(row.pve_id, row.vmid, row.pbs_id, row.last_backup)
+        for row in session.scalars(stmt)
+    ]

@@ -117,9 +117,9 @@ def test_the_rest_of_the_config_is_untouched(migrated: Config):
     assert migrated.app.language == "it" and migrated.app.port == 8081
     assert migrated.notifications.telegram.bot_token == "test-bot-token"
     assert migrated.notifications.custom_urls == ["gotify://example.test/token"]
+    # history retention is the one part of maintenance: with no route equivalent; gc and
+    # verify became per-route options and a Verify route.
     assert migrated.maintenance.history.retention_days == 21
-    # The 0.9 sections stay live until the cycle and scheduler are ported off them.
-    assert migrated.pve.host == "192.0.2.10" and migrated.backup.bwlimit == 5000
 
 
 # --- the parachute ------------------------------------------------------------
@@ -159,7 +159,9 @@ def test_a_config_that_cannot_be_converted_is_left_alone(tmp_path: Path, monkeyp
     original = path.read_text(encoding="utf-8")
     monkeypatch.setattr(config_migrate, "migrate", lambda raw: {**raw, "routes": "nonsense"})
     cfg = load_config(path)
-    assert cfg.routes == [] and cfg.pve.host == "192.0.2.10"
+    # Nothing was converted and nothing was written; the 0.9 sections on disk are simply
+    # dropped at load, so the app boots on defaults rather than failing to start.
+    assert cfg.routes == []
     assert path.read_text(encoding="utf-8") == original
     assert not (tmp_path / BAK).exists()
 

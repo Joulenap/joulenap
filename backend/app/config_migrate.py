@@ -11,8 +11,8 @@ Two rules keep this from ever bricking a boot (the BE-B1 lesson):
 * the converted config is validated before it is adopted. If anything about it fails to
   validate, or the file cannot be written, the original is kept and the app starts on it.
 
-The 0.9 sections are deliberately *left in place*: they are still what the cycle, scheduler
-and API read until those are ported. They are removed by the milestones that replace them.
+The 0.9 sections are dropped from the converted config — nothing reads them any more, and
+``config.yaml.pre-overhaul.bak`` is the rollback path if one is ever needed.
 """
 
 from __future__ import annotations
@@ -51,8 +51,12 @@ def needs_migration(raw: dict[str, Any]) -> bool:
 
 
 def migrate(raw: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of ``raw`` with ``pves``/``pbss``/``routes`` filled in from the 0.9
-    sections. The old sections are left untouched. Pure — no file access."""
+    """Return a 1.0 copy of ``raw``: ``pves``/``pbss``/``routes`` built from the 0.9
+    sections, which are then dropped. Pure — no file access.
+
+    ``.pre-overhaul.bak`` is the rollback path, not the old keys: nothing reads them after
+    this, and leaving them in would fail validation (``_Base`` forbids extra keys).
+    """
     out = dict(raw)
     pve = _section(raw, "pve")
     pbs = _section(raw, "pbs")
@@ -71,6 +75,12 @@ def migrate(raw: dict[str, Any]) -> dict[str, Any]:
     out["pves"] = pves
     out["pbss"] = pbss
     out["routes"] = routes
+    for key in ("pve", "pbs", "backup"):
+        out.pop(key, None)
+    if isinstance(out.get("maintenance"), dict):
+        out["maintenance"] = {
+            k: v for k, v in out["maintenance"].items() if k not in ("gc", "verify")
+        }
     return out
 
 

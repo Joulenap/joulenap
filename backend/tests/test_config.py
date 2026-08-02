@@ -10,7 +10,16 @@ from pydantic import ValidationError
 
 from app import config as cfgmod
 from app import paths
-from app.config import Config, load_config, redact, redacted_dict, restore_secrets, save_config
+from app.config import (
+    Config,
+    PbsDevice,
+    PveDevice,
+    load_config,
+    redact,
+    redacted_dict,
+    restore_secrets,
+    save_config,
+)
 
 EXAMPLE = paths.config_example_path()
 
@@ -18,10 +27,11 @@ EXAMPLE = paths.config_example_path()
 def test_example_config_loads_and_validates():
     cfg = load_config(EXAMPLE)
     assert cfg.app.port == 8080
-    assert cfg.pve.port == 8006
-    assert cfg.pbs.port == 8007
-    assert cfg.backup.guests.mode == "all"
-    assert cfg.backup.retention.keep_daily == 7
+    assert cfg.app.scheduler_enabled is True
+    # The example ships no devices and no routes: a fresh install lands in the wizard, and
+    # anything listed here would appear as a phantom device (config_store copies it verbatim).
+    assert (cfg.pves, cfg.pbss, cfg.routes) == ([], [], [])
+    assert cfg.maintenance.history.retention_days == 14
     # Example ships with notifications off (unconfigured, no leaked tokens).
     assert cfg.notifications.telegram.enabled is False
 
@@ -31,7 +41,7 @@ def test_defaults_when_empty(tmp_path: Path):
     p.write_text("app: {}\n", encoding="utf-8")
     cfg = load_config(p)
     assert cfg.app.auth.username == "admin"
-    assert cfg.backup.enabled is True
+    assert cfg.app.scheduler_enabled is True
 
 
 def test_missing_file_raises(tmp_path: Path):
@@ -46,21 +56,27 @@ def test_unknown_key_rejected(tmp_path: Path):
         load_config(p)
 
 
-def test_legacy_auto_include_new_is_dropped_not_rejected(tmp_path: Path):
-    # BE-C5: the field was removed from the schema, but every pre-0.6.0 config.yaml still has
-    # it on disk. extra="forbid" would turn that into a startup failure after a container
-    # pull, so the loader strips it instead — and the next save writes the file without it.
+def test_legacy_sections_are_dropped_not_rejected(tmp_path: Path):
+    # BE-C5, now for the whole 0.9 model: extra="forbid" would turn a leftover pve:/pbs:/
+    # backup: section into a startup failure after a container pull, so the loader strips
+    # them — and the next save writes the file without them. ``routes`` being present is what
+    # marks the file as already migrated, so this is *not* the migration path.
     p = tmp_path / "config.yaml"
     p.write_text(
-        "backup:\n  guests:\n    mode: include\n    auto_include_new: true\n    list: [100]\n",
+        "routes: []\n"
+        "pve:\n  host: 192.0.2.10\n"
+        "pbs:\n  host: 192.0.2.20\n"
+        "backup:\n  guests:\n    mode: include\n    auto_include_new: true\n"
+        "maintenance:\n  gc:\n    enabled: true\n  history:\n    retention_days: 21\n",
         encoding="utf-8",
     )
     cfg = load_config(p)
-    assert cfg.backup.guests.mode == "include"
-    assert cfg.backup.guests.list == [100]
-    assert not hasattr(cfg.backup.guests, "auto_include_new")
+    assert cfg.maintenance.history.retention_days == 21  # the half that survived
     save_config(cfg, p)
-    assert "auto_include_new" not in p.read_text(encoding="utf-8")
+    text = p.read_text(encoding="utf-8")
+    assert "auto_include_new" not in text
+    for key in ("pve:", "pbs:", "backup:"):
+        assert key not in text
 
 
 def test_roundtrip_save_load(tmp_path: Path):
@@ -123,15 +139,15 @@ def test_save_config_is_owner_only(tmp_path: Path, monkeypatch):
 def test_redaction_masks_secrets_keeps_empty():
     cfg = load_config(EXAMPLE)
     cfg.app.secret_key = "supersecret"
-    cfg.pve.api_token_secret = "tok"
+    cfg.pves = [PveDevice(id="pve-01", api_token_secret="tok")]
+    cfg.pbss = [PbsDevice(id="pbs-01")]  # no secret set yet
     cfg.notifications.custom_urls = ["tgram://a/b"]
     red = redacted_dict(cfg)
     assert red["app"]["secret_key"] == cfgmod.REDACTED
-    assert red["pve"]["api_token_secret"] == cfgmod.REDACTED
+    assert red["pves"][0]["api_token_secret"] == cfgmod.REDACTED
     assert red["notifications"]["custom_urls"] == [cfgmod.REDACTED]
-    # Empty secret stays empty so the UI can show "not set". The example ships this blank
-    # (unconfigured), so redaction leaves it as-is rather than masking.
-    assert red["pbs"]["api_token_secret"] == ""
+    # Empty secret stays empty so the UI can show "not set".
+    assert red["pbss"][0]["api_token_secret"] == ""
 
 
 def test_redact_does_not_mutate_source():
@@ -175,17 +191,44 @@ def test_restore_custom_urls_mixed_raises():
 
 def test_restore_secret_empty_clears_scalar():
     cfg = Config()
-    cfg.pve.api_token_secret = "tok"
-    incoming = {"pve": {"api_token_secret": ""}}
+    cfg.pves = [PveDevice(id="pve-01", api_token_secret="tok")]
+    incoming = {"pves": [{"id": "pve-01", "api_token_secret": ""}]}
     out = restore_secrets(incoming, cfg)
-    assert out["pve"]["api_token_secret"] == ""
+    assert out["pves"][0]["api_token_secret"] == ""
 
 
 def test_empty_secret_not_masked():
     cfg = Config()
-    cfg.pve.api_token_secret = ""
+    cfg.pves = [PveDevice(id="pve-01")]
     red = redacted_dict(cfg)
-    assert red["pve"]["api_token_secret"] == ""
+    assert red["pves"][0]["api_token_secret"] == ""
+
+
+def test_device_secrets_are_matched_by_id_not_position():
+    # The client reorders (or drops) a device and echoes ***REDACTED*** for the secrets it
+    # did not change. Matching positionally would hand pbs-02's stored token to pbs-01.
+    cfg = Config()
+    cfg.pbss = [
+        PbsDevice(id="pbs-01", api_token_secret="first", managed_power=False),
+        PbsDevice(id="pbs-02", api_token_secret="second", managed_power=False),
+    ]
+    incoming = {
+        "pbss": [
+            {"id": "pbs-02", "api_token_secret": cfgmod.REDACTED},
+            {"id": "pbs-01", "api_token_secret": cfgmod.REDACTED},
+        ]
+    }
+    out = restore_secrets(incoming, cfg)
+    assert [d["api_token_secret"] for d in out["pbss"]] == ["second", "first"]
+
+
+def test_a_new_device_keeps_the_secret_it_was_sent():
+    # An id with no stored counterpart must not silently inherit another device's token.
+    cfg = Config()
+    cfg.pbss = [PbsDevice(id="pbs-01", api_token_secret="first", managed_power=False)]
+    incoming = {"pbss": [{"id": "pbs-99", "api_token_secret": "brand-new"}]}
+    out = restore_secrets(incoming, cfg)
+    assert out["pbss"][0]["api_token_secret"] == "brand-new"
 
 
 def test_session_defaults():

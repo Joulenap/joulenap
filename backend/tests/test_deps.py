@@ -1,11 +1,11 @@
-from app.config import Config
+"""The connector factories a route cycle builds its clients from."""
+
+from app.config import PbsDevice
 from app.jobs import deps
 
 
-def test_build_pbs_pins_when_fingerprint_present(monkeypatch):
-    cfg = Config()
-    cfg.pbs.host = "pbs.local"
-    cfg.pbs.fingerprint = "AB:CD"
+def test_connect_pbs_pins_when_fingerprint_present(monkeypatch):
+    device = PbsDevice(id="pbs-01", host="pbs.local", fingerprint="AB:CD", managed_power=False)
     sentinel = object()
     captured = {}
 
@@ -24,15 +24,16 @@ def test_build_pbs_pins_when_fingerprint_present(monkeypatch):
             pass
 
     monkeypatch.setattr(deps, "PbsClient", FakePbs)
-    deps._build_pbs(cfg).close()
+    deps._connect_pbs(device).close()
     assert captured["fp"] == "AB:CD"
     assert recorded["verify"] is sentinel  # the pinned context is actually wired to verify=
 
 
-def test_build_pbs_no_fingerprint_leaves_verify_false(monkeypatch):
-    cfg = Config()
-    cfg.pbs.host = "pbs.local"  # fingerprint empty
+def test_connect_pbs_no_fingerprint_leaves_verify_false(monkeypatch):
+    device = PbsDevice(id="pbs-01", host="pbs.local", managed_power=False)  # fingerprint empty
+
     def boom(*a, **k):
         raise AssertionError("should not pin without a fingerprint")
+
     monkeypatch.setattr(deps.tls, "pinned_ssl_context", boom)
-    deps._build_pbs(cfg).close()  # must not raise
+    deps._connect_pbs(device).close()  # must not raise

@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from .. import __version__
 from ..core.config_store import ConfigStore
 from ..db import get_session
-from ..db.guest_backups import get_last_backups
+from ..db.guest_backups import list_last_backups
 from ..db.models import Run, RunStatus
 from . import _probe
 from ._apikey import authorize_api_key
@@ -120,74 +120,102 @@ def get_metrics(
         [({"version": __version__}, 1)],
     )
 
-    # --- power + scheduler state ---
-    pbs_online, live_ds, load = _probe.probe_pbs(config, job_service.deps.build_pbs)
-    w.gauge("pbs_online", "1 if the PBS answers on its API port, 0 while asleep.", int(pbs_online))
+    # --- global state ---
     w.gauge(
         "scheduler_enabled",
-        "1 if the scheduled backup job is armed.",
-        int(config.backup.enabled),
+        "1 if the scheduler kill-switch is on (routes may be armed).",
+        int(config.app.scheduler_enabled),
     )
     w.gauge(
         "job_running",
-        "1 while a backup, GC or verify run is in flight.",
+        "1 while a backup, sync, GC or verify run is in flight.",
         int(job_service.is_running),
     )
-    w.gauge(
-        "next_run_timestamp_seconds",
-        "Unix time of the next scheduled backup; absent when the scheduler is off.",
-        _epoch(scheduler.next_run_time),
-    )
+    w.gauge("queued_runs", "Runs waiting in the queue behind the one in flight.",
+            len(job_service.pending()))
 
-    # PBS load is only meaningful while the box is awake, so those series come and go.
-    w.gauge("pbs_cpu_percent", "PBS CPU usage percent (only while the PBS is awake).",
-            load.cpu if load else None)
-    w.gauge("pbs_memory_percent", "PBS memory usage percent (only while the PBS is awake).",
-            load.mem if load else None)
-    w.gauge("pbs_uptime_seconds", "PBS uptime in seconds (only while the PBS is awake).",
-            load.uptime if load else None)
+    # --- per PBS: power, load, datastore ---
+    # Every series below carries a pbs="<id>" label. The datastore values come from the
+    # cache while the box sleeps, which is its normal state — a scrape never wakes anything.
+    probes = _probe.probe_pbss(config, job_service.deps.connect_pbs)
+    w.metric(
+        "pbs_online",
+        "1 if this PBS answers on its API port, 0 while asleep.",
+        "gauge",
+        [({"pbs": pbs.id}, int(probes[pbs.id].online)) for pbs in config.pbss if pbs.id in probes],
+    )
+    for name, help_text, pick in (
+        ("pbs_cpu_percent", "PBS CPU usage percent (only while the PBS is awake).",
+         lambda load: load.cpu),
+        ("pbs_memory_percent", "PBS memory usage percent (only while the PBS is awake).",
+         lambda load: load.mem),
+        ("pbs_uptime_seconds", "PBS uptime in seconds (only while the PBS is awake).",
+         lambda load: load.uptime),
+    ):
+        w.metric(name, help_text, "gauge", [
+            ({"pbs": pbs_id}, pick(probe.load))
+            for pbs_id, probe in probes.items()
+            if probe.load is not None
+        ])
+    for name, help_text, pick in (
+        ("datastore_used_bytes", "PBS datastore bytes used (last known value).",
+         lambda ds: ds.used),
+        ("datastore_total_bytes", "PBS datastore total bytes (last known value).",
+         lambda ds: ds.total),
+    ):
+        w.metric(name, help_text, "gauge", [
+            ({"pbs": pbs.id, "datastore": pbs.datastore}, pick(probes[pbs.id].datastore))
+            for pbs in config.pbss
+            if pbs.id in probes and probes[pbs.id].datastore is not None
+        ])
 
-    # --- last completed backup cycle ---
-    last = _probe.latest_finished_cycle_run(session)
-    w.gauge(
-        "last_run_timestamp_seconds",
-        "Unix time the last finished backup cycle started; absent until one has run.",
-        _epoch(last.started_at) if last else None,
+    # --- per route: schedule + last outcome ---
+    # A route with no armed job (disabled, or the kill-switch is off) simply has no
+    # next_run series — absent, not zero, so alerts use absent() rather than a sentinel.
+    w.metric(
+        "route_next_run_timestamp_seconds",
+        "Unix time this route next fires; absent when it isn't armed.",
+        "gauge",
+        [({"route": route_id}, when.timestamp()) for route_id, when in scheduler.next_runs()],
     )
-    w.gauge(
-        "last_run_success",
-        "1 if the last finished backup cycle succeeded, 0 if it failed or was aborted.",
-        int(last.status == RunStatus.SUCCESS) if last else None,
-    )
-    w.gauge(
-        "last_run_duration_seconds",
-        "Wall-clock duration of the last finished backup cycle.",
-        (last.finished_at - last.started_at).total_seconds()
-        if last and last.finished_at
-        else None,
-    )
-    w.gauge(
-        "last_run_guests",
-        "Number of guests backed up by the last finished backup cycle.",
-        last.guests_ok if last and last.guests_ok is not None else None,
-    )
-
-    # --- datastore (cached, so it still reports while the PBS sleeps) ---
-    ds = _probe.resolve_datastore(config.pbs.datastore, live_ds)
-    w.gauge("datastore_used_bytes", "PBS datastore bytes used (last known value).",
-            ds.used if ds else None)
-    w.gauge("datastore_total_bytes", "PBS datastore total bytes (last known value).",
-            ds.total if ds else None)
+    last_runs = {
+        route.id: _probe.latest_finished_run(session, route.id) for route in config.routes
+    }
+    for name, help_text, pick in (
+        ("route_last_run_timestamp_seconds",
+         "Unix time this route's last finished run started.",
+         lambda run: _epoch(run.started_at)),
+        ("route_last_run_success",
+         "1 if this route's last finished run succeeded, 0 if it failed or was aborted.",
+         lambda run: int(run.status == RunStatus.SUCCESS)),
+        ("route_last_run_duration_seconds",
+         "Wall-clock duration of this route's last finished run.",
+         lambda run: (run.finished_at - run.started_at).total_seconds() if run.finished_at
+         else None),
+        ("route_last_run_guests",
+         "Number of guests backed up by this route's last finished run.",
+         lambda run: run.guests_ok),
+    ):
+        w.metric(name, help_text, "gauge", [
+            ({"route": route_id}, value)
+            for route_id, run in last_runs.items()
+            if run is not None and (value := pick(run)) is not None
+        ])
 
     # --- per-guest freshness: the series worth alerting on ---
-    # Labelled by vmid only. Guest *names* live on PVE, and fetching them would put an API
-    # call on every scrape just to decorate a label.
-    guests = get_last_backups(session)
+    # Labelled by vmid plus the PVE it lives on and the PBS holding the snapshot — a vmid
+    # alone stopped being unique the moment a second PVE could exist. Guest *names* still
+    # live on PVE, and fetching them would put an API call on every scrape to decorate a
+    # label.
     w.metric(
         "guest_last_backup_timestamp_seconds",
-        "Unix time of each guest's most recent snapshot on the PBS, from Joulenap's cache.",
+        "Unix time of each guest's most recent snapshot, from Joulenap's cache.",
         "gauge",
-        [({"vmid": str(vmid)}, ts.timestamp()) for vmid, ts in sorted(guests.items())],
+        [
+            ({"vmid": str(row.vmid), "pve": row.pve_id, "pbs": row.pbs_id},
+             row.last_backup.timestamp())
+            for row in list_last_backups(session)
+        ],
     )
 
     # --- run history ---

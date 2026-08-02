@@ -133,6 +133,27 @@ class PowerLease:
             held = self._state.get(pbs_id)
             return LeaseState(held.holders, held.was_awake) if held else LeaseState()
 
+    # --- manual power buttons ------------------------------------------------
+    #
+    # The topology card's ⏻ acts on the box directly, outside any run. They live here so the
+    # API never has to reach for the connector helpers itself, and so there is exactly one
+    # place that knows how to wake and shut down a PBS.
+
+    def wake(self, pbs: PbsDevice) -> None:
+        """Send the magic packet and return. The button doesn't wait for the box to come up:
+        a wake takes minutes and the topology already polls each device's state."""
+        self._deps.send_wol(pbs)
+
+    def power_off_now(self, pbs: PbsDevice) -> None:
+        """Shut a box down on the user's explicit request, raising if it fails.
+
+        No idle-wait and no refcount check, unlike :meth:`release`: the caller has confirmed
+        no run holds the lease, and a click means *now*. Failures propagate here — a manual
+        action that silently does nothing is worse than an error message, whereas a failed
+        power-off at the end of a run costs energy, not correctness.
+        """
+        self._deps.poweroff(pbs)
+
     def acquire(self, pbs: PbsDevice) -> bool:
         """Make sure ``pbs`` is up and count this run as a holder. Returns ``was_awake``.
 

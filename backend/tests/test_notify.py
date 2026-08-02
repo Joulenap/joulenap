@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 
 from fakes import make_deps
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from app.config import Config
+from app.config import Config, Route
+from app.db import session_scope
 from app.db.models import Run, RunKind, RunStatus, RunStep, RunTrigger, StepName, StepStatus
-from app.jobs.backup_cycle import run_backup_cycle
-from app.jobs.recorder import RunRecorder
 from app.main import create_app
 from app.notify import NotificationService
 from app.notify.apprise_urls import Channel, build_channels
 from app.notify.messages import (
     GuestSummary,
+    RunContext,
     build_interrupted_message,
     build_missed_backup_message,
     build_run_message,
@@ -179,6 +181,34 @@ def _run(
     return run
 
 
+def _route(route_id: str = "nightly", name: str = "Nightly", **overrides) -> Route:
+    return Route.model_validate(
+        {"id": route_id, "name": name, "kind": "verify", "target": "pbs-01", **overrides}
+    )
+
+
+def _msg(config, run, datastore=None, guests=None, next_at=None, route=None):
+    """``build_run_message`` with the old positional tail, so these tests stay readable.
+
+    The production seam is a single :class:`RunContext`; spelling that out at ~25 call sites
+    would say nothing the field names don't.
+    """
+    return build_run_message(
+        RunContext(
+            config=config,
+            run=run,
+            route=route,
+            datastore=datastore,
+            guests=guests,
+            next_at=next_at,
+        )
+    )
+
+
+def _send(svc, config, run, **kwargs):
+    return svc.send_run_result(RunContext(config=config, run=run, **kwargs))
+
+
 def _step(name: StepName, status: StepStatus, seconds: int) -> RunStep:
     """A finished step that took ``seconds``, for the duration breakdown."""
     step = RunStep(name=name, status=status)
@@ -188,7 +218,7 @@ def _step(name: StepName, status: StepStatus, seconds: int) -> RunStep:
 
 
 def test_run_message_success_english():
-    title, body = build_run_message(Config(), _run(RunStatus.SUCCESS))
+    title, body = _msg(Config(), _run(RunStatus.SUCCESS))
     assert "succeeded" in title
     assert "1m 23s" in body
 
@@ -198,7 +228,7 @@ def test_run_message_includes_guests_and_datastore():
 
     run = _run(RunStatus.SUCCESS)
     ds = DatastoreStatus(total=8_000_000_000_000, used=2_000_000_000_000, avail=6_000_000_000_000)
-    _title, body = build_run_message(Config(), run, ds, GuestSummary(total=4, ok=4))
+    _title, body = _msg(Config(), run, ds, GuestSummary(total=4, ok=4))
     assert "Guests: 4/4" in body
     assert "25.0% used" in body
     assert "5.5 TiB free" in body
@@ -206,7 +236,7 @@ def test_run_message_includes_guests_and_datastore():
 
 def test_run_message_omits_guests_and_datastore_when_absent():
     # No guest summary and no datastore -> neither line appears (e.g. an aborted run).
-    _title, body = build_run_message(Config(), _run(RunStatus.ABORTED))
+    _title, body = _msg(Config(), _run(RunStatus.ABORTED))
     assert "Guests" not in body
     assert "Datastore" not in body
 
@@ -214,8 +244,7 @@ def test_run_message_omits_guests_and_datastore_when_absent():
 def test_run_message_names_the_guests_that_failed():
     """A single guest failing takes the whole vzdump task down, so the run reads FAILURE with
     no hint of which guest broke. The tally is the only place that detail exists."""
-    _title, body = build_run_message(
-        Config(),
+    _title, body = _msg(Config(),
         _run(RunStatus.FAILURE, error="vzdump failed"),
         None,
         GuestSummary(total=14, ok=12, failed=["web01", "db02"]),
@@ -226,7 +255,7 @@ def test_run_message_names_the_guests_that_failed():
 def test_run_message_omits_the_guest_line_when_nothing_was_selected():
     # total == 0 means the cycle never got as far as picking guests: "0/0" would read like a
     # result when it is really an absence.
-    _title, body = build_run_message(Config(), _run(RunStatus.ABORTED), None, GuestSummary())
+    _title, body = _msg(Config(), _run(RunStatus.ABORTED), None, GuestSummary())
     assert "Guests" not in body
 
 
@@ -237,8 +266,7 @@ def test_run_message_field_order():
     run = _run(RunStatus.FAILURE, error="boom", trigger=RunTrigger.SCHEDULED)
     run.steps = [_woke(), RunStep(name=StepName.BACKUP, status=StepStatus.FAILURE)]
     ds = DatastoreStatus(total=8_000_000_000_000, used=2_000_000_000_000, avail=6_000_000_000_000)
-    _title, body = build_run_message(
-        Config(),
+    _title, body = _msg(Config(),
         run,
         ds,
         GuestSummary(total=2, ok=1, failed=["web01"]),
@@ -266,15 +294,14 @@ def test_run_message_duration_breaks_down_the_work_phases():
         RunStep(name=StepName.GC, status=StepStatus.SKIPPED),
         _step(StepName.POWEROFF, StepStatus.SUCCESS, 9),
     ]
-    _title, body = build_run_message(Config(), run)
+    _title, body = _msg(Config(), run)
     assert "Duration: 1m 23s (backup 1m 10s)" in body
 
 
 def test_run_message_trigger_and_next_run_are_localized():
     cfg = Config()
     cfg.app.language = "it"
-    _title, body = build_run_message(
-        cfg,
+    _title, body = _msg(cfg,
         _run(RunStatus.SUCCESS, trigger=RunTrigger.SCHEDULED),
         None,
         None,
@@ -288,14 +315,14 @@ def test_run_message_trigger_and_next_run_are_localized():
 def test_run_message_omits_next_run_when_no_schedule_is_armed():
     # A disabled/invalid schedule leaves no armed job: better no line than a "—" placeholder,
     # which reads like an error in an otherwise-fine success push.
-    _title, body = build_run_message(Config(), _run(RunStatus.SUCCESS))
+    _title, body = _msg(Config(), _run(RunStatus.SUCCESS))
     assert "Next scheduled run" not in body
 
 
 def test_run_message_failure_includes_error_and_locale():
     cfg = Config()
     cfg.app.language = "it"
-    title, body = build_run_message(cfg, _run(RunStatus.FAILURE, error="vzdump failed"))
+    title, body = _msg(cfg, _run(RunStatus.FAILURE, error="vzdump failed"))
     assert "fallito" in title
     assert "vzdump failed" in body
 
@@ -303,10 +330,10 @@ def test_run_message_failure_includes_error_and_locale():
 def test_run_message_title_names_the_kind_that_ran():
     # A verify or GC cycle must not report itself as a backup (doc-gap #7): a scheduled
     # verify failure used to notify "backup failed".
-    verify = build_run_message(Config(), _run(RunStatus.FAILURE, kind=RunKind.VERIFY))[0]
+    verify = _msg(Config(), _run(RunStatus.FAILURE, kind=RunKind.VERIFY))[0]
     assert "verification failed" in verify
     assert "backup" not in verify
-    gc = build_run_message(Config(), _run(RunStatus.SUCCESS, kind=RunKind.GC))[0]
+    gc = _msg(Config(), _run(RunStatus.SUCCESS, kind=RunKind.GC))[0]
     assert "garbage collection succeeded" in gc
     assert "backup" not in gc
 
@@ -315,17 +342,15 @@ def test_run_message_kind_titles_are_localized():
     cfg = Config()
     cfg.app.language = "it"
     # Italian agrees in gender with the noun — "verifica fallita", not "fallito".
-    assert "verifica fallita" in build_run_message(
-        cfg, _run(RunStatus.FAILURE, kind=RunKind.VERIFY)
+    assert "verifica fallita" in _msg(cfg, _run(RunStatus.FAILURE, kind=RunKind.VERIFY)
     )[0]
 
 
 def test_run_message_unmapped_kind_falls_back_to_the_backup_title():
     # A backup cycle keeps today's wording, and a kind with no block of its own degrades to
     # it rather than raising.
-    assert "backup succeeded" in build_run_message(Config(), _run(RunStatus.SUCCESS))[0]
-    assert "backup succeeded" in build_run_message(
-        Config(), _run(RunStatus.SUCCESS, kind=RunKind.BACKUP)
+    assert "backup succeeded" in _msg(Config(), _run(RunStatus.SUCCESS))[0]
+    assert "backup succeeded" in _msg(Config(), _run(RunStatus.SUCCESS, kind=RunKind.BACKUP)
     )[0]
 
 
@@ -337,21 +362,21 @@ def _woke() -> RunStep:
 def test_run_message_flags_pbs_left_on_when_poweroff_failed():
     run = _run(RunStatus.SUCCESS)
     run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.FAILURE)]
-    _title, body = build_run_message(Config(), run)
+    _title, body = _msg(Config(), run)
     assert "left powered on" in body
 
 
 def test_run_message_flags_pbs_left_on_when_poweroff_skipped():
     run = _run(RunStatus.SUCCESS)
     run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.SKIPPED)]
-    _title, body = build_run_message(Config(), run)
+    _title, body = _msg(Config(), run)
     assert "left powered on" in body
 
 
 def test_run_message_no_pbs_line_when_poweroff_succeeded():
     run = _run(RunStatus.SUCCESS)
     run.steps = [_woke(), RunStep(name=StepName.POWEROFF, status=StepStatus.SUCCESS)]
-    _title, body = build_run_message(Config(), run)
+    _title, body = _msg(Config(), run)
     assert "left powered on" not in body
 
 
@@ -359,7 +384,7 @@ def test_run_message_flags_pbs_left_on_when_backup_fails_after_wake():
     # Failure after the PBS woke: no POWEROFF step at all, box is left on for inspection.
     run = _run(RunStatus.FAILURE, error="vzdump failed")
     run.steps = [_woke(), RunStep(name=StepName.BACKUP, status=StepStatus.FAILURE)]
-    _title, body = build_run_message(Config(), run)
+    _title, body = _msg(Config(), run)
     assert "left powered on" in body
 
 
@@ -367,7 +392,7 @@ def test_run_message_flags_pbs_left_on_when_aborted_after_wake():
     # An abort after wake (e.g. free-space preflight) also leaves the box on.
     run = _run(RunStatus.ABORTED, error="datastore too full")
     run.steps = [_woke(), RunStep(name=StepName.PRECHECK, status=StepStatus.FAILURE)]
-    _title, body = build_run_message(Config(), run)
+    _title, body = _msg(Config(), run)
     assert "left powered on" in body
 
 
@@ -378,7 +403,7 @@ def test_run_message_no_pbs_line_when_wait_timed_out():
         RunStep(name=StepName.WAKE, status=StepStatus.SUCCESS),
         RunStep(name=StepName.WAIT, status=StepStatus.FAILURE),
     ]
-    _title, body = build_run_message(Config(), run)
+    _title, body = _msg(Config(), run)
     assert "left powered on" not in body
 
 
@@ -386,8 +411,9 @@ def test_missed_backup_message_english():
     missed = datetime(2026, 7, 9, 4, 0, tzinfo=UTC)
     last = datetime(2026, 7, 8, 4, 0, tzinfo=UTC)
     nxt = datetime(2026, 7, 12, 4, 0, tzinfo=UTC)
-    title, body = build_missed_backup_message(Config(), missed, last, nxt)
+    title, body = build_missed_backup_message(Config(), _route(), missed, last, nxt)
     assert "missed scheduled backup" in title
+    assert "Route: Nightly" in body  # which one, now that every route has its own schedule
     assert "was offline" in body
     assert "Missed run: 2026-07-09 04:00" in body
     assert "Last backup run: 2026-07-08 04:00" in body
@@ -398,7 +424,7 @@ def test_missed_backup_message_localized_italian():
     cfg = Config()
     cfg.app.language = "it"
     title, body = build_missed_backup_message(
-        cfg, datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, None
+        cfg, _route(), datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, None
     )
     assert "mancato" in title
     assert "offline" in body
@@ -412,7 +438,11 @@ def test_send_missed_backup_dispatches_when_on_failure_enabled():
     fake = FakeApprise()
     svc = NotificationService(apprise_factory=lambda: fake)
     report = svc.send_missed_backup(
-        cfg, datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, datetime(2026, 7, 12, 4, 0, tzinfo=UTC)
+        cfg,
+        _route(),
+        datetime(2026, 7, 9, 4, 0, tzinfo=UTC),
+        None,
+        datetime(2026, 7, 12, 4, 0, tzinfo=UTC),
     )
     assert report.sent is True
     assert report.channels == 5
@@ -423,7 +453,9 @@ def test_send_missed_backup_skipped_when_on_failure_disabled():
     cfg = _notifications_config()
     cfg.notifications.on_failure = False
     svc = NotificationService(apprise_factory=FakeApprise)
-    report = svc.send_missed_backup(cfg, datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, None)
+    report = svc.send_missed_backup(
+        cfg, _route(), datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, None
+    )
     assert report.sent is False
     assert report.skipped is True
     assert report.reason == "on_failure disabled"
@@ -437,6 +469,7 @@ def test_missed_backup_message_renders_every_time_in_the_configured_zone():
     cfg.app.timezone = "Europe/Rome"  # UTC+2 in July
     _title, body = build_missed_backup_message(
         cfg,
+        _route(),
         datetime(2026, 7, 9, 2, 0, tzinfo=UTC),
         datetime(2026, 7, 8, 2, 0, tzinfo=UTC),
         datetime(2026, 7, 10, 2, 0, tzinfo=UTC),
@@ -449,8 +482,8 @@ def test_missed_backup_message_renders_every_time_in_the_configured_zone():
 def test_run_message_next_run_uses_the_configured_zone():
     cfg = Config()
     cfg.app.timezone = "Europe/Rome"
-    _title, body = build_run_message(
-        cfg, _run(RunStatus.SUCCESS), None, None, datetime(2026, 7, 10, 2, 0, tzinfo=UTC)
+    _title, body = _msg(
+        cfg, _run(RunStatus.SUCCESS), next_at=datetime(2026, 7, 10, 2, 0, tzinfo=UTC)
     )
     assert "Next scheduled run: 2026-07-10 04:00 CEST" in body
 
@@ -748,7 +781,7 @@ def test_failed_channels_are_logged_on_a_run(caplog):
     fake = FakeApprise(fail_urls={"ntfys://ntfy.sh/homelab": "boom"})
     svc = NotificationService(apprise_factory=lambda: fake)
     with caplog.at_level(logging.WARNING, logger="app.notify.service"):
-        svc.send_run_result(_notifications_config(), _run(RunStatus.SUCCESS))
+        _send(svc, _notifications_config(), _run(RunStatus.SUCCESS))
     assert any("ntfy" in r.message and "boom" in r.message for r in caplog.records)
 
 
@@ -756,7 +789,7 @@ def test_success_skipped_when_on_success_disabled():
     cfg = _notifications_config()
     cfg.notifications.on_success = False
     svc = NotificationService(apprise_factory=FakeApprise)
-    report = svc.send_run_result(cfg, _run(RunStatus.SUCCESS))
+    report = _send(svc, cfg, _run(RunStatus.SUCCESS))
     assert report.skipped is True
 
 
@@ -764,37 +797,102 @@ def test_failure_sent_when_on_failure_enabled():
     fake = FakeApprise()
     cfg = _notifications_config()
     svc = NotificationService(apprise_factory=lambda: fake)
-    report = svc.send_run_result(cfg, _run(RunStatus.FAILURE, error="boom"))
+    report = _send(svc, cfg, _run(RunStatus.FAILURE, error="boom"))
     assert report.sent is True
     assert "boom" in fake.payload[1]
 
 
-# --- cycle integration -------------------------------------------------------
+# --- who sends it, and when --------------------------------------------------
+#
+# The cycle no longer notifies: it returns a RunContext and JobService._execute sends it
+# *after* releasing the power leases, which is the only moment "did the box go back to
+# sleep" is knowable. These cover that hand-off.
 
 
-def test_backup_cycle_notifies_with_final_run(temp_db):
-    captured: list[tuple[RunStatus, bool]] = []
-    deps, *_ = make_deps(
-        notify=lambda _c, run, ds, *_a: captured.append((run.status, ds is not None))
+def _queued_service(temp_store, notify):
+    from fakes import FakeBox, FakePbs
+
+    from app.jobs.service import JobService
+
+    deps, *_ = make_deps(pbss={"pbs-01": FakePbs(), "pbs-02": FakePbs()}, notify=notify)
+    return JobService(temp_store, deps=deps, lease_deps=FakeBox().deps())
+
+
+def _drain(service) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if service.current() is None and not service.pending() and not service.is_running:
+            return
+        time.sleep(0.01)
+    raise AssertionError("queue did not drain")
+
+
+def test_the_notification_is_sent_after_the_run_finished(temp_config, temp_db):
+    from app.core.config_store import ConfigStore
+
+    seen: list[RunContext] = []
+    service = _queued_service(ConfigStore.load_or_create(), seen.append)
+
+    service.run_maintenance("pbs-01", "gc")
+    _drain(service)
+
+    assert len(seen) == 1
+    ctx = seen[0]
+    assert ctx.run.status == RunStatus.SUCCESS
+    assert ctx.datastore is not None  # read while the PBS was still awake
+    assert ctx.route is None  # an ad-hoc maintenance run belongs to no route
+
+
+def test_a_route_run_carries_its_route_and_next_fire(temp_config, temp_db):
+    from app.core.config_store import ConfigStore
+
+    seen: list[RunContext] = []
+    service = _queued_service(ConfigStore.load_or_create(), seen.append)
+    when = datetime(2026, 7, 12, 2, 0, tzinfo=UTC)
+    service.deps.next_run = lambda route_id: when if route_id == "offsite" else None
+
+    service.run_route("offsite")
+    _drain(service)
+
+    assert len(seen) == 1
+    assert seen[0].route.id == "offsite"
+    assert seen[0].next_at == when
+
+
+def test_a_muted_route_is_not_notified():
+    cfg = _notifications_config()
+    svc = NotificationService(apprise_factory=FakeApprise)
+    report = _send(svc, cfg, _run(RunStatus.SUCCESS), route=_route(notify=False))
+    assert report.skipped is True
+    assert "notify off" in report.reason
+
+
+def test_a_muted_route_is_not_told_it_missed_a_run():
+    # A route the user muted stays muted even when the news is that it did not run.
+    cfg = _notifications_config()
+    svc = NotificationService(apprise_factory=FakeApprise)
+    report = svc.send_missed_backup(
+        cfg, _route(notify=False), datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, None
     )
-    cfg = Config()
-    cfg.pve.storage_id = "pbs"
-    with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
-        run_backup_cycle(cfg, recorder, deps)
-    # Success path also captured datastore usage (PBS still awake) for the message.
-    assert captured == [(RunStatus.SUCCESS, True)]
+    assert report.skipped is True
 
 
-def test_notify_failure_does_not_break_cycle(temp_db):
-    def boom(_c, _run, _ds=None, *_a):
+def test_a_notify_failure_does_not_break_the_run(temp_config, temp_db):
+    from app.core.config_store import ConfigStore
+
+    def boom(_ctx):
         raise RuntimeError("smtp down")
 
-    deps, *_ = make_deps(notify=boom)
-    cfg = Config()
-    cfg.pve.storage_id = "pbs"
-    with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
-        run_backup_cycle(cfg, recorder, deps)
-        assert recorder.run.status == RunStatus.SUCCESS
+    service = _queued_service(ConfigStore.load_or_create(), boom)
+
+    service.run_maintenance("pbs-01", "gc")
+    _drain(service)
+
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        assert run.status == RunStatus.SUCCESS
+        messages = [e.message for e in run.logs]
+    assert any("notification failed" in m for m in messages)
 
 
 # --- endpoint ----------------------------------------------------------------

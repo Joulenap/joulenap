@@ -12,8 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING
 
-from ..config import Config
-from ..db.models import Run, RunStatus, StepName, StepStatus
+from ..config import Config, Route
+from ..db.models import Run, RunStatus, RunStep, StepName, StepStatus
 
 if TYPE_CHECKING:
     from ..connectors.pbs import DatastoreStatus
@@ -35,6 +35,29 @@ class GuestSummary:
     total: int = 0  # guests the run set out to back up
     ok: int = 0
     failed: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RunContext:
+    """Everything a finished run's notification can say about itself.
+
+    One object instead of the positional ``(config, run, datastore, guests, next_at)``
+    tuple that used to be threaded through ``CycleDeps.notify`` ->
+    ``NotificationService.send_run_result`` -> ``build_run_message``: adding a field there
+    meant editing every call site and every fake, and a caller passing its arguments in
+    the wrong order got a silently wrong message instead of a TypeError. Everything past
+    the first two is optional, so a cycle fills in only what it actually knows.
+    """
+
+    config: Config
+    run: Run
+    #: The route this run belongs to, if any — an ad-hoc PBS GC/verify has none. Carries
+    #: the per-route ``notify`` filter and names the route in the body.
+    route: Route | None = None
+    datastore: DatastoreStatus | None = None
+    guests: GuestSummary | None = None
+    #: When this route next fires, for the "Next scheduled run" line.
+    next_at: datetime | None = None
 
 
 # event keys: success | failure | aborted | test
@@ -63,6 +86,11 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "failure": "❌ Joulenap — watch cycle failed",
             "aborted": "⚠️ Joulenap — watch cycle aborted",
         },
+        "sync": {
+            "success": "✅ Joulenap — sync succeeded",
+            "failure": "❌ Joulenap — sync failed",
+            "aborted": "⚠️ Joulenap — sync aborted",
+        },
         "missed": {
             "title": "⚠️ Joulenap — missed scheduled backup",
             "intro": "A scheduled backup was skipped because Joulenap was offline when it "
@@ -77,6 +105,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "body": "If you can read this, notifications are configured correctly.",
         },
         "_labels": {
+            "route": "Route",
             "trigger": "Trigger",
             "trigger_scheduled": "scheduled",
             "trigger_manual": "manual",
@@ -123,6 +152,11 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "failure": "❌ Joulenap — ciclo di controllo fallito",
             "aborted": "⚠️ Joulenap — ciclo di controllo interrotto",
         },
+        "sync": {
+            "success": "✅ Joulenap — sincronizzazione riuscita",
+            "failure": "❌ Joulenap — sincronizzazione fallita",
+            "aborted": "⚠️ Joulenap — sincronizzazione interrotta",
+        },
         "missed": {
             "title": "⚠️ Joulenap — backup pianificato mancato",
             "intro": "Un backup pianificato è stato saltato perché Joulenap era offline "
@@ -138,6 +172,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "body": "Se leggi questo messaggio, le notifiche sono configurate correttamente.",
         },
         "_labels": {
+            "route": "Route",
             "trigger": "Avvio",
             "trigger_scheduled": "pianificato",
             "trigger_manual": "manuale",
@@ -234,11 +269,21 @@ def human_bytes(n: int) -> str:
     return f"{size:.1f} PiB"
 
 
+def _step_is(step: RunStep, name: StepName) -> bool:
+    """Whether ``step`` is an instance of ``name``, labelled or not.
+
+    A run touching several devices records ``wait:pbs-01`` / ``poweroff:pbs-02`` (see
+    ``RunRecorder.step``'s ``label``), so an equality test would silently stop matching the
+    moment a route had more than one target.
+    """
+    return step.name.split(":", 1)[0] == name.value
+
+
 def _pbs_left_on(run: Run) -> bool:
-    """True if the cycle woke the PBS but never powered it back off — so the box is still
+    """True if the cycle woke a PBS but never powered it back off — so a box is still
     burning energy and the user should check it.
 
-    The rule: the WAIT step succeeded (the PBS actually came up) **and** no POWEROFF step
+    The rule: a WAIT step succeeded (a PBS actually came up) **and** no POWEROFF step
     succeeded. That single condition covers every "left on" case uniformly:
 
       * success but power-off failed / was skipped (PBS busy) — POWEROFF present, not SUCCESS;
@@ -248,36 +293,50 @@ def _pbs_left_on(run: Run) -> bool:
     An abort *before* the box came up (wake/wait timeout) leaves the WAIT step non-SUCCESS, so
     the PBS is off and this correctly returns False — hence why it keys on WAIT, not on the
     run status."""
-    woke = any(s.name == StepName.WAIT and s.status == StepStatus.SUCCESS for s in run.steps)
+    woke = any(_step_is(s, StepName.WAIT) and s.status == StepStatus.SUCCESS for s in run.steps)
     powered_off = any(
-        s.name == StepName.POWEROFF and s.status == StepStatus.SUCCESS for s in run.steps
+        _step_is(s, StepName.POWEROFF) and s.status == StepStatus.SUCCESS for s in run.steps
     )
     return woke and not powered_off
 
 
-def build_run_message(
-    config: Config,
-    run: Run,
-    datastore: DatastoreStatus | None = None,
-    guests: GuestSummary | None = None,
-    next_at: datetime | None = None,
-) -> tuple[str, str]:
+#: Route kinds, for the body's ``Route:`` line. Localized because the kind is a user-facing
+#: word in the UI too; an unknown kind falls through to its raw value.
+_KIND_LABEL = {
+    "en": {"backup": "backup", "sync": "sync", "external": "external", "verify": "verify"},
+    "it": {
+        "backup": "backup",
+        "sync": "sincronizzazione",
+        "external": "esterna",
+        "verify": "verifica",
+    },
+}
+
+
+def build_run_message(ctx: RunContext) -> tuple[str, str]:
     """``(title, body)`` describing a finished run, in the configured language.
 
     One field per line, in a fixed order; a field whose data is missing drops out entirely
-    rather than rendering a placeholder. ``datastore`` (read while the PBS was still awake)
-    adds the usage line, ``guests`` the per-guest tally of a backup cycle, ``next_at`` the
-    schedule's following fire.
+    rather than rendering a placeholder. ``ctx.datastore`` (read while the PBS was still
+    awake) adds the usage line, ``ctx.guests`` the per-guest tally of a backup cycle,
+    ``ctx.next_at`` the schedule's following fire.
     """
+    config, run = ctx.config, ctx.run
     pack = _pack(config.app.language)
     labels = pack["_labels"]
     event = _STATUS_EVENT.get(run.status, "failure")  # RUNNING shouldn't reach here
 
     # The title already conveys success/failure/aborted, so we don't repeat the (untranslated)
     # status enum in the body.
-    lines: list[str] = [
-        f"{labels['trigger']}: {labels.get(f'trigger_{run.trigger}', run.trigger)}"
-    ]
+    lines: list[str] = []
+    if ctx.route is not None:
+        # The route's *colour* is deliberately absent: it is a UI affordance, and a hex
+        # string in a push notification is noise on every channel that could render it.
+        kinds = _KIND_LABEL.get(config.app.language, _KIND_LABEL["en"])
+        kind = kinds.get(ctx.route.kind, ctx.route.kind)
+        lines.append(f"{labels['route']}: {ctx.route.name or ctx.route.id} ({kind})")
+    lines.append(f"{labels['trigger']}: {labels.get(f'trigger_{run.trigger}', run.trigger)}")
+    datastore, guests, next_at = ctx.datastore, ctx.guests, ctx.next_at
     if run.started_at and run.finished_at:
         duration = (run.finished_at - run.started_at).total_seconds()
         breakdown = _phase_breakdown(labels, run)
@@ -290,9 +349,9 @@ def build_run_message(
         if guests.failed:
             line += f" ({labels['failed']}: {', '.join(guests.failed)})"
         lines.append(line)
-    # External-schedules watch: the MONITOR step's detail is either "N task(s) observed"
-    # or "no tasks observed" (see run_monitor_cycle) — the count line for the former, the
-    # your-schedule-didn't-fire warning for the latter.
+    # An External route's watch: the MONITOR step's detail is either "N task(s) observed"
+    # or "no tasks observed" (see route_cycle._external_body) — the count line for the
+    # former, the your-schedule-didn't-fire warning for the latter.
     monitor = next((s for s in run.steps if s.name == StepName.MONITOR), None)
     if monitor is not None and monitor.detail:
         try:
@@ -343,16 +402,25 @@ def _format_dt(dt: datetime | None, tz: tzinfo) -> str:
 
 
 def build_missed_backup_message(
-    config: Config, missed_at: datetime, last_run_at: datetime | None, next_at: datetime | None
+    config: Config,
+    route: Route,
+    missed_at: datetime,
+    last_run_at: datetime | None,
+    next_at: datetime | None,
 ) -> tuple[str, str]:
-    """``(title, body)`` for a scheduled backup that didn't run because the process was down
-    over its window (BE-R1), in the configured language."""
+    """``(title, body)`` for a scheduled route that didn't run because the process was down
+    over its window (BE-R1), in the configured language.
+
+    Names the route: with per-route schedules, "a scheduled backup was skipped" no longer
+    identifies which one.
+    """
     pack = _pack(config.app.language)
     labels = pack["_labels"]
     tz = _timezone(config)
     lines = [
         pack["missed"]["intro"],
         "",
+        f"{labels['route']}: {route.name or route.id}",
         f"{labels['missed_run']}: {_format_dt(missed_at, tz)}",
         f"{labels['last_run']}: {_format_dt(last_run_at, tz)}",
         f"{labels['next_run']}: {_format_dt(next_at, tz)}",
@@ -390,7 +458,7 @@ def build_interrupted_message(config: Config, run: Run) -> tuple[str, str]:
 def _awake_since(run: Run) -> datetime | None:
     """When the PBS finished coming up — the WAIT step's finish, or None if it never did."""
     for step in run.steps:
-        if step.name == StepName.WAIT and step.status == StepStatus.SUCCESS:
+        if _step_is(step, StepName.WAIT) and step.status == StepStatus.SUCCESS:
             return step.finished_at
     return None
 

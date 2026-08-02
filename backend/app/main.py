@@ -63,26 +63,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.warning("Marked %d interrupted run(s) as failed at startup", len(swept))
     service = JobService(store)
     scheduler = Scheduler(
-        service.submit_backup,
+        service.run_route,
         service.run_prune,
-        service.submit_verify,
         timezone=store.config.app.timezone,
     )
     scheduler.start()
     scheduler.rearm(store.config)
     scheduler.arm_prune()
-    # Late-bound so a cycle can put the next scheduled run in its notification: the cycle
-    # only ever sees its CycleDeps, and the Scheduler doesn't exist yet when JobService
-    # builds them (same reason cancelled/cancel_power_off are wired this way).
-    service.deps.next_run = lambda: scheduler.next_run_time
+    # Late-bound so a finished run can put its route's next fire in the notification: the
+    # Scheduler doesn't exist yet when JobService builds its deps (same reason
+    # cancelled/cancel_power_off are wired this way).
+    service.deps.next_run = scheduler.next_run_time
     app.state.job_service = service
     app.state.scheduler = scheduler
     app.state.notifier = NotificationService()
-    # Detect a scheduled backup missed while the process was down (BE-R1). Off the startup
+    # Detect scheduled runs missed while the process was down (BE-R1). Off the startup
     # path on a daemon thread so a slow/black-holing notification channel can't delay the app
     # becoming ready, and wrapped so it can never crash boot.
     threading.Thread(
-        target=_startup_missed_backup_check,
+        target=_startup_missed_run_check,
         args=(store.config, scheduler, app.state.notifier),
         daemon=True,
         name="missed-backup-check",
@@ -101,15 +100,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         scheduler.shutdown()
 
 
-def _startup_missed_backup_check(
+def _startup_missed_run_check(
     config: Config, scheduler: Scheduler, notifier: NotificationService
 ) -> None:
-    from .core.catchup import check_missed_backup
+    from .core.catchup import check_missed_runs
 
     try:
-        check_missed_backup(config, scheduler, notifier)
+        check_missed_runs(config, scheduler, notifier)
     except Exception:  # noqa: BLE001 - a startup safety net must never take the app down
-        log.exception("missed-backup startup check failed")
+        log.exception("missed-run startup check failed")
 
 
 def _send_startup_alerts(

@@ -12,8 +12,8 @@ from sqlalchemy import select
 from app.config import PbsDevice, PveDevice, Route, RouteSource
 from app.core.config_store import ConfigStore
 from app.db import session_scope
-from app.db.models import Run, RunStatus, RunTrigger
-from app.jobs.service import AlreadyQueuedError, JobService
+from app.db.models import Run, RunKind, RunStatus, RunTrigger
+from app.jobs.service import AlreadyQueuedError, JobService, QueuedRun
 
 
 def make_service(box: FakeBox | None = None) -> tuple[JobService, FakeBox]:
@@ -35,15 +35,34 @@ def make_service(box: FakeBox | None = None) -> tuple[JobService, FakeBox]:
         Route(id="sync", name="Offsite", kind="sync", source_pbs="pbs1", target="pbs2"),
     ]
     box = box or FakeBox()
-    deps, _pve, _pbs, _power = make_deps()
+    deps, _pve, _pbs = make_deps()
     return JobService(store, deps=deps, lease_deps=box.deps()), box
 
 
-def ok_job(_config, recorder, _deps) -> None:
+def enqueue(service: JobService, route_id: str, job, *, trigger=RunTrigger.SCHEDULED,
+            power_off: bool = True) -> int:
+    """Queue ``route_id`` with a stand-in job, bypassing the real route cycles.
+
+    The cycles have their own tests; here the point is the queue and the lease around it,
+    so the job is whatever the case needs (park, succeed, explode).
+    """
+    return service.enqueue(
+        QueuedRun(
+            key=route_id,
+            route_id=route_id,
+            trigger=trigger,
+            kind=RunKind.CYCLE,
+            job=job,
+            power_off=power_off,
+        )
+    )
+
+
+def ok_job(_config, _subject, recorder, _deps) -> None:
     recorder.finish(RunStatus.SUCCESS)
 
 
-def failing_job(_config, _recorder, _deps) -> None:
+def failing_job(_config, _subject, _recorder, _deps) -> None:
     raise RuntimeError("vzdump exploded")
 
 
@@ -54,7 +73,7 @@ class Gate:
         self.started = threading.Event()
         self.release = threading.Event()
 
-    def job(self, _config, recorder, _deps) -> None:
+    def job(self, _config, _subject, recorder, _deps) -> None:
         self.started.set()
         assert self.release.wait(timeout=5)
         recorder.finish(RunStatus.SUCCESS)
@@ -78,16 +97,16 @@ def test_runs_execute_in_fifo_order(temp_config, temp_db):
     order: list[str] = []
 
     def record(route_id):
-        def job(_c, recorder, _d):
+        def job(_c, _subject, recorder, _d):
             order.append(route_id)
             recorder.finish(RunStatus.SUCCESS)
 
         return job
 
-    assert service.enqueue("r1", RunTrigger.SCHEDULED, gate.job) == 0
+    assert enqueue(service, "r1", gate.job, trigger=RunTrigger.SCHEDULED) == 0
     assert gate.started.wait(timeout=5)
-    assert service.enqueue("r2", RunTrigger.SCHEDULED, record("r2")) == 1
-    assert service.enqueue("r3", RunTrigger.SCHEDULED, record("r3")) == 2
+    assert enqueue(service, "r2", record("r2")) == 1
+    assert enqueue(service, "r3", record("r3")) == 2
     assert [item.route_id for item in service.pending()] == ["r2", "r3"]
     assert service.current().route_id == "r1"
 
@@ -100,14 +119,14 @@ def test_enqueueing_a_route_twice_is_rejected(temp_config, temp_db):
     service, _box = make_service()
     gate = Gate()
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, gate.job)
+    enqueue(service, "r1", gate.job, trigger=RunTrigger.SCHEDULED)
     assert gate.started.wait(timeout=5)
     try:
         with pytest.raises(AlreadyQueuedError, match="already running"):
-            service.enqueue("r1", RunTrigger.MANUAL, ok_job)
-        service.enqueue("r2", RunTrigger.SCHEDULED, ok_job)
+            enqueue(service, "r1", ok_job, trigger=RunTrigger.MANUAL)
+        enqueue(service, "r2", ok_job, trigger=RunTrigger.SCHEDULED)
         with pytest.raises(AlreadyQueuedError, match="already queued"):
-            service.enqueue("r2", RunTrigger.MANUAL, ok_job)
+            enqueue(service, "r2", ok_job, trigger=RunTrigger.MANUAL)
     finally:
         gate.release.set()
     drain(service)
@@ -117,9 +136,9 @@ def test_a_queued_route_can_be_dequeued(temp_config, temp_db):
     service, _box = make_service()
     gate = Gate()
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, gate.job)
+    enqueue(service, "r1", gate.job, trigger=RunTrigger.SCHEDULED)
     assert gate.started.wait(timeout=5)
-    service.enqueue("r2", RunTrigger.SCHEDULED, failing_job)
+    enqueue(service, "r2", failing_job, trigger=RunTrigger.SCHEDULED)
 
     assert service.dequeue("r2") is True
     assert service.dequeue("r2") is False  # gone
@@ -134,9 +153,9 @@ def test_a_queued_route_can_be_dequeued(temp_config, temp_db):
 def test_the_worker_restarts_after_the_queue_drains(temp_config, temp_db):
     service, _box = make_service()
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "r1", ok_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
-    service.enqueue("r2", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "r2", ok_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
 
     with session_scope() as session:
@@ -146,7 +165,7 @@ def test_the_worker_restarts_after_the_queue_drains(temp_config, temp_db):
 def test_the_run_row_carries_the_route(temp_config, temp_db):
     service, _box = make_service()
 
-    service.enqueue("sync", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "sync", ok_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
 
     with session_scope() as session:
@@ -159,9 +178,9 @@ def test_a_route_deleted_while_queued_is_dropped(temp_config, temp_db):
     service, box = make_service()
     gate = Gate()
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, gate.job)
+    enqueue(service, "r1", gate.job, trigger=RunTrigger.SCHEDULED)
     assert gate.started.wait(timeout=5)
-    service.enqueue("r2", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "r2", ok_job, trigger=RunTrigger.SCHEDULED)
     service._store.config.routes = [r for r in service._store.config.routes if r.id != "r2"]
     gate.release.set()
     drain(service)
@@ -176,7 +195,7 @@ def test_a_queued_run_waits_for_an_exclusive_block(temp_config, temp_db):
     service, _box = make_service()
 
     with service.exclusive():
-        service.enqueue("r1", RunTrigger.MANUAL, ok_job)
+        enqueue(service, "r1", ok_job, trigger=RunTrigger.MANUAL)
         time.sleep(0.05)
         with session_scope() as session:
             assert session.scalars(select(Run)).all() == []  # blocked, no run row yet
@@ -195,9 +214,9 @@ def test_two_routes_sharing_a_pbs_wake_once_and_power_off_at_the_end(temp_config
     service, box = make_service(FakeBox(reachable=[False, True]))
     gate = Gate()
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, gate.job)
+    enqueue(service, "r1", gate.job, trigger=RunTrigger.SCHEDULED)
     assert gate.started.wait(timeout=5)
-    service.enqueue("r2", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "r2", ok_job, trigger=RunTrigger.SCHEDULED)
     gate.release.set()
     drain(service)
 
@@ -208,7 +227,7 @@ def test_two_routes_sharing_a_pbs_wake_once_and_power_off_at_the_end(temp_config
 def test_a_failed_run_leaves_the_pbs_on(temp_config, temp_db):
     service, box = make_service(FakeBox(reachable=[False, True]))
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, failing_job)
+    enqueue(service, "r1", failing_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
 
     assert box.wol == ["pbs1"]
@@ -221,9 +240,9 @@ def test_the_next_route_skips_the_wake_of_a_box_left_on(temp_config, temp_db):
     # Acceptance 3, second half: the box the failed run left awake is not woken again.
     service, box = make_service(FakeBox(reachable=[False, True]))
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, failing_job)
+    enqueue(service, "r1", failing_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
-    service.enqueue("r2", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "r2", ok_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
 
     assert box.wol == ["pbs1"]  # one packet for both runs
@@ -233,7 +252,7 @@ def test_the_next_route_skips_the_wake_of_a_box_left_on(temp_config, temp_db):
 def test_a_manual_run_can_keep_the_pbs_on(temp_config, temp_db):
     service, box = make_service()
 
-    service.enqueue("r1", RunTrigger.MANUAL, ok_job, power_off=False)
+    enqueue(service, "r1", ok_job, trigger=RunTrigger.MANUAL, power_off=False)
     drain(service)
 
     assert box.poweroffs == []
@@ -243,7 +262,7 @@ def test_a_sync_route_leases_both_boxes(temp_config, temp_db):
     # A sync route holds two leases — target and source — released independently.
     service, box = make_service(FakeBox(reachable=[False, True]))
 
-    service.enqueue("sync", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "sync", ok_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
 
     assert box.wol == ["pbs2"]  # the target was down at its probe; the source answered
@@ -254,7 +273,7 @@ def test_an_unreachable_pbs_fails_the_run_without_running_the_job(temp_config, t
     service, box = make_service(FakeBox(reachable=False))
     ran = []
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, lambda *_a: ran.append(1))
+    enqueue(service, "r1", lambda *_a: ran.append(1, trigger=RunTrigger.SCHEDULED))
     drain(service)
 
     assert ran == []
@@ -268,9 +287,9 @@ def test_an_unreachable_pbs_fails_the_run_without_running_the_job(temp_config, t
 def test_a_run_on_another_pbs_does_not_hold_the_first(temp_config, temp_db):
     service, box = make_service()
 
-    service.enqueue("r1", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "r1", ok_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
-    service.enqueue("r3", RunTrigger.SCHEDULED, ok_job)
+    enqueue(service, "r3", ok_job, trigger=RunTrigger.SCHEDULED)
     drain(service)
 
     assert box.poweroffs == ["pbs1", "pbs2"]

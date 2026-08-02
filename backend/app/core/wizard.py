@@ -23,6 +23,7 @@ from ..connectors.pbs import get_fingerprint
 from ..connectors.provision import PbsProvisioner, PveProvisioner
 from ..connectors.pve import PveClient
 from ..connectors.sshkey import authorized_keys_line, generate_keypair, install_public_key
+from ..connectors.wol import send_magic_packet
 
 _PBS_PROBE_TIMEOUT = 3.0
 
@@ -145,6 +146,23 @@ def pbs_check(*, host: str, port: int = 8007) -> dict[str, Any]:
 def wol_detect_mac(*, host: str) -> dict[str, Any]:
     """Detect the MAC of a powered-on PBS via ping + ARP."""
     return {"mac": detect_mac(host)}
+
+
+def wol_test(*, mac: str, host: str = "", iface: str = "") -> dict[str, Any]:
+    """Send one magic packet, to check the MAC and the network path before saving a device.
+
+    With a ``host`` the packet is scoped to that subnet's directed broadcast and sent from
+    the chosen (or auto-detected) interface, rather than blasting the whole network. Without
+    one — pre-setup, when the target subnet is still unknown — it falls back to the global
+    broadcast. "Sent" only means the packet left; whether the box wakes is what the user
+    watches for.
+    """
+    if host:
+        dest, source_ip = net.wol_target(host, iface)
+    else:
+        dest, source_ip = "255.255.255.255", None
+    send_magic_packet(mac, broadcast=dest, source_ip=source_ip)
+    return {"sent": True, "mac": mac, "broadcast": dest}
 
 
 def ssh_keygen(*, key_path: Path) -> dict[str, Any]:

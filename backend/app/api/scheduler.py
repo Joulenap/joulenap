@@ -1,4 +1,7 @@
-"""POST /api/scheduler/toggle — flip the backup job on/off (applies immediately).
+"""POST /api/scheduler/toggle — the global kill-switch (applies immediately).
+
+Off arms nothing at all: no route fires on its schedule, while manual runs still work.
+Pausing one route is ``routes[].enabled``, edited through /api/routes.
 
 Per the UI convention only this master switch applies instantly; text fields are saved
 with the explicit "Apply changes" PUT /api/config.
@@ -21,9 +24,15 @@ class TogglePayload(BaseModel):
     enabled: bool
 
 
+class NextRun(BaseModel):
+    route_id: str
+    at: datetime
+
+
 class ToggleResponse(BaseModel):
     enabled: bool
-    next_run: datetime | None
+    #: What is armed after the flip — empty when the switch has just been turned off.
+    next_runs: list[NextRun]
 
 
 @router.post("/scheduler/toggle", response_model=ToggleResponse)
@@ -33,8 +42,13 @@ def toggle_scheduler(
     scheduler: Scheduler = Depends(get_scheduler),
 ) -> ToggleResponse:
     def apply(cfg) -> None:
-        cfg.backup.enabled = payload.enabled
+        cfg.app.scheduler_enabled = payload.enabled
 
     new_config = store.update(apply)
     scheduler.rearm(new_config)
-    return ToggleResponse(enabled=payload.enabled, next_run=scheduler.next_run_time)
+    return ToggleResponse(
+        enabled=payload.enabled,
+        next_runs=[
+            NextRun(route_id=route_id, at=when) for route_id, when in scheduler.next_runs()
+        ],
+    )

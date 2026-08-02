@@ -16,8 +16,7 @@ from .. import paths
 from ..connectors import net
 from ..connectors.errors import ConnectorError
 from ..core import wizard
-from ..core.config_store import ConfigStore
-from .deps import get_config_store, require_auth
+from .deps import require_auth
 
 router = APIRouter(prefix="/wizard", dependencies=[Depends(require_auth)], tags=["wizard"])
 
@@ -161,8 +160,8 @@ def detect_mac(body: DetectMacRequest) -> dict[str, Any]:
 
 @router.post("/ssh/keygen")
 def ssh_keygen() -> dict[str, Any]:
-    # Always write into the (writable, auto-created) data dir; the frontend points
-    # config.pbs.ssh_key_path at the returned path.
+    # Always write into the (writable, auto-created) data dir; the frontend points the
+    # device's ssh_key_path at the returned path.
     key_path = paths.data_dir() / _KEY_FILENAME
     return _connector_call(wizard.ssh_keygen, key_path=key_path)
 
@@ -212,36 +211,28 @@ def ssh_trust(body: SshTrustRequest) -> dict[str, Any]:
     )
 
 
-# --- reset setup -------------------------------------------------------------
-
-# Connection-identity fields the wizard populates. Reset blanks exactly these so the wizard
-# starts fresh, while tuning left elsewhere (ports, TLS, wake timeouts, backup safety,
-# notifications, schedule, the admin account) is preserved. The generated SSH key file is
-# intentionally kept — only its reference is cleared here.
-_PVE_RESET = ("host", "node", "api_token_id", "api_token_secret", "storage_id")
-_PBS_RESET = (
-    "host",
-    "datastore",
-    "fingerprint",
-    "api_token_id",
-    "api_token_secret",
-    "mac",
-    "wol_broadcast_iface",
-)
+# --- Wake-on-LAN smoke test --------------------------------------------------
+#
+# Stateless like the rest of this router: the wizard tests a MAC it has just detected,
+# before there is a device to save it on. Waking a *configured* PBS is
+# POST /api/devices/pbss/{id}/power instead.
 
 
-@router.post("/reset")
-def reset_setup(store: ConfigStore = Depends(get_config_store)) -> dict[str, bool]:
-    """Clear the saved PVE/PBS connection so the setup wizard restarts from scratch.
+class WolTestRequest(BaseModel):
+    mac: str = Field(min_length=1)
+    # The PBS's address, so the packet goes to that subnet's directed broadcast rather than
+    # the whole network. Optional: pre-setup we may not know it yet.
+    host: str = ""
+    iface: str = ""
 
-    Only the connection-identity fields are wiped; everything else (schedule, retention,
-    notifications, backup-safety tuning, the login account) is left untouched."""
 
-    def clear(cfg: Any) -> None:
-        for field in _PVE_RESET:
-            setattr(cfg.pve, field, "")
-        for field in _PBS_RESET:
-            setattr(cfg.pbs, field, "")
+@router.post("/wol/test")
+def wol_test(body: WolTestRequest) -> dict[str, Any]:
+    return _connector_call(
+        wizard.wol_test, mac=body.mac, host=body.host, iface=body.iface
+    )
 
-    store.update(clear)
-    return {"ok": True}
+
+# TODO(M12): the scoped per-device flows — a PVE's PBS discovery feeding straight into a
+# device entry, and the transient-root ACL grant a push sync route needs on the peer — are
+# the frontend wizard's business and land with it.

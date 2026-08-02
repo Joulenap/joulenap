@@ -18,6 +18,11 @@ class RunSummary(BaseModel):
     status: str
     started_at: datetime
     finished_at: datetime | None
+    # The route this run came from, for the history's route column. Both null for an ad-hoc
+    # PBS maintenance run; ``route_name`` is denormalised on the row, so a deleted route's
+    # history still reads correctly.
+    route_id: str | None = None
+    route_name: str | None = None
     # Nullable while a run is in flight, and for kinds that don't touch guests (GC/verify).
     guests_ok: int | None = None
     error: str | None = None

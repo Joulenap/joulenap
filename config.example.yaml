@@ -8,6 +8,8 @@ app:
   language: en              # UI language: en, it, ...
   theme: dark               # dark | light — also switchable from the header toggle
   port: 8080                # web UI port
+  scheduler_enabled: true   # global kill-switch: false arms no route at all (manual runs
+                            # still work). Pause one route with routes[].enabled: false.
   timezone: ""              # IANA tz for the scheduler, e.g. "Europe/Rome".
                             # Empty -> the TZ env var, then UTC. Set this (or TZ) or
                             # "backup at 02:00" runs at 02:00 UTC in a container.
@@ -149,15 +151,10 @@ routes: []
 #       time: "05:00"
 #       days: [false, false, false, false, false, false, true]   # Sundays only
 
-# --- Maintenance (run while PBS is awake, before power-off) ---
+# --- Maintenance ---
+# GC and post-backup verify are per-route (routes[].options.gc / .verify_after), and a
+# periodic full verification is a route of kind "verify". Only history retention is global.
 maintenance:
-  gc:
-    enabled: true           # on: run GC after each backup, before power-off. no schedule of its own.
-  verify:
-    after_backup: false     # quick verify of new snapshots after each backup (PBS already awake)
-    enabled: false          # scheduled full verification on its own wake/verify/power-off cycle
-    schedule: "0 3 1 * *"   # cron for the scheduled verify (here: 03:00 on the 1st of each month)
-    reverify_days: 30       # re-verify snapshots older than N days; 0 = re-verify everything each run
   history:
     retention_days: 14      # auto-delete run history + activity-log entries older than N days (0 = keep forever)
 

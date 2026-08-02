@@ -75,12 +75,22 @@ def _deps(*, alpha=None, beta=None, pbs=None, notify=None, cancelled=None):
 
 
 def _run(config: Config, deps, route_id: str = "nightly") -> int:
+    """Run the cycle directly (no queue, no lease) and return the run id.
+
+    The cycle returns the notification context instead of sending it — the service does
+    that once the leases are released — so ``_ctx`` catches what a notification *would*
+    have said; :func:`_summary` is the one test that looks at it.
+    """
     route = next(r for r in config.routes if r.id == route_id)
     with RunRecorder(
         RunKind.CYCLE, RunTrigger.MANUAL, route_id=route.id, route_name=route.name
     ) as recorder:
-        run_route_backup(config, route, recorder, deps)
+        _ctx.append(run_route_backup(config, route, recorder, deps))
         return recorder.run_id
+
+
+#: The last context :func:`_run` produced (None when the run was cancelled).
+_ctx: list = []
 
 
 def _load(run_id: int) -> tuple[str, dict[str, str]]:
@@ -226,12 +236,12 @@ def test_a_failing_node_task_fails_only_its_source(temp_db):
 def _summary(config, deps_kwargs=None):
     seen: dict = {}
 
-    def notify(_config, _run, datastore, guests, _next_at=None):
-        seen["datastore"] = datastore
-        seen["guests"] = guests
-
-    deps, alpha, beta, pbs = _deps(notify=notify, **(deps_kwargs or {}))
+    deps, alpha, beta, pbs = _deps(**(deps_kwargs or {}))
+    _ctx.clear()
     _run(config, deps)
+    ctx = _ctx[-1]
+    seen["datastore"] = ctx.datastore
+    seen["guests"] = ctx.guests
     return seen, alpha, beta, pbs
 
 
@@ -382,11 +392,11 @@ def test_cancel_stops_the_running_vzdump_and_aborts(temp_db):
     notified: list[object] = []
     # False at the between-sources check, then True from inside the first task's wait.
     answers = iter([False])
-    deps, alpha, beta, _pbs = _deps(
-        cancelled=lambda: next(answers, True), notify=lambda *a: notified.append(a)
-    )
+    deps, alpha, beta, _pbs = _deps(cancelled=lambda: next(answers, True))
+    _ctx.clear()
 
     status, steps = _load(_run(config, deps))
+    notified[:] = [c for c in _ctx if c is not None]
 
     assert status == RunStatus.ABORTED
     assert alpha.stopped == ["UPID:n1:backup"]  # the task it had actually started
@@ -427,11 +437,7 @@ def _service(config_setup) -> tuple[JobService, FakeBox, dict]:
 
 
 def _enqueue_and_drain(service: JobService) -> None:
-    def job(config, recorder, deps) -> None:
-        route = next(r for r in config.routes if r.id == "nightly")
-        run_route_backup(config, route, recorder, deps)
-
-    service.enqueue("nightly", RunTrigger.MANUAL, job)
+    service.run_route("nightly", RunTrigger.MANUAL)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         if service.current() is None and not service.pending() and not service.is_running:

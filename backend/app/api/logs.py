@@ -57,13 +57,18 @@ def get_task_log(
 @router.get("/runs", response_model=list[RunSummary])
 def get_runs(
     limit: int = Query(default=50, ge=1, le=500),
+    route: str | None = Query(default=None, description="Only runs of this route id"),
     session: Session = Depends(get_session),
 ) -> list[RunSummary]:
-    """Run history (summaries), newest first."""
-    runs = session.scalars(
-        select(Run).order_by(Run.started_at.desc(), Run.id.desc()).limit(limit)
-    ).all()
-    return [RunSummary.of(r) for r in runs]
+    """Run history (summaries), newest first, optionally filtered to one route.
+
+    The filter matches on the recorded ``route_id``, so history stays readable after a route
+    is deleted (the chip disappears, the rows don't).
+    """
+    stmt = select(Run).order_by(Run.started_at.desc(), Run.id.desc()).limit(limit)
+    if route is not None:
+        stmt = stmt.where(Run.route_id == route)
+    return [RunSummary.of(r) for r in session.scalars(stmt).all()]
 
 
 @router.get("/runs/{run_id}", response_model=RunDetail)

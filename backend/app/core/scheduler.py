@@ -1,8 +1,8 @@
 """In-process scheduler (APScheduler) owned by the app.
 
-Joulenap arms exactly one cron job — the backup cycle, from ``backup.schedule`` — and
-re-arms it whenever config changes. GC has no trigger of its own: it runs as a step of
-the backup cycle when enabled (see jobs/backup_cycle.py). This scheduler never touches
+Joulenap arms **one cron job per enabled route** and re-arms them all whenever config
+changes. GC and verify have no triggers of their own: they are per-route options that run
+while the PBS is already awake, or a route of their own kind. This scheduler never touches
 systemd/cron on any host.
 """
 
@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from ..config import Config
+from ..config import Config, Route
 from ..db.models import RunTrigger
 from ..jobs import AlreadyRunningError
 
@@ -45,8 +45,9 @@ def resolve_timezone(name: str | None = None) -> tzinfo:
     return UTC
 
 
-BACKUP_JOB_ID = "backup-cycle"
-VERIFY_JOB_ID = "verify-cycle"
+#: Every route's job id is ``route:<id>``, so re-arming can drop the whole family without
+#: touching the prune job (which is not config-driven).
+ROUTE_JOB_PREFIX = "route:"
 PRUNE_JOB_ID = "history-prune"
 # History pruning is cheap and time-insensitive; run it once a day, off the hour, so it
 # doesn't pile onto the typical early-morning backup window.
@@ -85,8 +86,9 @@ def _build_trigger(schedule: str, tz: tzinfo) -> CronTrigger:
 def validate_cron(schedule: str) -> None:
     """Raise ``ValueError``/``TypeError`` if ``schedule`` can't be built into a cron trigger.
 
-    Used by ``PUT /api/config`` to reject a bad schedule *before* it is persisted (BE-B1),
-    so an invalid string can never reach disk and brick the next startup's ``rearm``.
+    Used by the route/config endpoints to reject a bad ``schedule.cron`` *before* it is
+    persisted (BE-B1), so an invalid string can never reach disk and silently leave that
+    route unarmed on every restart.
     """
     _build_trigger(schedule, UTC)
 
@@ -102,19 +104,39 @@ def _translate_dow(dow: str) -> str:
     return ",".join(out)
 
 
+def route_cron(route: Route) -> str:
+    """The 5-field crontab string a route fires on.
+
+    ``schedule.cron`` wins verbatim when set — it is the escape hatch for a pattern
+    ``time`` + ``days`` cannot express (day-of-month, step values), and a 0.9 config
+    migrates its advanced cron into it rather than approximating.
+
+    Otherwise: the day flags are Monday-first (``days[0]`` is Monday) while cron numbers
+    weekdays Sunday-first, so index ``i`` becomes ``(i + 1) % 7``. Getting that backwards
+    shifts every schedule by a day — which is also why the result still goes through
+    ``_build_trigger`` and its ``_translate_dow`` like any other crontab string.
+    """
+    if route.schedule.cron:
+        return route.schedule.cron
+    hour, minute = route.schedule.time.split(":")
+    if all(route.schedule.days):
+        dow = "*"
+    else:
+        dow = ",".join(str((i + 1) % 7) for i, on in enumerate(route.schedule.days) if on)
+    return f"{int(minute)} {int(hour)} * * {dow}"
+
+
 class Scheduler:
     def __init__(
         self,
-        run_backup: Callable[[RunTrigger], object],
+        run_route: Callable[[str, RunTrigger], object],
         run_prune: Callable[[], object] | None = None,
-        run_verify: Callable[[RunTrigger], object] | None = None,
         timezone: str | tzinfo | None = None,
     ):
         self._timezone = timezone if isinstance(timezone, tzinfo) else resolve_timezone(timezone)
         self._scheduler = BackgroundScheduler(timezone=self._timezone)
-        self._run_backup = run_backup
+        self._run_route = run_route
         self._run_prune = run_prune
-        self._run_verify = run_verify
         log.info("Scheduler timezone: %s", self._timezone)
 
     def start(self) -> None:
@@ -125,91 +147,60 @@ class Scheduler:
         if self._scheduler.running:
             self._scheduler.shutdown(wait=False)
 
+    # --- arming --------------------------------------------------------------
+
     def rearm(self, config: Config) -> None:
-        """(Re)build the config-driven cron jobs (backup + scheduled verify) and re-arm the
-        prune housekeeping job so its timezone stays in sync. Each config-driven job is
-        removed first so a disabled/empty schedule leaves nothing armed."""
+        """(Re)build one cron job per enabled route, and re-arm the prune housekeeping job
+        so its timezone stays in sync.
+
+        Every route job is removed first, so a route that was disabled, deleted or had its
+        schedule changed leaves nothing armed behind it.
+        """
         # Re-resolve app.timezone here so a timezone changed at runtime (e.g. saved via
         # Settings, which calls rearm) actually takes effect. Without this the zone is fixed
         # at construction and a new schedule would stay in the old zone until restart.
         self._timezone = resolve_timezone(config.app.timezone)
-        self._rearm_backup(config)
-        self._rearm_verify(config)
+        for job in self._scheduler.get_jobs():
+            if job.id.startswith(ROUTE_JOB_PREFIX):
+                self._scheduler.remove_job(job.id)
+        if not config.app.scheduler_enabled:
+            log.info("Scheduler kill-switch is off; no route armed")
+        else:
+            for route in config.routes:
+                if route.enabled:
+                    self._arm_route(route)
         # Prune isn't config-driven, but its trigger carries a timezone too, so re-arm it in
         # the (possibly new) zone — otherwise it keeps firing in the boot-time zone (BE-B7).
         self.arm_prune()
 
-    def _rearm_backup(self, config: Config) -> None:
-        if self._scheduler.get_job(BACKUP_JOB_ID):
-            self._scheduler.remove_job(BACKUP_JOB_ID)
-        if not config.backup.enabled or not config.backup.schedule:
-            log.info("Backup job disabled; no schedule armed")
-            return
+    def _arm_route(self, route: Route) -> None:
+        schedule = route_cron(route)
         try:
-            trigger = _build_trigger(config.backup.schedule, self._timezone)
+            trigger = _build_trigger(schedule, self._timezone)
         except (ValueError, TypeError) as exc:
-            # A hand-edited/legacy invalid schedule must not crash arming — otherwise a bad
-            # string on disk bricks every startup (BE-B1). Skip arming, like _rearm_verify.
+            # A hand-edited/legacy invalid schedule must not crash arming — otherwise one bad
+            # string on disk bricks every startup (BE-B1). Skip this route, arm the rest.
             log.warning(
-                "Invalid backup schedule %r: %s; backup job not armed", config.backup.schedule, exc
+                "Invalid schedule %r for route '%s': %s; not armed", schedule, route.id, exc
             )
             return
         self._scheduler.add_job(
-            self._fire_backup,
+            self._fire_route,
             trigger,
-            id=BACKUP_JOB_ID,
+            id=self.job_id(route.id),
+            args=[route.id],
             replace_existing=True,
             coalesce=True,  # collapse missed fires (e.g. host asleep) into one
             max_instances=1,
         )
-        log.info("Armed backup job: %s (next run %s)", config.backup.schedule, self.next_run_time)
-
-    def _rearm_verify(self, config: Config) -> None:
-        if self._scheduler.get_job(VERIFY_JOB_ID):
-            self._scheduler.remove_job(VERIFY_JOB_ID)
-        if self._run_verify is None:
-            return
-        v = config.maintenance.verify
-        if not v.enabled or not v.schedule:
-            return
-        try:
-            trigger = _build_trigger(v.schedule, self._timezone)
-        except (ValueError, TypeError) as exc:
-            # A legacy/invalid schedule string (e.g. the old "monthly") must not crash arming.
-            log.warning("Invalid verify schedule %r: %s; verify job not armed", v.schedule, exc)
-            return
-        self._scheduler.add_job(
-            self._fire_verify,
-            trigger,
-            id=VERIFY_JOB_ID,
-            replace_existing=True,
-            coalesce=True,
-            max_instances=1,
+        log.info(
+            "Armed route '%s': %s (next run %s)", route.id, schedule, self.next_run_time(route.id)
         )
-        log.info("Armed scheduled verify job: %s", v.schedule)
-
-    def _fire_backup(self) -> None:
-        # A scheduled fire must never crash the scheduler thread; the run itself is recorded
-        # to the DB by the service. An "already running" skip is expected, not an error.
-        try:
-            self._run_backup(RunTrigger.SCHEDULED)
-        except AlreadyRunningError:
-            log.info("Scheduled backup skipped: a run is already in progress")
-        except Exception:  # noqa: BLE001
-            log.exception("Scheduled backup run failed to start")
-
-    def _fire_verify(self) -> None:
-        try:
-            self._run_verify(RunTrigger.SCHEDULED)  # type: ignore[misc]  # guarded by _rearm_verify
-        except AlreadyRunningError:
-            log.info("Scheduled verify skipped: a run is already in progress")
-        except Exception:  # noqa: BLE001
-            log.exception("Scheduled verify run failed to start")
 
     def arm_prune(self) -> None:
         """Arm (or, via ``replace_existing``, re-arm) the daily history-prune job in the
-        current timezone. No-op when no prune callback was provided. Independent of backup
-        config, so it runs even when backups are disabled; ``rearm`` calls it to keep the
+        current timezone. No-op when no prune callback was provided. Independent of the
+        routes, so it runs even with the kill-switch off; ``rearm`` calls it to keep the
         prune trigger's timezone in sync."""
         if self._run_prune is None:
             return
@@ -223,41 +214,76 @@ class Scheduler:
         )
         log.info("Armed history-prune job (daily at %02d:%02d)", PRUNE_HOUR, PRUNE_MINUTE)
 
+    # --- firing --------------------------------------------------------------
+
+    def _fire_route(self, route_id: str) -> None:
+        # A scheduled fire must never crash the scheduler thread; the run itself is recorded
+        # to the DB by the service. An "already queued" skip is expected, not an error.
+        try:
+            self._run_route(route_id, RunTrigger.SCHEDULED)
+        except AlreadyRunningError:
+            log.info("Scheduled run of route '%s' skipped: it is already queued", route_id)
+        except KeyError:
+            log.warning("Scheduled route '%s' no longer exists", route_id)
+        except Exception:  # noqa: BLE001
+            log.exception("Scheduled run of route '%s' failed to start", route_id)
+
     def _fire_prune(self) -> None:
         try:
             self._run_prune()  # type: ignore[misc]  # guarded by arm_prune
         except Exception:  # noqa: BLE001
             log.exception("Scheduled history prune failed")
 
-    @property
-    def backup_job(self):
-        return self._scheduler.get_job(BACKUP_JOB_ID)
+    # --- introspection -------------------------------------------------------
 
-    @property
-    def verify_job(self):
-        return self._scheduler.get_job(VERIFY_JOB_ID)
+    @staticmethod
+    def job_id(route_id: str) -> str:
+        return f"{ROUTE_JOB_PREFIX}{route_id}"
 
     @property
     def prune_job(self):
         return self._scheduler.get_job(PRUNE_JOB_ID)
 
-    @property
-    def next_run_time(self) -> datetime | None:
-        job = self.backup_job
+    def route_job(self, route_id: str):
+        return self._scheduler.get_job(self.job_id(route_id))
+
+    def armed_route_ids(self) -> list[str]:
+        """Which routes currently have a job armed, in no particular order."""
+        return [
+            job.id[len(ROUTE_JOB_PREFIX) :]
+            for job in self._scheduler.get_jobs()
+            if job.id.startswith(ROUTE_JOB_PREFIX)
+        ]
+
+    def next_run_time(self, route_id: str) -> datetime | None:
+        job = self.route_job(route_id)
         # A pending job (scheduler not yet started) has no next_run_time computed.
         return getattr(job, "next_run_time", None) if job else None
 
-    def missed_backup_since(self, anchor: datetime, now: datetime) -> datetime | None:
-        """The first scheduled backup fire in ``(anchor, now]``, or None if none was due.
+    def next_runs(self) -> list[tuple[str, datetime]]:
+        """``(route_id, when)`` for every armed route with a computed next fire, soonest
+        first — the homepage's "Upcoming runs" list and the status pill's "next" value."""
+        out = [
+            (route_id, when)
+            for route_id in self.armed_route_ids()
+            if (when := self.next_run_time(route_id)) is not None
+        ]
+        return sorted(out, key=lambda pair: pair[1])
 
-        Used at startup to detect a backup that was due while the process was down (the
+    def missed_run_since(self, route_id: str, anchor: datetime, now: datetime) -> datetime | None:
+        """The first scheduled fire of ``route_id`` in ``(anchor, now]``, or None if none was
+        due.
+
+        Used at startup to detect a run that was due while the process was down (the
         in-memory jobstore has no memory of fires missed across a restart; ``coalesce`` only
-        helps while alive — BE-R1). ``anchor`` is the last finished cycle's start; we ask the
-        *armed job's own trigger* (so the timezone + DOW translation match the real schedule)
-        for the next fire strictly after it, and report it only if it's already in the past.
+        helps while alive — BE-R1). ``anchor`` is that route's last finished run's start; we
+        ask the *armed job's own trigger* (so the timezone + DOW translation match the real
+        schedule) for the next fire strictly after it, and report it only if it is already in
+        the past.
 
-        Returns None when no backup job is armed (backups disabled / empty schedule)."""
-        job = self.backup_job
+        Returns None when the route has no job armed (disabled, or the kill-switch is off).
+        """
+        job = self.route_job(route_id)
         if job is None:
             return None
         # +1s so the fire that the anchor run itself served isn't re-reported as missed

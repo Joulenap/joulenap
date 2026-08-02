@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from app.connectors.errors import ConnectorError, TaskCancelled, TaskError
 from app.connectors.pbs import DatastoreStatus, NodeLoad
 from app.connectors.pve import Guest
@@ -258,39 +256,21 @@ def make_deps(
     *,
     pve: FakePve | None = None,
     pbs: FakePbs | None = None,
-    power: FakePower | None = None,
-    reachable: bool | Callable[[], bool] = True,
-    pbs_idle: bool | Callable[[], bool] = True,
-    wol=None,
     notify=None,
     pves: dict[str, object] | None = None,
     pbss: dict[str, object] | None = None,
-) -> tuple[CycleDeps, FakePve, FakePbs, FakePower]:
+) -> tuple[CycleDeps, FakePve, FakePbs]:
     """Build a :class:`CycleDeps` wired to in-memory fakes.
 
-    ``pve``/``pbs``/``power`` serve the 0.9 config-shaped builders. ``pves``/``pbss`` map a
-    *device id* to its fake for the route-shaped ``connect_pve``/``connect_pbs``; a route
-    test with several sources gives one entry per device, and everything else falls back to
-    the single fake so no existing caller changes.
+    ``pves``/``pbss`` map a *device id* to its fake, so a route test with several sources
+    gives one entry per device; ``pve``/``pbs`` are the fallback every unlisted device
+    resolves to, which is all a single-source route needs.
     """
     pve = pve or FakePve()
     pbs = pbs or FakePbs()
-    power = power or FakePower()
-    # ``reachable`` / ``pbs_idle`` may each be a constant or a zero-arg callable, so a test
-    # can simulate the box coming up only after a retry (e.g. iter([False, True])) or an
-    # exception from the idle check.
-    wait = reachable if callable(reachable) else (lambda: reachable)
-    idle = pbs_idle if callable(pbs_idle) else (lambda: pbs_idle)
     deps = CycleDeps(
-        build_pve=lambda _c: pve,
-        build_pbs=lambda _c: pbs,
-        build_power=lambda _c: power,
-        send_wol=wol or (lambda _c: None),
-        # Second arg is the cancel probe the real _wait_reachable takes; fakes ignore it.
-        wait_reachable=lambda _c, _cancel=None: wait(),
-        wait_pbs_idle=lambda _c: idle(),
-        notify=notify or (lambda *_a: None),
         connect_pve=lambda device: (pves or {}).get(device.id, pve),
         connect_pbs=lambda device: (pbss or {}).get(device.id, pbs),
+        notify=notify or (lambda _ctx: None),
     )
-    return deps, pve, pbs, power
+    return deps, pve, pbs

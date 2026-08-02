@@ -68,10 +68,15 @@ def _deps(*, pbs1=None, pbs2=None, pve=None, notify=None, cancelled=None):
     return deps, pbs1, pbs2, pve
 
 
+#: The last context :func:`_run` produced (None when the run was cancelled). The cycle
+#: returns it instead of notifying — the service sends it once the leases are released.
+_ctx: list = []
+
+
 def _run(config: Config, deps, kind: RunKind = RunKind.SYNC) -> int:
     route = config.routes[0]
     with RunRecorder(kind, RunTrigger.MANUAL, route_id=route.id, route_name=route.name) as rec:
-        run_route(config, route, rec, deps)
+        _ctx.append(run_route(config, route, rec, deps))
         return rec.run_id
 
 
@@ -250,9 +255,9 @@ def test_external_watches_and_starts_nothing(temp_db):
 
 def test_external_uses_the_devices_own_timeouts(temp_db):
     config = _config("external")
-    # The device says "give up immediately" (see _config); the 0.9 global setting says 900s.
-    # Reading the wrong one would sit here for a quarter of an hour.
-    config.backup.external.first_task_wait = 900
+    # The route's *target* says "give up immediately" (see _config) while the other box keeps
+    # the 900s default. Reading the wrong device would sit here for a quarter of an hour.
+    config.pbss[1].external.first_task_wait = 900
     deps, *_ = _deps()
 
     run_id = _run(config, deps, kind=RunKind.MONITOR)
@@ -370,15 +375,16 @@ def test_a_missing_target_aborts(temp_db):
     assert _load(_run(config, deps, kind=RunKind.VERIFY))[0] == RunStatus.ABORTED
 
 
-def test_the_notification_carries_the_target_usage(temp_db):
-    sent: list[tuple] = []
+def test_the_notification_context_carries_the_target_usage(temp_db):
     config = _config("verify")
-    deps, *_ = _deps(notify=lambda *args: sent.append(args))
+    deps, *_ = _deps()
 
     _run(config, deps, kind=RunKind.VERIFY)
 
-    assert len(sent) == 1
-    assert sent[0][2].total == 8_000_000_000  # the datastore read, for the usage line
+    ctx = _ctx[-1]
+    assert ctx is not None
+    assert ctx.datastore.total == 8_000_000_000  # the datastore read, for the usage line
+    assert ctx.route.id == "r1"  # so the message can name it and honour routes[].notify
 
 
 # --- end to end through the queue (the lease owns the power) ------------------
@@ -399,12 +405,7 @@ def _service(*, fail: bool = False) -> tuple[JobService, FakeBox, dict]:
 
 
 def _drain(service: JobService) -> None:
-    service.enqueue(
-        "r1",
-        RunTrigger.MANUAL,
-        lambda config, recorder, deps: run_route(config, config.routes[0], recorder, deps),
-        kind=RunKind.SYNC,
-    )
+    service.run_route("r1", RunTrigger.MANUAL)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         if service.current() is None and not service.pending() and not service.is_running:

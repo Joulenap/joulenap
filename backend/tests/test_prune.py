@@ -111,7 +111,7 @@ def test_zero_retention_disables_pruning(temp_db):
 
 
 def test_service_run_prune_uses_configured_retention(temp_config, temp_db):
-    deps, _pve, _pbs, _power = make_deps()
+    deps, *_ = make_deps()
     store = ConfigStore.load_or_create()
     store.config.maintenance.history.retention_days = 14
     service = JobService(store, deps=deps)

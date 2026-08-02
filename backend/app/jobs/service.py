@@ -4,15 +4,14 @@
 logic. A non-reentrant lock guarantees only **one** run is ever in flight, so a manual run
 can't collide with a scheduled one.
 
-Route runs go through :meth:`JobService.enqueue`: they queue instead of being rejected
+Everything goes through :meth:`JobService.enqueue`: runs queue instead of being rejected
 (per-route schedules mean two routes can fire minutes apart) and each one takes a
 :class:`~.lease.PowerLease` on the PBS devices it touches, so a shared box is woken once
-and powered off only after the last route that needs it.
+and powered off only after the last run that needs it.
 
-ponytail: two admission paths coexist during the overhaul — the queue, and the 0.9
-``_run``/``_submit`` entry points below, which still 409 when busy. Both take the same
-``_lock``, so they serialise correctly against each other; the 0.9 half goes away with the
-scheduler/API port in M07.
+The service also owns the two things a cycle deliberately doesn't: the wake/power-off
+steps in the run's timeline (the lease decides them, so it records them) and the result
+notification, sent last so it can report whether the box actually went back to sleep.
 """
 
 from __future__ import annotations
@@ -23,22 +22,26 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Any
 
 from ..config import Config, PbsDevice, Route
 from ..core.config_store import ConfigStore
 from ..db import session_scope
-from ..db.models import RunKind, RunStatus, RunTrigger
+from ..db.models import LogLevel, RunKind, RunStatus, RunTrigger, StepName, StepStatus
 from ..db.prune import PruneResult, prune_history
-from .backup_cycle import run_backup_cycle, run_gc_cycle, run_monitor_cycle, run_verify_cycle
+from ..notify.messages import RunContext
 from .deps import CycleDeps
 from .lease import LeaseDeps, PbsUnreachableError, PowerLease
 from .recorder import RunRecorder
+from .route_cycle import RUN_KINDS, run_pbs_maintenance, run_route
 
 log = logging.getLogger("joulenap.jobs")
 
-# What a queued run actually does once its PBS devices are awake. The cycles in
-# backup_cycle.py have this shape; M05 supplies the route-aware ones.
-CycleJob = Callable[[Config, RunRecorder, CycleDeps], None]
+#: What a queued run actually does once its PBS devices are awake. ``subject`` is the
+#: :class:`~..config.Route` for a route run and the :class:`~..config.PbsDevice` for an
+#: ad-hoc one — whichever the entry names. It returns the context to notify with, or
+#: ``None`` to say nothing (the user cancelled), and sets the run's final status itself.
+CycleJob = Callable[[Config, Any, RunRecorder, CycleDeps], "RunContext | None"]
 
 
 class AlreadyRunningError(RuntimeError):
@@ -54,12 +57,18 @@ class AlreadyQueuedError(AlreadyRunningError):
 
 @dataclass
 class QueuedRun:
-    """One entry in the run queue."""
+    """One entry in the run queue.
 
-    route_id: str
+    ``key`` is what "already queued" means: a route's id, or ``pbs:<id>:gc`` for an ad-hoc
+    maintenance run. Exactly one of ``route_id`` / ``pbs_id`` names what the run is about.
+    """
+
+    key: str
     trigger: RunTrigger
     kind: RunKind
     job: CycleJob
+    route_id: str | None = None
+    pbs_id: str | None = None
     # The manual "power off when finished" toggle; a scheduled run always wants it on.
     power_off: bool = True
     run_id: int | None = None  # assigned when the run actually starts
@@ -129,38 +138,78 @@ class JobService:
 
     # --- run queue -----------------------------------------------------------
 
-    def enqueue(
-        self,
-        route_id: str,
-        trigger: RunTrigger,
-        job: CycleJob,
-        *,
-        kind: RunKind = RunKind.CYCLE,
-        power_off: bool = True,
-    ) -> int:
-        """Queue a run of ``route_id``. Returns how many runs are ahead of it (0 = it starts
-        now).
+    def enqueue(self, item: QueuedRun) -> int:
+        """Queue a run. Returns how many runs are ahead of it (0 = it starts now).
 
         Runs still execute strictly one at a time — serialisation is the design, not a
-        limitation. Raises :class:`AlreadyQueuedError` if that route is already queued or
-        running: two overlapping runs of the same route would fight over the same snapshots.
+        limitation. Raises :class:`AlreadyQueuedError` if the same subject is already queued
+        or running: two overlapping runs of one route would fight over the same snapshots.
         """
-        item = QueuedRun(
-            route_id=route_id, trigger=trigger, kind=kind, job=job, power_off=power_off
-        )
         with self._state_lock:
-            if self._current is not None and self._current.route_id == route_id:
-                raise AlreadyQueuedError(f"Route '{route_id}' is already running")
-            if any(queued.route_id == route_id for queued in self._queue):
-                raise AlreadyQueuedError(f"Route '{route_id}' is already queued")
+            if self._current is not None and self._current.key == item.key:
+                raise AlreadyQueuedError(f"'{item.key}' is already running")
+            if any(queued.key == item.key for queued in self._queue):
+                raise AlreadyQueuedError(f"'{item.key}' is already queued")
             ahead = len(self._queue) + (1 if self._current is not None or self.is_running else 0)
             # Start the worker first: it blocks on ``_state_lock`` (which we hold) before
             # looking at the queue, so it can't see the empty deque and exit — and if the
             # thread fails to start, nothing was queued.
             self._ensure_worker()
             self._queue.append(item)
-        log.info("Queued route '%s' (%s), %d run(s) ahead", route_id, trigger.value, ahead)
+        log.info("Queued '%s' (%s), %d run(s) ahead", item.key, item.trigger.value, ahead)
         return ahead
+
+    def run_route(
+        self,
+        route_id: str,
+        trigger: RunTrigger = RunTrigger.MANUAL,
+        *,
+        power_off: bool = True,
+    ) -> int:
+        """Queue a run of one route. Raises ``KeyError`` if no such route is configured."""
+        route = next((r for r in self._store.config.routes if r.id == route_id), None)
+        if route is None:
+            raise KeyError(route_id)
+        return self.enqueue(
+            QueuedRun(
+                key=route.id,
+                route_id=route.id,
+                trigger=trigger,
+                # An unknown kind still gets a run row (CYCLE) so the failure is recorded and
+                # visible; run_route aborts it with a reason rather than raising into nothing.
+                kind=RUN_KINDS.get(route.kind, RunKind.CYCLE),
+                job=run_route,
+                power_off=power_off,
+            )
+        )
+
+    def run_maintenance(
+        self,
+        pbs_id: str,
+        action: str,
+        trigger: RunTrigger = RunTrigger.MANUAL,
+        *,
+        power_off: bool = True,
+    ) -> int:
+        """Queue an ad-hoc GC or verify on one PBS, outside any route.
+
+        Raises ``KeyError`` for an unknown device and ``ValueError`` for an unknown action.
+        """
+        if action not in ("gc", "verify"):
+            raise ValueError(action)
+        device = next((p for p in self._store.config.pbss if p.id == pbs_id), None)
+        if device is None:
+            raise KeyError(pbs_id)
+        return self.enqueue(
+            QueuedRun(
+                key=f"pbs:{pbs_id}:{action}",
+                pbs_id=pbs_id,
+                trigger=trigger,
+                kind=RunKind.GC if action == "gc" else RunKind.VERIFY,
+                job=lambda c, s, r, d: run_pbs_maintenance(c, s, r, d, action=action),
+                power_off=power_off,
+            )
+        )
 
     def pending(self) -> list[QueuedRun]:
         """The queued (not yet started) runs, in order. The running one is ``current()``."""
@@ -172,24 +221,25 @@ class JobService:
         with self._state_lock:
             return self._current
 
-    def dequeue(self, route_id: str) -> bool:
-        """Drop a *queued* route. False if it isn't queued — a run already in flight is
+    def dequeue(self, key: str) -> bool:
+        """Drop a *queued* entry. False if it isn't queued — a run already in flight is
         stopped with :meth:`cancel`, not dequeued."""
         with self._state_lock:
             for item in self._queue:
-                if item.route_id == route_id:
+                if item.key == key:
                     self._queue.remove(item)
-                    log.info("Dequeued route '%s'", route_id)
+                    log.info("Dequeued '%s'", key)
                     return True
         return False
 
     def _pending_pbs_ids(self) -> set[str]:
         """Which PBS devices the queued runs still need, so the lease doesn't power one down
-        seconds before the next route needs it."""
-        queued = {item.route_id for item in self.pending()}
-        ids: set[str] = set()
+        seconds before the next run needs it."""
+        pending = self.pending()
+        ids = {item.pbs_id for item in pending if item.pbs_id}
+        queued_routes = {item.route_id for item in pending if item.route_id}
         for route in self._store.config.routes:
-            if route.id in queued:
+            if route.id in queued_routes:
                 ids.add(route.target)
                 if route.source_pbs:
                     ids.add(route.source_pbs)
@@ -228,31 +278,30 @@ class JobService:
                     self._current = None
 
     def _execute(self, item: QueuedRun) -> None:
-        """Take the route's power leases, run its job, then release them under the policy."""
-        config = self._store.config  # one snapshot: the route and its devices must agree
-        route = next((r for r in config.routes if r.id == item.route_id), None)
-        if route is None:
-            log.warning("Route '%s' was deleted before its run started; dropped", item.route_id)
-            return
-        devices = self._route_devices(config, route)
-        if devices is None:
-            return
+        """Take the run's power leases, do its job, release them, then notify.
 
-        recorder, _ = self._start(item.kind, item.trigger, blocking=True, route=route)
+        The whole run — wake, work, power-off, notification — lives inside one
+        ``with recorder:`` block so every phase lands in the same timeline and the message
+        goes out last, when whether the box went back to sleep is finally known.
+        """
+        config = self._store.config  # one snapshot: the subject and its devices must agree
+        resolved = self._resolve(config, item)
+        if resolved is None:
+            return
+        subject, devices = resolved
+
+        route = subject if isinstance(subject, Route) else None
+        recorder = self._start(item.kind, item.trigger, route)
         item.run_id = recorder.run_id
         held: list[PbsDevice] = []
-        succeeded = False
         try:
             with recorder:
                 log.info(
-                    "Starting %s run for route '%s' (%s)",
-                    item.kind.value,
-                    route.id,
-                    item.trigger.value,
+                    "Starting %s run for '%s' (%s)", item.kind.value, item.key, item.trigger.value
                 )
                 try:
                     for device in devices:
-                        self.lease.acquire(device)
+                        self._acquire_step(device, recorder, multi=len(devices) > 1)
                         held.append(device)
                 except PbsUnreachableError as exc:
                     # A cancel abandons the wake wait the same way a timeout does, so say
@@ -262,21 +311,37 @@ class JobService:
                     else:
                         recorder.finish(RunStatus.FAILURE, error=str(exc))
                     raise
-                item.job(config, recorder, self.deps)
-                # The cycle sets the run's final status itself; read it while the recorder's
-                # session is still open.
-                succeeded = recorder.run.status == RunStatus.SUCCESS
+                # The cycle sets the run's final status itself and hands back what to say
+                # about it (None = cancelled, say nothing).
+                ctx = item.job(config, subject, recorder, self.deps)
+                self._release_all(item, held, recorder)
+                held = []
+                if ctx is not None:
+                    self._notify(ctx, recorder)
         finally:
-            power_off = self._power_off_policy(item, succeeded=succeeded)
-            for device in held:
-                # Independently: a sync route holds two leases and each box may have a
-                # different answer (another queued route, unmanaged power).
-                self.lease.release(device, power_off=power_off)
+            # Only reached with leases still held when the job raised out of the block.
+            self._release_all(item, held, recorder=None)
             self._lock.release()
 
-    def _route_devices(self, config: Config, route: Route) -> list[PbsDevice] | None:
-        """The PBS devices a route needs awake — its target, plus the source of a sync route.
-        None if one of them no longer exists (the run is skipped rather than half-run)."""
+    def _resolve(
+        self, config: Config, item: QueuedRun
+    ) -> tuple[Route | PbsDevice, list[PbsDevice]] | None:
+        """What this entry is about, and the PBS devices it needs awake.
+
+        A route needs its target plus, for a sync, its source. ``None`` means the subject
+        was deleted between queueing and starting — the run is skipped rather than half-run.
+        """
+        if item.pbs_id is not None:
+            device = next((p for p in config.pbss if p.id == item.pbs_id), None)
+            if device is None:
+                log.warning("PBS '%s' was deleted before its run started; dropped", item.pbs_id)
+                return None
+            return device, [device]
+
+        route = next((r for r in config.routes if r.id == item.route_id), None)
+        if route is None:
+            log.warning("Route '%s' was deleted before its run started; dropped", item.route_id)
+            return None
         devices: list[PbsDevice] = []
         for pbs_id in [route.target, *([route.source_pbs] if route.source_pbs else [])]:
             device = next((p for p in config.pbss if p.id == pbs_id), None)
@@ -284,7 +349,55 @@ class JobService:
                 log.error("Route '%s' points at unknown pbs '%s'; run skipped", route.id, pbs_id)
                 return None
             devices.append(device)
-        return devices
+        return route, devices
+
+    def _acquire_step(self, device: PbsDevice, recorder: RunRecorder, *, multi: bool) -> None:
+        """Take the lease on one device, recorded as a WAIT step so the wake shows up in the
+        run's timeline (and the "PBS left powered on" warning has something to key on).
+
+        Labelled by device only when the run touches more than one box: a sync route's
+        timeline needs to say *which* PBS, a backup route's doesn't.
+        """
+        with recorder.step(StepName.WAIT, label=device.id if multi else None) as step:
+            was_awake = self.lease.acquire(device)
+            step.detail = "already awake" if was_awake else "woken by Wake-on-LAN"
+
+    def _release_all(
+        self, item: QueuedRun, devices: list[PbsDevice], recorder: RunRecorder | None
+    ) -> None:
+        """Drop every lease this run holds, recording each power-off decision.
+
+        Devices are released independently: a sync route holds two leases and each box may
+        have a different answer (another holder, a queued route, unmanaged power).
+        ``recorder=None`` is the crash path — the leases must still be dropped, but the run
+        row is already being finalised, so there is nothing left to record against.
+        """
+        succeeded = recorder is not None and recorder.run.status == RunStatus.SUCCESS
+        power_off = self._power_off_policy(item, succeeded=succeeded)
+        multi = len(devices) > 1
+        for device in devices:
+            if recorder is None:
+                self.lease.release(device, power_off=power_off)
+                continue
+            with recorder.step(StepName.POWEROFF, label=device.id if multi else None) as step:
+                if self.lease.release(device, power_off=power_off):
+                    continue
+                # Not a failure: leaving the box on is the *correct* outcome after a failed
+                # run, for an unmanaged device, or while another route still needs it. The
+                # notification's "PBS left powered on" warning keys on this step not being
+                # SUCCESS, so the user still hears about it when it costs them power.
+                step.status = StepStatus.SKIPPED
+                step.detail = "left powered on"
+
+    def _notify(self, ctx: RunContext, recorder: RunRecorder) -> None:
+        """Send the result notification. A delivery failure is logged, never fatal — the run
+        has already completed and its recorded status must not depend on the notifier."""
+        if ctx.route is not None:
+            ctx.next_at = self.deps.next_run(ctx.route.id)
+        try:
+            self.deps.notify(ctx)
+        except Exception as exc:  # noqa: BLE001 - a broken channel must not fail the run
+            recorder.log(LogLevel.WARN, f"notification failed: {exc}")
 
     def _power_off_policy(self, item: QueuedRun, *, succeeded: bool) -> bool:
         """Whether *this run* wants its PBS devices powered off. The lease still has the last
@@ -298,53 +411,6 @@ class JobService:
         if self._cancel.is_set():
             return self._cancel_power_off
         return succeeded
-
-    # --- blocking entry points (internal / tests) ----------------------------
-
-    def _backup_slot(self):
-        """``(RunKind, cycle fn)`` for the backup slot: the full backup cycle, or — in
-        external-schedules mode — the watch cycle (wake -> watch PVE/PBS's own jobs ->
-        power off). One switch here covers the scheduler fire, the REST "run now" and the
-        blocking test entry point alike."""
-        if self._store.config.backup.external.enabled:
-            return RunKind.MONITOR, run_monitor_cycle
-        return RunKind.CYCLE, run_backup_cycle
-
-    def run_backup(
-        self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True
-    ) -> int:
-        """Run the backup slot's cycle to completion. Returns the run id."""
-        kind, cycle = self._backup_slot()
-        return self._run(kind, trigger, lambda c, r, d: cycle(c, r, d, power_off=power_off))
-
-    def run_gc(self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True) -> int:
-        """Run a full GC cycle (wake -> GC -> power-off) to completion. Returns the run id."""
-        return self._run(
-            RunKind.GC, trigger, lambda c, r, d: run_gc_cycle(c, r, d, power_off=power_off)
-        )
-
-    def run_verify(self, trigger: RunTrigger = RunTrigger.MANUAL) -> int:
-        """Run a full verification cycle (wake -> verify -> power-off). Returns the run id."""
-        return self._run(RunKind.VERIFY, trigger, run_verify_cycle)
-
-    # --- non-blocking entry points (HTTP / scheduler) ------------------------
-
-    def submit_backup(
-        self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True
-    ) -> int:
-        """Start the backup slot's cycle in the background; return its run id immediately."""
-        kind, cycle = self._backup_slot()
-        return self._submit(kind, trigger, lambda c, r, d: cycle(c, r, d, power_off=power_off))
-
-    def submit_gc(self, trigger: RunTrigger = RunTrigger.MANUAL, *, power_off: bool = True) -> int:
-        """Start a full GC cycle in the background; return its run id immediately."""
-        return self._submit(
-            RunKind.GC, trigger, lambda c, r, d: run_gc_cycle(c, r, d, power_off=power_off)
-        )
-
-    def submit_verify(self, trigger: RunTrigger = RunTrigger.MANUAL) -> int:
-        """Start a full verification cycle in the background; return its run id immediately."""
-        return self._submit(RunKind.VERIFY, trigger, run_verify_cycle)
 
     # --- history pruning -----------------------------------------------------
 
@@ -369,25 +435,18 @@ class JobService:
     # --- internals -----------------------------------------------------------
 
     def _start(
-        self,
-        kind: RunKind,
-        trigger: RunTrigger,
-        *,
-        blocking: bool = False,
-        route: Route | None = None,
-    ) -> tuple[RunRecorder, object]:
-        """Acquire the single-run lock and create the run row. Caller owns the lock.
+        self, kind: RunKind, trigger: RunTrigger, route: Route | None
+    ) -> RunRecorder:
+        """Wait for the single-run lock and create the run row. Caller owns the lock.
 
-        ``blocking`` is for the queue worker, whose whole job is to wait its turn; every
-        other caller wants the immediate AlreadyRunningError.
+        Blocking is the point: the queue worker's whole job is to wait its turn. Anything
+        that must *not* wait (a manual power-off) takes the lock through :meth:`exclusive`.
         """
-        if not self._lock.acquire(blocking=blocking):
-            raise AlreadyRunningError("A backup or GC run is already in progress")
+        self._lock.acquire()
         try:
             # Clear any cancel left over from the previous run before this one can observe it.
             self._cancel.clear()
             self._cancel_power_off = False
-            config = self._store.config  # read live config at run time
             recorder = RunRecorder(
                 kind,
                 trigger,
@@ -398,40 +457,4 @@ class JobService:
         except BaseException:
             self._lock.release()
             raise
-        return recorder, config
-
-    def _run(self, kind: RunKind, trigger: RunTrigger, job) -> int:
-        recorder, config = self._start(kind, trigger)
-        try:
-            with recorder:
-                log.info("Starting %s run (%s)", kind.value, trigger.value)
-                job(config, recorder, self.deps)
-                return recorder.run_id
-        finally:
-            self._lock.release()
-
-    def _submit(self, kind: RunKind, trigger: RunTrigger, job) -> int:
-        recorder, config = self._start(kind, trigger)
-        run_id = recorder.run_id
-
-        def worker() -> None:
-            try:
-                with recorder:
-                    log.info("Starting %s run (%s)", kind.value, trigger.value)
-                    job(config, recorder, self.deps)
-            finally:
-                self._lock.release()
-
-        try:
-            threading.Thread(target=worker, name=f"joulenap-{kind.value}", daemon=True).start()
-        except BaseException:
-            # The worker (and its lock-release + recorder finalisation) never runs, so do it
-            # here — otherwise the run is stuck RUNNING and the single-run lock is held forever,
-            # 409-ing every later run until restart (BE-B6).
-            try:
-                recorder.finish(RunStatus.FAILURE, error="worker thread failed to start")
-            finally:
-                recorder.close()
-                self._lock.release()
-            raise
-        return run_id
+        return recorder

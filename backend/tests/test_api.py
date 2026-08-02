@@ -1,4 +1,7 @@
-"""Milestone 4 REST routers: status, config, guests, scheduler, jobs, wol, logs."""
+"""REST routers: status, config, scheduler toggle, guests, runs/logs, account, dashboard.
+
+Route and device CRUD live in test_api_routes.py / test_api_devices.py.
+"""
 
 from __future__ import annotations
 
@@ -6,21 +9,22 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from fakes import FakePve, UnreachablePve, make_deps
+from fakes import FakeBox, FakePve, UnreachablePve, make_deps
 from fastapi.testclient import TestClient
 
 from app.config import load_config
 from app.connectors.pve import Guest
 from app.db import session_scope
+from app.db.datastore_stats import get_datastore_stat, upsert_datastore_stat
 from app.db.models import Run, RunKind, RunStatus, RunTrigger
-from app.jobs import AlreadyRunningError, JobService
+from app.jobs import JobService
 from app.main import create_app
 
 
 @pytest.fixture
 def app_ctx(temp_config, temp_db, monkeypatch):
-    """Authenticated TestClient + app. PBS reachability is stubbed off by default so
-    status/cycle tests don't touch the network; inject fake job deps per test."""
+    """Authenticated TestClient + app. Device reachability is stubbed off by default so
+    status tests don't touch the network; inject fake job deps per test."""
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: False)
     app = create_app()
     with TestClient(app) as client:
@@ -29,10 +33,16 @@ def app_ctx(temp_config, temp_db, monkeypatch):
 
 
 def _inject(app, **deps_kwargs):
-    """Swap app.state.job_service for one wired to in-memory connector fakes."""
-    deps, pve, pbs, power = make_deps(**deps_kwargs)
-    app.state.job_service = JobService(app.state.config_store, deps=deps)
-    return pve, pbs, power
+    """Swap app.state.job_service for one wired to in-memory connector fakes.
+
+    The power lease gets a FakeBox too: without it a queued run would send real magic
+    packets and then sit through the wake timeout.
+    """
+    deps, pve, pbs = make_deps(**deps_kwargs)
+    app.state.job_service = JobService(
+        app.state.config_store, deps=deps, lease_deps=FakeBox().deps()
+    )
+    return pve, pbs
 
 
 def _wait_run(client, run_id, *, timeout=5.0):
@@ -52,10 +62,12 @@ def _wait_run(client, run_id, *, timeout=5.0):
 def test_protected_endpoints_require_auth(temp_config, temp_db):
     with TestClient(create_app()) as client:
         for path in ("/api/status", "/api/config", "/api/guests", "/api/runs",
-                     "/api/logs", "/api/tasklog"):
+                     "/api/logs", "/api/tasklog", "/api/routes", "/api/devices"):
             assert client.get(path).status_code == 401, path
-        for path in ("/api/backup/run", "/api/gc/run", "/api/power/on", "/api/power/off",
-                     "/api/notify/test", "/api/scheduler/toggle", "/api/wol/test"):
+        for path in ("/api/routes", "/api/routes/nightly/run", "/api/runs/1/stop",
+                     "/api/devices/pbss", "/api/devices/pbss/pbs-01/power",
+                     "/api/devices/pbss/pbs-01/gc", "/api/devices/pbss/pbs-01/test",
+                     "/api/notify/test", "/api/scheduler/toggle", "/api/wizard/wol/test"):
             assert client.post(path).status_code == 401, path
 
 
@@ -74,24 +86,85 @@ def test_login_locks_out_after_repeated_failures(app_ctx):
 def test_status_shape(app_ctx):
     client, _app = app_ctx
     body = client.get("/api/status").json()
-    assert body["scheduler_enabled"] is True  # example config enables backups
-    assert body["job_running"] is False
-    assert body["running_kind"] is None  # nothing in flight
-    assert body["pbs_online"] is False
+    assert body["state"] == "idle"
+    assert body["scheduler_enabled"] is True
+    assert body["running"] is None and body["queued"] == []
     assert body["last_run"] is None
-    assert "next_run" in body and "schedule" in body
+    # One entry per configured device, for the topology.
+    assert [d["id"] for d in body["pves"]] == ["pve-alpha", "pve-beta"]
+    assert [d["id"] for d in body["pbss"]] == ["pbs-01", "pbs-02"]
+    assert all(d["online"] is False for d in body["pbss"])  # stubbed unreachable
 
 
-def test_status_running_kind_reflects_in_progress_run(app_ctx):
-    """A RUNNING run surfaces its kind so the header pill can label GC/verify
-    correctly instead of always saying 'Backup running' (UX-6)."""
+def test_status_lists_the_next_run_of_every_armed_route(app_ctx):
+    client, _app = app_ctx
+    body = client.get("/api/status").json()
+    assert {r["route_id"] for r in body["next_runs"]} == {"nightly", "lab", "offsite"}
+    assert body["next_runs"][0]["route_name"]  # named, so the rail needs no second call
+    # Soonest first: the rail renders them in order.
+    times = [r["at"] for r in body["next_runs"]]
+    assert times == sorted(times)
+
+
+def test_status_pill_says_paused_when_the_kill_switch_is_off(app_ctx):
+    client, app = app_ctx
+    app.state.config_store.update(lambda c: setattr(c.app, "scheduler_enabled", False))
+    body = client.get("/api/status").json()
+    assert body["state"] == "paused"
+    assert body["scheduler_enabled"] is False
+
+
+def test_status_running_names_the_route_in_flight(app_ctx):
+    """The pill says "Running · <route>", so the run row has to carry which one."""
     client, _app = app_ctx
     with session_scope() as s:
-        s.add(Run(kind=RunKind.GC, trigger=RunTrigger.MANUAL, status=RunStatus.RUNNING,
-                  started_at=datetime.now(UTC)))
+        s.add(
+            Run(
+                kind=RunKind.CYCLE,
+                trigger=RunTrigger.SCHEDULED,
+                status=RunStatus.RUNNING,
+                started_at=datetime.now(UTC),
+                route_id="nightly",
+                route_name="Nightly",
+            )
+        )
 
     body = client.get("/api/status").json()
-    assert body["running_kind"] == "gc"
+    assert body["state"] == "running"
+    assert body["running"]["route_name"] == "Nightly"
+    assert body["running"]["kind"] == "cycle"
+
+
+def test_status_reports_the_queue(app_ctx):
+    client, app = app_ctx
+    _inject(app)
+    service = app.state.job_service
+    # Park a run so a second one stays queued behind it.
+    import threading
+
+    from app.db.models import RunTrigger as _T
+    from app.jobs.service import QueuedRun
+
+    release = threading.Event()
+    started = threading.Event()
+
+    def parked(_c, _s, recorder, _d):
+        started.set()
+        release.wait(timeout=5)
+        recorder.finish(RunStatus.SUCCESS)
+
+    service.enqueue(
+        QueuedRun(key="nightly", route_id="nightly", trigger=_T.MANUAL,
+                  kind=RunKind.CYCLE, job=parked)
+    )
+    assert started.wait(timeout=5)
+    try:
+        service.run_route("offsite")
+        body = client.get("/api/status").json()
+        assert [q["key"] for q in body["queued"]] == ["offsite"]
+        assert body["pbss"][0]["holders"] == 1  # the lease the running route holds
+    finally:
+        release.set()
 
 
 # --- config ------------------------------------------------------------------
@@ -100,118 +173,86 @@ def test_status_running_kind_reflects_in_progress_run(app_ctx):
 def test_config_get_redacts_secrets(app_ctx):
     client, _app = app_ctx
     cfg = client.get("/api/config").json()
-    assert cfg["pve"]["api_token_secret"] == "***REDACTED***"
+    assert cfg["pves"][0]["api_token_secret"] == "***REDACTED***"
     assert cfg["app"]["secret_key"] == "***REDACTED***"
 
 
 def test_config_put_preserves_redacted_secrets_and_rearms(app_ctx, temp_config):
     client, _app = app_ctx
     cfg = client.get("/api/config").json()
-    cfg["backup"]["schedule"] = "30 2 * * *"  # change a non-secret; secrets stay REDACTED
+    cfg["routes"][0]["schedule"]["time"] = "03:30"  # non-secret; secrets stay REDACTED
 
     r = client.put("/api/config", json=cfg)
     assert r.status_code == 200
 
     on_disk = load_config(temp_config)
-    assert on_disk.backup.schedule == "30 2 * * *"
+    assert on_disk.routes[0].schedule.time == "03:30"
     # The real secret survived the round-trip rather than being overwritten with REDACTED.
-    assert on_disk.pve.api_token_secret == "test-pve-secret"
+    assert on_disk.pves[0].api_token_secret == "test-pve-secret"
     assert on_disk.app.secret_key not in ("", "***REDACTED***")
 
 
 def test_config_put_sets_new_secret(app_ctx, temp_config):
     client, _app = app_ctx
     cfg = client.get("/api/config").json()
-    cfg["pve"]["api_token_secret"] = "brand-new-secret"
+    cfg["pves"][0]["api_token_secret"] = "brand-new-secret"
 
     assert client.put("/api/config", json=cfg).status_code == 200
-    assert load_config(temp_config).pve.api_token_secret == "brand-new-secret"
+    assert load_config(temp_config).pves[0].api_token_secret == "brand-new-secret"
 
 
 def test_config_put_rejects_invalid(app_ctx):
     client, _app = app_ctx
     cfg = client.get("/api/config").json()
-    cfg["backup"]["mode"] = "not-a-mode"
+    cfg["routes"][0]["options"]["mode"] = "not-a-mode"
     assert client.put("/api/config", json=cfg).status_code == 422
 
 
-def test_config_put_rejects_invalid_backup_schedule(app_ctx, temp_config):
-    # A newly-set unparseable cron must 422 before persisting, not 500 the rearm and then
-    # brick the next startup (BE-B1).
+def test_config_put_rejects_an_invalid_route_cron(app_ctx, temp_config):
+    # A newly-set unparseable cron must 422 before persisting, not leave the route silently
+    # unarmed on every restart (BE-B1).
     client, _app = app_ctx
-    before = load_config(temp_config).backup.schedule
-    r = client.put("/api/config", json={"backup": {"schedule": "0 4 * *"}})  # 4 fields
+    cfg = client.get("/api/config").json()
+    cfg["routes"][0]["schedule"]["cron"] = "0 4 * *"  # 4 fields
+    r = client.put("/api/config", json={"routes": cfg["routes"]})
     assert r.status_code == 422
-    # Nothing was written: the old (valid) schedule is intact on disk.
-    assert load_config(temp_config).backup.schedule == before
+    # Nothing was written: the route on disk is untouched.
+    assert load_config(temp_config).routes[0].schedule.cron == ""
 
 
 def test_config_put_rejects_invalid_mac(app_ctx, temp_config):
     # A newly-set malformed WoL MAC must 422 before persisting, not fail silently at wake
     # time (BE-C2). "00:11:22:33:44" is only 5 octets.
     client, _app = app_ctx
-    before = load_config(temp_config).pbs.mac
-    r = client.put("/api/config", json={"pbs": {"mac": "00:11:22:33:44"}})
+    before = load_config(temp_config).pbss[0].mac
+    cfg = client.get("/api/config").json()
+    cfg["pbss"][0]["mac"] = "00:11:22:33:44"
+    r = client.put("/api/config", json={"pbss": cfg["pbss"]})
     assert r.status_code == 422
-    assert "pbs.mac" in str(r.json()["detail"])
-    assert load_config(temp_config).pbs.mac == before  # nothing written
+    assert "pbs-01" in str(r.json()["detail"])  # says which device
+    assert load_config(temp_config).pbss[0].mac == before  # nothing written
 
 
 def test_config_put_accepts_valid_mac(app_ctx, temp_config):
     client, _app = app_ctx
-    r = client.put("/api/config", json={"pbs": {"mac": "aa-bb-cc-dd-ee-ff"}})
+    cfg = client.get("/api/config").json()
+    cfg["pbss"][0]["mac"] = "aa-bb-cc-dd-ee-ff"
+    r = client.put("/api/config", json={"pbss": cfg["pbss"]})
     assert r.status_code == 200
-    assert load_config(temp_config).pbs.mac == "aa-bb-cc-dd-ee-ff"
+    assert load_config(temp_config).pbss[0].mac == "aa-bb-cc-dd-ee-ff"
 
 
 def test_config_put_partial_body_preserves_secrets(app_ctx, temp_config):
     client, _app = app_ctx
     before = load_config(temp_config)
-    # A partial body (only backup.schedule) must not reset anything else.
-    r = client.put("/api/config", json={"backup": {"schedule": "15 5 * * *"}})
+    # A partial body (only the history window) must not reset anything else.
+    r = client.put("/api/config", json={"maintenance": {"history": {"retention_days": 30}}})
     assert r.status_code == 200
-
     after = load_config(temp_config)
-    assert after.backup.schedule == "15 5 * * *"
-    assert after.backup.mode == before.backup.mode              # untouched within section
-    assert after.pve.api_token_secret == "test-pve-secret"      # secret survived
+    assert after.maintenance.history.retention_days == 30
+    assert after.pves[0].api_token_secret == before.pves[0].api_token_secret
+    assert after.pbss[0].api_token_secret == before.pbss[0].api_token_secret
     assert after.app.secret_key == before.app.secret_key
-    assert after.app.auth.password_hash == before.app.auth.password_hash
-    assert after.app.auth.username == before.app.auth.username
-
-
-def test_config_put_ignores_client_managed_secrets(app_ctx, temp_config):
-    client, _app = app_ctx
-    before = load_config(temp_config)
-    cfg = client.get("/api/config").json()
-    cfg["app"]["secret_key"] = "attacker-known-key"
-    cfg["app"]["auth"]["password_hash"] = ""   # attempt to reset to first-run
-    assert client.put("/api/config", json=cfg).status_code == 200
-
-    after = load_config(temp_config)
-    assert after.app.secret_key == before.app.secret_key
-    assert after.app.auth.password_hash == before.app.auth.password_hash
-    # Not dropped back to open first-run setup.
-    assert client.get("/api/auth/status").json()["setup_needed"] is False
-
-
-def test_config_put_custom_urls_replace_keep_and_mixed(app_ctx, temp_config):
-    client, _app = app_ctx
-    cfg = client.get("/api/config").json()
-    cfg["notifications"]["custom_urls"] = ["gotify://h/t1", "gotify://h/t2"]
-    assert client.put("/api/config", json=cfg).status_code == 200
-    assert load_config(temp_config).notifications.custom_urls == ["gotify://h/t1", "gotify://h/t2"]
-
-    # GET masks them; echoing the all-sentinel list back keeps the stored URLs.
-    masked = client.get("/api/config").json()
-    assert masked["notifications"]["custom_urls"] == ["***REDACTED***", "***REDACTED***"]
-    assert client.put("/api/config", json=masked).status_code == 200
-    assert load_config(temp_config).notifications.custom_urls == ["gotify://h/t1", "gotify://h/t2"]
-
-    # A mixed sentinel/real list is rejected rather than silently dropping an entry.
-    mixed = client.get("/api/config").json()
-    mixed["notifications"]["custom_urls"] = ["***REDACTED***", "gotify://h/t3"]
-    assert client.put("/api/config", json=mixed).status_code == 422
 
 
 # --- api-key management -------------------------------------------------------
@@ -251,48 +292,71 @@ def test_api_key_management_requires_auth(temp_config, temp_db):
 # --- scheduler toggle --------------------------------------------------------
 
 
-def test_scheduler_toggle_off(app_ctx, temp_config):
+def test_scheduler_toggle_off_disarms_everything(app_ctx, temp_config):
     client, _app = app_ctx
     body = client.post("/api/scheduler/toggle", json={"enabled": False}).json()
     assert body["enabled"] is False
-    assert body["next_run"] is None
-    assert load_config(temp_config).backup.enabled is False
+    assert body["next_runs"] == []  # the kill-switch really unarmed every route
+    assert load_config(temp_config).app.scheduler_enabled is False
+
+
+def test_scheduler_toggle_back_on_rearms_every_route(app_ctx):
+    client, _app = app_ctx
+    client.post("/api/scheduler/toggle", json={"enabled": False})
+    body = client.post("/api/scheduler/toggle", json={"enabled": True}).json()
+    assert {r["route_id"] for r in body["next_runs"]} == {"nightly", "lab", "offsite"}
 
 
 # --- guests ------------------------------------------------------------------
 
 
-def test_guests_lists_from_pve(app_ctx):
+def test_guests_lists_one_pves_cluster(app_ctx):
     client, app = app_ctx
     _inject(
         app,
-        pve=FakePve(
-            guests=[Guest(vmid=100, name="ct", type="lxc", status="running")]
-        ),
+        pves={
+            "pve-alpha": FakePve(
+                guests=[Guest(vmid=100, name="ct", type="lxc", status="running", node="n1")]
+            )
+        },
     )
-    guests = client.get("/api/guests").json()
+    guests = client.get("/api/guests?pve=pve-alpha").json()
     assert guests == [
-        {"vmid": 100, "name": "ct", "type": "lxc", "status": "running", "last_backup": None}
+        {
+            "vmid": 100,
+            "name": "ct",
+            "type": "lxc",
+            "status": "running",
+            "node": "n1",
+            "last_backup": None,
+        }
     ]
 
 
-def test_guests_include_cached_last_backup(app_ctx):
-    from datetime import UTC, datetime
+def test_guests_require_a_pve(app_ctx):
+    # vmids collide across PVEs, so "all the guests" is not a question with one answer.
+    client, _app = app_ctx
+    assert client.get("/api/guests").status_code == 422
+    assert client.get("/api/guests?pve=nope").status_code == 404
 
-    from app.db import session_scope
+
+def test_guests_include_cached_last_backup(app_ctx):
     from app.db.guest_backups import upsert_last_backups
 
     client, app = app_ctx
     _inject(
         app,
-        pve=FakePve(guests=[Guest(vmid=100, name="ct", type="lxc", status="running")]),
+        pves={
+            "pve-alpha": FakePve(
+                guests=[Guest(vmid=100, name="ct", type="lxc", status="running", node="n1")]
+            )
+        },
     )
     epoch = 1_700_000_000
     with session_scope() as session:
-        upsert_last_backups(session, "", "", {100: epoch})  # TODO(M05): real ids
+        upsert_last_backups(session, "pve-alpha", "pbs-01", {100: epoch})
 
-    guests = client.get("/api/guests").json()
-    assert guests[0]["last_backup"] is not None
+    guests = client.get("/api/guests?pve=pve-alpha").json()
     # Served as UTC-aware (with an offset) so the frontend converts it to local time.
     assert datetime.fromisoformat(guests[0]["last_backup"]) == datetime.fromtimestamp(
         epoch, tz=UTC
@@ -301,58 +365,14 @@ def test_guests_include_cached_last_backup(app_ctx):
 
 def test_guests_pve_unreachable_returns_502(app_ctx):
     client, app = app_ctx
-    deps, _pve, _pbs, _power = make_deps()
-    deps.build_pve = lambda _c: UnreachablePve()
-    app.state.job_service = JobService(app.state.config_store, deps=deps)
-    assert client.get("/api/guests").status_code == 502
+    _inject(app, pves={"pve-alpha": UnreachablePve()})
+    assert client.get("/api/guests?pve=pve-alpha").status_code == 502
 
 
-# --- wol test ----------------------------------------------------------------
+# --- stopping a run ----------------------------------------------------------
 
 
-def test_wol_test_sends(app_ctx):
-    client, app = app_ctx
-    calls: list[int] = []
-    _inject(app, wol=lambda _c: calls.append(1))
-    r = client.post("/api/wol/test")
-    assert r.status_code == 200 and r.json()["sent"] is True
-    assert calls == [1]
-
-
-def test_wol_test_no_mac_returns_400(app_ctx):
-    client, app = app_ctx
-    app.state.config_store.update(lambda cfg: setattr(cfg.pbs, "mac", ""))
-    assert client.post("/api/wol/test").status_code == 400
-
-
-# --- backup / gc run ---------------------------------------------------------
-
-
-def test_backup_run_records_and_completes(app_ctx):
-    client, app = app_ctx
-    _inject(app, reachable=True)  # fakes -> cycle succeeds quickly
-
-    r = client.post("/api/backup/run")
-    assert r.status_code == 202
-    run_id = r.json()["run_id"]
-
-    final = _wait_run(client, run_id)
-    assert final["kind"] == "cycle"
-    assert final["status"] == "success"
-    assert any(s["name"] == "poweroff" for s in final["steps"])
-    # Shows up in history and produced log lines.
-    assert run_id in [r["id"] for r in client.get("/api/runs").json()]
-    assert len(client.get("/api/logs").json()) > 0
-
-
-def test_gc_run_records(app_ctx):
-    client, app = app_ctx
-    _inject(app)
-    run_id = client.post("/api/gc/run").json()["run_id"]
-    assert _wait_run(client, run_id)["kind"] == "gc"
-
-
-def test_cancel_asks_the_service_to_stop_that_run(app_ctx):
+def test_stop_asks_the_service_to_cancel_that_run(app_ctx):
     client, app = app_ctx
     seen = {}
 
@@ -362,41 +382,53 @@ def test_cancel_asks_the_service_to_stop_that_run(app_ctx):
 
     app.state.job_service.cancel = fake_cancel
 
-    r = client.post("/api/jobs/cancel", json={"run_id": 7, "power_off": True})
+    r = client.post("/api/runs/7/stop", json={"power_off": True})
     assert r.status_code == 202
     assert r.json() == {"run_id": 7}
     assert seen["args"] == (7, True)
 
 
-def test_cancel_defaults_to_leaving_the_pbs_on(app_ctx):
+def test_stop_defaults_to_leaving_the_pbs_on(app_ctx):
     client, app = app_ctx
     seen = {}
     app.state.job_service.cancel = lambda run_id, *, power_off=False: seen.update(
         power_off=power_off
     ) or True
 
-    client.post("/api/jobs/cancel", json={"run_id": 7})
+    client.post("/api/runs/7/stop")
     assert seen["power_off"] is False
 
 
-def test_cancel_conflicts_when_that_run_is_not_in_flight(app_ctx):
+def test_stop_conflicts_when_that_run_is_not_in_flight(app_ctx):
     # e.g. the click landed just after the run finished — 409, not a silent no-op.
     client, app = app_ctx
     app.state.job_service.cancel = lambda run_id, *, power_off=False: False
-    assert client.post("/api/jobs/cancel", json={"run_id": 7}).status_code == 409
-
-
-def test_backup_run_conflict_when_busy(app_ctx):
-    client, app = app_ctx
-
-    def busy(_trigger, *, power_off=True):
-        raise AlreadyRunningError("already running")
-
-    app.state.job_service.submit_backup = busy
-    assert client.post("/api/backup/run").status_code == 409
+    assert client.post("/api/runs/7/stop").status_code == 409
 
 
 # --- runs / logs -------------------------------------------------------------
+
+
+def _guest(vmid: int) -> Guest:
+    return Guest(vmid=vmid, name=f"g{vmid}", type="lxc", status="running", node="n1")
+
+
+def _run_route(client, app, route_id: str) -> int:
+    """Fire a route through the API and wait for it to finish; returns the run id."""
+    assert client.post(f"/api/routes/{route_id}/run").status_code == 202
+    service = app.state.job_service
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        current = service.current()
+        if current is not None and current.run_id is not None:
+            run_id = current.run_id
+            _wait_run(client, run_id)
+            return run_id
+        if not service.pending() and not service.is_running:
+            break
+        time.sleep(0.01)
+    # It already finished before we looked: take the newest run.
+    return client.get("/api/runs").json()[0]["id"]
 
 
 def test_run_not_found(app_ctx):
@@ -408,13 +440,14 @@ def test_run_summary_carries_guests_ok(app_ctx):
     # The history table shows how many guests a run backed up, so the summary (not just the
     # detail) has to carry it — /api/runs is the only request that view makes per poll.
     client, app = app_ctx
-    _inject(app, reachable=True)
-    run_id = client.post("/api/backup/run").json()["run_id"]
-    _wait_run(client, run_id)
+    _inject(app, pves={"pve-alpha": FakePve(guests=[_guest(100)]),
+                       "pve-beta": FakePve(guests=[_guest(200)])})
+    run_id = _run_route(client, app, "nightly")
 
     summary = next(r for r in client.get("/api/runs").json() if r["id"] == run_id)
     assert summary["guests_ok"] == client.get(f"/api/runs/{run_id}").json()["guests_ok"]
     assert summary["guests_ok"] is not None
+    assert summary["route_id"] == "nightly"  # the history table's route column
 
 
 def test_tasklog_empty_when_nothing_ran(app_ctx):
@@ -424,81 +457,25 @@ def test_tasklog_empty_when_nothing_ran(app_ctx):
 
 def test_tasklog_returns_lines_and_supports_after_cursor(app_ctx):
     client, app = app_ctx
-    pve = FakePve(log_lines=["INFO: creating vzdump", "VM 100: done"])
-    deps, _pve, _pbs, _power = make_deps(pve=pve, reachable=True)
-    app.state.job_service = JobService(app.state.config_store, deps=deps)
+    pve = FakePve(guests=[_guest(100)], log_lines=["INFO: creating vzdump", "VM 100: done"])
+    _inject(app, pves={"pve-alpha": pve, "pve-beta": FakePve(guests=[_guest(200)])})
 
-    run_id = client.post("/api/backup/run").json()["run_id"]
-    _wait_run(client, run_id)
+    run_id = _run_route(client, app, "nightly")
 
     body = client.get("/api/tasklog").json()
     assert body["run_id"] == run_id
     texts = [line["text"] for line in body["lines"]]
     assert "INFO: creating vzdump" in texts and "VM 100: done" in texts
-    assert all(line["source"] == "pve" and line["step"] == "backup" for line in body["lines"])
+    # A multi-source route labels its steps per PVE, so the panel can group them.
+    assert all(line["source"] == "pve" for line in body["lines"])
+    assert {line["step"] for line in body["lines"]} <= {"backup:pve-alpha", "backup:pve-beta"}
 
     # `after` the last id returns no further lines (incremental polling is a no-op when idle).
     last_id = body["lines"][-1]["id"]
     assert client.get(f"/api/tasklog?after={last_id}").json()["lines"] == []
 
 
-# --- power + status enrichment + account (M6 backend additions) --------------
-
-
-def test_power_on_sends_wol(app_ctx):
-    client, app = app_ctx
-    calls: list[int] = []
-    _inject(app, wol=lambda _c: calls.append(1))
-    assert client.post("/api/power/on").json() == {"ok": True}
-    assert calls == [1]
-
-
-def test_backup_run_keep_on_leaves_pbs_up(app_ctx):
-    client, app = app_ctx
-    _pve, _pbs, power = _inject(app)
-    r = client.post("/api/backup/run", json={"keep_on": True})
-    assert r.status_code == 202
-    body = _wait_run(client, r.json()["run_id"])
-    assert body["status"] == "success"
-    assert power.powered_off is False
-
-
-def test_backup_run_default_powers_off(app_ctx):
-    client, app = app_ctx
-    _pve, _pbs, power = _inject(app)
-    r = client.post("/api/backup/run")  # no body → keep_on defaults false
-    assert r.status_code == 202
-    _wait_run(client, r.json()["run_id"])
-    assert power.powered_off is True
-
-
-def test_gc_run_keep_on_leaves_pbs_up(app_ctx):
-    client, app = app_ctx
-    _pve, _pbs, power = _inject(app)
-    r = client.post("/api/gc/run", json={"keep_on": True})
-    assert r.status_code == 202
-    body = _wait_run(client, r.json()["run_id"])
-    assert body["status"] == "success"
-    assert power.powered_off is False
-
-
-def test_power_off_calls_poweroff(app_ctx):
-    client, app = app_ctx
-    _pve, _pbs, power = _inject(app)
-    assert client.post("/api/power/off").json() == {"ok": True}
-    assert power.powered_off is True
-
-
-def test_power_off_conflict_when_busy(app_ctx):
-    client, app = app_ctx
-
-    class _Busy:
-        def exclusive(self):
-            # A run holds the lock: entering the guard raises, mapping to 409.
-            raise AlreadyRunningError("A backup or GC run is already in progress")
-
-    app.state.job_service = _Busy()
-    assert client.post("/api/power/off").status_code == 409
+# --- per-device status enrichment --------------------------------------------
 
 
 def test_status_includes_datastore_and_load_when_online(app_ctx, monkeypatch):
@@ -506,71 +483,74 @@ def test_status_includes_datastore_and_load_when_online(app_ctx, monkeypatch):
     _inject(app)
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: True)
     body = client.get("/api/status").json()
-    assert body["pbs_online"] is True
-    assert body["datastore"]["total"] == 8_000_000_000
-    assert body["load"] == {"cpu": 7, "mem": 38, "uptime": 3600}
+    first = body["pbss"][0]
+    assert first["online"] is True
+    assert first["datastore"]["total"] == 8_000_000_000
+    assert first["load"] == {"cpu": 7, "mem": 38, "uptime": 3600}
 
 
 def test_status_omits_datastore_when_offline(app_ctx):
     client, _app = app_ctx  # fixture stubs reachability to False
-    body = client.get("/api/status").json()
-    assert body["datastore"] is None and body["load"] is None
-
-
-def test_probe_pbs_offline_returns_no_datastore():
-    from app.api._probe import probe_pbs
-    from app.config import Config
-
-    cfg = Config()
-    cfg.pbs.host = ""  # no host => never probes
-    online, datastore, load = probe_pbs(cfg, build_pbs=lambda c: None)
-    assert online is False
-    assert datastore is None
-    assert load is None
-
-
-def test_resolve_datastore_live_upserts_and_returns_live(temp_db):
-    from app.api._probe import resolve_datastore
-    from app.connectors.pbs import DatastoreStatus
-    from app.db import session_scope
-    from app.db.datastore_stats import get_datastore_stat
-
-    view = resolve_datastore("backup", DatastoreStatus(total=10, used=4, avail=6))
-    assert (view.total, view.used) == (10, 4)
-    with session_scope() as s:
-        row = get_datastore_stat(s, "", "backup")
-    assert row is not None and row.used == 4  # live reading was persisted
-
-
-def test_resolve_datastore_offline_uses_cache(temp_db):
-    from app.api._probe import resolve_datastore
-    from app.db import session_scope
-    from app.db.datastore_stats import upsert_datastore_stat
-
-    with session_scope() as s:
-        upsert_datastore_stat(s, "", "backup", 8, 2)
-    view = resolve_datastore("backup", None)
-    assert (view.total, view.used, view.used_pct) == (8, 2, 25.0)
-
-
-def test_resolve_datastore_none_when_no_live_no_cache(temp_db):
-    from app.api._probe import resolve_datastore
-
-    assert resolve_datastore("backup", None) is None
+    first = client.get("/api/status").json()["pbss"][0]
+    assert first["datastore"] is None and first["load"] is None
 
 
 def test_status_datastore_from_cache_when_offline(app_ctx):
+    # The whole point of Joulenap: the box is off most of the time, and the dashboard still
+    # has to say how full it was.
     client, _app = app_ctx
     with session_scope() as s:
-        from app.db.datastore_stats import upsert_datastore_stat
-        upsert_datastore_stat(s, "", "backup", 8_000_000_000, 2_000_000_000)
+        upsert_datastore_stat(s, "pbs-01", "backup", 8_000_000_000, 2_000_000_000)
 
-    body = client.get("/api/status").json()
-    assert body["datastore"] is not None
-    assert body["datastore"]["used_pct"] == 25.0
-    assert body["datastore"]["used"] == 2_000_000_000
-    assert body["datastore"]["total"] == 8_000_000_000
-    assert body["load"] is None  # live-only, stays null when PBS offline
+    pbss = {d["id"]: d for d in client.get("/api/status").json()["pbss"]}
+    assert pbss["pbs-01"]["datastore"] == {
+        "used": 2_000_000_000,
+        "total": 8_000_000_000,
+        "used_pct": 25.0,
+    }
+    assert pbss["pbs-01"]["load"] is None  # live-only, stays null when the PBS is offline
+    assert pbss["pbs-02"]["datastore"] is None  # a different box, its own cache row
+
+
+def test_probe_skips_a_device_with_no_host():
+    from app.api._probe import probe_pbss
+    from app.config import Config, PbsDevice
+
+    cfg = Config()
+    cfg.pbss = [PbsDevice(id="pbs-01", managed_power=False)]  # no host => never probes
+    probes = probe_pbss(cfg, connect=lambda _d: None)
+    assert probes["pbs-01"].online is False
+    assert probes["pbs-01"].datastore is None and probes["pbs-01"].load is None
+
+
+def test_resolve_datastore_live_upserts_under_the_device_id(temp_db):
+    from app.api._probe import resolve_datastore
+    from app.config import PbsDevice
+    from app.connectors.pbs import DatastoreStatus
+
+    device = PbsDevice(id="pbs-01", datastore="backup", managed_power=False)
+    view = resolve_datastore(device, DatastoreStatus(total=10, used=4, avail=6))
+    assert (view.total, view.used) == (10, 4)
+    with session_scope() as s:
+        row = get_datastore_stat(s, "pbs-01", "backup")
+    assert row is not None and row.used == 4  # live reading was persisted, keyed by device
+
+
+def test_resolve_datastore_offline_uses_that_devices_cache(temp_db):
+    from app.api._probe import resolve_datastore
+    from app.config import PbsDevice
+
+    device = PbsDevice(id="pbs-01", datastore="backup", managed_power=False)
+    other = PbsDevice(id="pbs-02", datastore="offsite", managed_power=False)
+    with session_scope() as s:
+        upsert_datastore_stat(s, "pbs-01", "backup", 8, 2)
+
+    view = resolve_datastore(device, None)
+    assert (view.total, view.used, view.used_pct) == (8, 2, 25.0)
+    assert resolve_datastore(other, None) is None  # not one shared row for every box
+
+
+# --- account -----------------------------------------------------------------
 
 
 def test_account_update_changes_username_and_password(app_ctx, temp_config):
@@ -694,49 +674,56 @@ def test_dashboard_200_with_header_key(app_ctx):
     r = client.get("/api/dashboard", headers={"X-API-Key": key})
     assert r.status_code == 200
     body = r.json()
-    assert set(body) == {
-        "pbs_state", "next_run", "last_run_status", "last_run_time",
-        "datastore_used_pct", "datastore_used_bytes", "datastore_total_bytes",
-    }
-    # PBS stubbed offline, no runs yet:
-    assert body["pbs_state"] == "sleeping"
-    assert body["last_run_status"] == "never"
-    assert body["last_run_time"] is None
-    assert body["datastore_used_pct"] is None
-    assert body["datastore_used_bytes"] is None
-    assert body["datastore_total_bytes"] is None
+    assert set(body) == {"state", "routes", "pbss"}
+    assert body["state"] == "idle"
+    # One entry per route and per PBS — there is no single "next run" or "datastore" now.
+    assert [e["id"] for e in body["routes"]] == ["nightly", "lab", "offsite"]
+    assert [e["id"] for e in body["pbss"]] == ["pbs-01", "pbs-02"]
+    nightly = body["routes"][0]
+    assert nightly["kind"] == "backup" and nightly["enabled"] is True
+    assert nightly["next_run"] is not None
+    assert nightly["last_run_status"] == "never" and nightly["last_run_time"] is None
+    # PBS stubbed offline, nothing cached yet:
+    assert body["pbss"][0]["state"] == "sleeping"
+    assert body["pbss"][0]["datastore_used_pct"] is None
 
 
 def test_dashboard_datastore_from_cache_when_offline(app_ctx):
     client, app = app_ctx
     key = _enable_api_key(app)
-    with session_scope() as s:  # session_scope already imported at top of test_api.py
-        from app.db.datastore_stats import upsert_datastore_stat
-        upsert_datastore_stat(s, "", "backup", 8_000_000_000, 2_000_000_000)
+    with session_scope() as s:
+        upsert_datastore_stat(s, "pbs-01", "backup", 8_000_000_000, 2_000_000_000)
 
-    body = client.get("/api/dashboard", headers={"X-API-Key": key}).json()
-    assert body["datastore_used_pct"] == 25.0
-    assert body["datastore_used_bytes"] == 2_000_000_000
-    assert body["datastore_total_bytes"] == 8_000_000_000
+    entry = client.get("/api/dashboard", headers={"X-API-Key": key}).json()["pbss"][0]
+    assert entry["datastore_used_pct"] == 25.0
+    assert entry["datastore_used_bytes"] == 2_000_000_000
+    assert entry["datastore_total_bytes"] == 8_000_000_000
 
 
 def test_dashboard_upserts_and_returns_live_when_pbs_online(app_ctx, monkeypatch):
     client, app = app_ctx
     key = _enable_api_key(app)
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: True)
-    _inject(app)  # deps.build_pbs -> FakePbs (datastore 8e9/2e9)
+    _inject(app)  # deps.connect_pbs -> FakePbs (datastore 8e9/2e9)
 
-    body = client.get("/api/dashboard", headers={"X-API-Key": key}).json()
-    assert body["pbs_state"] == "online"
-    assert body["datastore_used_pct"] == 25.0
-    assert body["datastore_used_bytes"] == 2_000_000_000
-    assert body["datastore_total_bytes"] == 8_000_000_000
+    entry = client.get("/api/dashboard", headers={"X-API-Key": key}).json()["pbss"][0]
+    assert entry["state"] == "online"
+    assert entry["datastore_used_pct"] == 25.0
+    assert entry["datastore_used_bytes"] == 2_000_000_000
 
     # the live reading was persisted to the cache (write-on-GET)
-    from app.db.datastore_stats import get_datastore_stat
     with session_scope() as s:
-        row = get_datastore_stat(s, "", "backup")
+        row = get_datastore_stat(s, "pbs-01", "backup")
     assert row is not None and row.used == 2_000_000_000
+
+
+def test_dashboard_reports_scheduler_paused(app_ctx):
+    client, app = app_ctx
+    key = _enable_api_key(app)
+    client.post("/api/scheduler/toggle", json={"enabled": False})  # goes through rearm
+    body = client.get("/api/dashboard", headers={"X-API-Key": key}).json()
+    assert body["state"] == "paused"
+    assert all(e["next_run"] is None for e in body["routes"])
 
 
 def test_dashboard_200_with_query_param_key(app_ctx):
@@ -744,7 +731,7 @@ def test_dashboard_200_with_query_param_key(app_ctx):
     key = _enable_api_key(app)
     r = client.get(f"/api/dashboard?key={key}")
     assert r.status_code == 200
-    assert r.json()["pbs_state"] == "sleeping"
+    assert r.json()["pbss"][0]["state"] == "sleeping"
 
 
 def test_dashboard_401_with_non_ascii_key(app_ctx):
@@ -754,15 +741,21 @@ def test_dashboard_401_with_non_ascii_key(app_ctx):
     assert r.status_code == 401
 
 
-def _add_cycle_run(session, status: RunStatus, *, started_at: datetime) -> Run:
-    run = Run(kind=RunKind.CYCLE, trigger=RunTrigger.SCHEDULED, status=status,
-               started_at=started_at)
+def _add_cycle_run(session, status: RunStatus, *, started_at: datetime, route="nightly") -> Run:
+    run = Run(
+        kind=RunKind.CYCLE,
+        trigger=RunTrigger.SCHEDULED,
+        status=status,
+        started_at=started_at,
+        route_id=route,
+        route_name=route,
+    )
     session.add(run)
     session.flush()
     return run
 
 
-def test_dashboard_last_run_reflects_last_finished_cycle_not_in_progress_one(app_ctx):
+def test_dashboard_last_run_reflects_the_last_finished_run_not_an_in_progress_one(app_ctx):
     client, app = app_ctx
     key = _enable_api_key(app)
     now = datetime.now(UTC)
@@ -770,21 +763,36 @@ def test_dashboard_last_run_reflects_last_finished_cycle_not_in_progress_one(app
         _add_cycle_run(s, RunStatus.SUCCESS, started_at=now - timedelta(hours=1))
         _add_cycle_run(s, RunStatus.RUNNING, started_at=now)
 
-    r = client.get("/api/dashboard", headers={"X-API-Key": key})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["last_run_status"] == "success"
-    assert datetime.fromisoformat(body["last_run_time"]) == now - timedelta(hours=1)
+    body = client.get("/api/dashboard", headers={"X-API-Key": key}).json()
+    nightly = body["routes"][0]
+    assert nightly["last_run_status"] == "success"
+    assert datetime.fromisoformat(nightly["last_run_time"]) == now - timedelta(hours=1)
 
 
-def test_dashboard_last_run_never_when_only_running_cycle(app_ctx):
+def test_dashboard_last_run_is_per_route(app_ctx):
+    # A failed sync must not make the nightly backup look failed, and vice versa.
+    client, app = app_ctx
+    key = _enable_api_key(app)
+    now = datetime.now(UTC)
+    with session_scope() as s:
+        _add_cycle_run(s, RunStatus.SUCCESS, started_at=now - timedelta(hours=2))
+        _add_cycle_run(
+            s, RunStatus.FAILURE, started_at=now - timedelta(hours=1), route="offsite"
+        )
+
+    body = client.get("/api/dashboard", headers={"X-API-Key": key}).json()
+    routes = {e["id"]: e for e in body["routes"]}
+    assert routes["nightly"]["last_run_status"] == "success"
+    assert routes["offsite"]["last_run_status"] == "failed"
+    assert routes["lab"]["last_run_status"] == "never"
+
+
+def test_dashboard_last_run_never_when_only_a_running_one_exists(app_ctx):
     client, app = app_ctx
     key = _enable_api_key(app)
     with session_scope() as s:
         _add_cycle_run(s, RunStatus.RUNNING, started_at=datetime.now(UTC))
 
-    r = client.get("/api/dashboard", headers={"X-API-Key": key})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["last_run_status"] == "never"
-    assert body["last_run_time"] is None
+    nightly = client.get("/api/dashboard", headers={"X-API-Key": key}).json()["routes"][0]
+    assert nightly["last_run_status"] == "never"
+    assert nightly["last_run_time"] is None

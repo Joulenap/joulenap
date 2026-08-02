@@ -30,8 +30,8 @@ def _put(client, text: str):
 
 def test_get_returns_the_redacted_config_as_yaml(client):
     doc = yaml.safe_load(_text(client))
-    assert doc["pve"]["host"] == "192.0.2.10"
-    assert doc["pve"]["api_token_secret"] == REDACTED  # never ships the real secret
+    assert doc["pves"][0]["host"] == "192.0.2.10"
+    assert doc["pves"][0]["api_token_secret"] == REDACTED  # never ships the real secret
     assert doc["app"]["auth"]["password_hash"] == REDACTED
 
 
@@ -46,17 +46,17 @@ def test_edit_applies_and_secrets_survive(client, temp_config):
     assert _put(client, text).status_code == 200
 
     saved = load_config(temp_config)
-    assert saved.backup.bwlimit == 5000
-    assert saved.pve.api_token_secret == "test-pve-secret"  # restored from the sentinel
+    assert saved.routes[0].options.bwlimit == 5000
+    assert saved.pves[0].api_token_secret == "test-pve-secret"  # restored from the sentinel
 
 
 def test_omitted_keys_keep_their_stored_value(client, temp_config):
     # Deep-merge semantics: deleting a section must not wipe the token behind it.
-    assert _put(client, "backup:\n  bwlimit: 42\n").status_code == 200
+    assert _put(client, "maintenance:\n  history:\n    retention_days: 42\n").status_code == 200
     saved = load_config(temp_config)
-    assert saved.backup.bwlimit == 42
-    assert saved.pve.api_token_secret == "test-pve-secret"
-    assert saved.pve.host == "192.0.2.10"
+    assert saved.maintenance.history.retention_days == 42
+    assert saved.pves[0].api_token_secret == "test-pve-secret"
+    assert saved.pves[0].host == "192.0.2.10"
 
 
 def test_malformed_yaml_reports_a_line(client):
@@ -74,16 +74,36 @@ def test_non_mapping_document_is_rejected(client):
 
 
 def test_unknown_key_is_rejected_with_its_path(client):
-    resp = _put(client, "backup:\n  bwlimitt: 10\n")
+    resp = _put(client, "maintenance:\n  history:\n    retention_dayz: 10\n")
     assert resp.status_code == 422
-    assert "backup.bwlimitt" in resp.json()["detail"]["message"]
+    assert "maintenance.history.retention_dayz" in resp.json()["detail"]["message"]
+
+
+def test_a_deleted_0_9_section_is_rejected_rather_than_silently_ignored(client):
+    # The loader strips pve:/pbs:/backup: from an old file on disk so the app still boots.
+    # A human *typing* one into the editor is a different thing: it must be told the section
+    # is gone, not have its edit accepted and dropped.
+    resp = _put(client, "backup:\n  bwlimit: 10\n")
+    assert resp.status_code == 422
+    assert "backup" in resp.json()["detail"]["message"]
 
 
 def test_invalid_cron_is_rejected_through_the_yaml_path(client):
-    # Proves the shared _apply_config guards (BE-B1) still run for the editor.
-    resp = _put(client, "backup:\n  schedule: not a cron\n")
+    # Proves the shared guards (BE-B1) still run for the editor. A list value replaces
+    # wholesale, so the route has to be sent in full.
+    doc = yaml.safe_load(_text(client))
+    doc["routes"][0]["schedule"]["cron"] = "0 4 * *"  # 4 fields, unparseable
+    resp = _put(client, yaml.safe_dump({"routes": doc["routes"]}))
     assert resp.status_code == 422
-    assert "schedule" in resp.json()["detail"]["message"]
+    assert "schedule.cron" in resp.json()["detail"]["message"]
+
+
+def test_a_bad_mac_is_rejected_through_the_yaml_path(client):
+    doc = yaml.safe_load(_text(client))
+    doc["pbss"][0]["mac"] = "not-a-mac"
+    resp = _put(client, yaml.safe_dump({"pbss": doc["pbss"]}))
+    assert resp.status_code == 422
+    assert "mac" in resp.json()["detail"]["message"]
 
 
 def test_requires_auth(temp_config, temp_db):
