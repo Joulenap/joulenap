@@ -51,6 +51,7 @@ class RunKind(StrEnum):
     CYCLE = "cycle"  # full wake -> backup -> maintenance -> poweroff cycle
     # External-schedules mode: wake -> watch the PBS's own scheduled jobs -> poweroff.
     MONITOR = "monitor"
+    SYNC = "sync"  # a sync route: PBS -> PBS, pull or push
 
 
 class RunTrigger(StrEnum):
@@ -81,6 +82,8 @@ class StepName(StrEnum):
     BACKUP = "backup"
     # External-schedules mode: the watch phase (waiting for + following the PBS's own jobs).
     MONITOR = "monitor"
+    # Sync route: the remote + sync job run on the executing PBS.
+    SYNC = "sync"
     GC = "gc"
     VERIFY = "verify"
     POWEROFF = "poweroff"

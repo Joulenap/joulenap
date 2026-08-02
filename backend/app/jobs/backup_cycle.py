@@ -12,10 +12,18 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
-from ..config import Config, PbsDevice, Route, RouteGuests, RouteSource
+from ..config import (
+    Config,
+    ExternalConfig,
+    PbsDevice,
+    PbsExternalConfig,
+    Route,
+    RouteGuests,
+    RouteSource,
+)
 from ..connectors.errors import TaskCancelled
 from ..connectors.pbs import DatastoreStatus
 from ..connectors.pve import Guest, build_prune_string
@@ -538,13 +546,16 @@ class _TaskLister(Protocol):
 
 def watch_external_tasks(
     pbs: _TaskLister,
-    config: Config,
+    ext: ExternalConfig | PbsExternalConfig,
     *,
     cancelled: Callable[[], bool],
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> int | None:
     """Follow the PBS's own (externally scheduled) tasks until they are done.
+
+    ``ext`` carries the two timeouts — ``config.backup.external`` for the 0.9 cycle, the PBS
+    device's own ``external`` for an External route; how slow a box is belongs to the box.
 
     Both knobs are timeouts, not fixed delays. Phase one waits up to ``first_task_wait``
     for the first task to *appear* — polling starts immediately, so a job that starts 90s
@@ -554,7 +565,6 @@ def watch_external_tasks(
     new task shows up, so the gaps between chained jobs (backup -> prune -> GC -> sync)
     never cause an early power-off. Returns the number of distinct tasks observed.
     """
-    ext = config.backup.external
     seen: set[str] = set()
 
     def poll() -> bool:
@@ -608,7 +618,9 @@ def run_monitor_cycle(
 
         with recorder.step(StepName.MONITOR) as step:
             with deps.build_pbs(config) as pbs:
-                observed = watch_external_tasks(pbs, config, cancelled=deps.cancelled)
+                observed = watch_external_tasks(
+                    pbs, config.backup.external, cancelled=deps.cancelled
+                )
             if observed is None:
                 step.detail = "no tasks observed"
                 recorder.log(
@@ -841,7 +853,7 @@ def _route_read_datastore(
 
 def _refresh_route_backup_cache(
     target: PbsDevice,
-    covered: dict[str, set[int]],
+    covered: Mapping[str, set[int] | None],
     recorder: RunRecorder,
     deps: CycleDeps,
 ) -> None:
@@ -851,6 +863,8 @@ def _refresh_route_backup_cache(
     One datastore lists snapshots by vmid with no idea which PVE they came from, so each
     source claims the vmids it actually backed up. Two PVEs sharing a vmid both get a row
     with the same time — that is a real PBS namespace collision, not something to fix here.
+    A ``None`` vmid set claims *every* snapshot in the datastore — what an External route can
+    say, since it did not choose the guests (it only watched someone else's job).
     Best-effort: the backup already succeeded, so a read/write failure is logged and dropped.
     """
     try:
@@ -859,7 +873,7 @@ def _refresh_route_backup_cache(
         cached = 0
         with session_scope() as session:
             for pve_id, vmids in covered.items():
-                mine = {vmid: ts for vmid, ts in latest.items() if vmid in vmids}
+                mine = latest if vmids is None else {v: t for v, t in latest.items() if v in vmids}
                 upsert_last_backups(session, pve_id, target.id, mine)
                 cached += len(mine)
     except Exception as exc:

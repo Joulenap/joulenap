@@ -114,6 +114,10 @@ class FakePbs:
         self.verify_started = False
         self.stopped: list[str] = []  # upids passed to stop_task
         self.verify_args: dict | None = None
+        # Sync route bookkeeping: what a route asked this box to set up and run.
+        self.remotes: dict[str, dict] = {}
+        self.sync_jobs: dict[str, dict] = {}
+        self.sync_runs: list[dict] = []
         self.log_lines = log_lines or []
         self.fail_datastore = fail_datastore
         self.gc_log_lines = gc_log_lines
@@ -141,6 +145,16 @@ class FakePbs:
         self.verify_started = True
         self.verify_args = {"ignore_verified": ignore_verified, "outdated_after": outdated_after}
         return "UPID:pbs:verify"
+
+    def ensure_remote(self, name: str, **kwargs) -> None:
+        self.remotes[name] = kwargs
+
+    def ensure_sync_job(self, job_id: str, **kwargs) -> None:
+        self.sync_jobs[job_id] = kwargs
+
+    def run_sync_job(self, job_id: str, *, direction: str = "pull") -> str:
+        self.sync_runs.append({"id": job_id, "direction": direction})
+        return "UPID:pbs:sync"
 
     def wait_task(
         self, upid: str, poll_interval=None, on_log=None, should_cancel=None, **_

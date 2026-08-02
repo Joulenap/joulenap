@@ -782,7 +782,7 @@ def test_watch_first_task_ends_the_grace_wait_early():
 
     n = watch_external_tasks(
         pbs,
-        _monitor_config(first_task_wait=900, idle_wait=0),
+        _monitor_config(first_task_wait=900, idle_wait=0).backup.external,
         cancelled=lambda: False,
         sleep=sleep,
         clock=clock,
@@ -801,7 +801,7 @@ def test_watch_quiet_countdown_resets_when_a_new_task_starts():
 
     n = watch_external_tasks(
         pbs,
-        _monitor_config(first_task_wait=0, idle_wait=15),
+        _monitor_config(first_task_wait=0, idle_wait=15).backup.external,
         cancelled=lambda: False,
         sleep=sleep,
         clock=clock,
@@ -817,7 +817,7 @@ def test_watch_returns_none_when_no_task_ever_appears():
 
     n = watch_external_tasks(
         FakePbs(),
-        _monitor_config(first_task_wait=25, idle_wait=300),
+        _monitor_config(first_task_wait=25, idle_wait=300).backup.external,
         cancelled=lambda: False,
         sleep=sleep,
         clock=clock,

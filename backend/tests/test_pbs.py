@@ -72,6 +72,92 @@ def test_start_gc_returns_upid():
     assert make_client(handler).start_gc().startswith("UPID:")
 
 
+def _recorder(existing: dict[str, list]):
+    """A handler that records every call and answers ``/config/*`` listings from ``existing``."""
+    calls: list[tuple[str, str, str]] = []  # (method, path, body + query)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append((request.method, path, request.content.decode() + request.url.query.decode()))
+        for section, entries in existing.items():
+            if request.method == "GET" and path.endswith(f"/config/{section}"):
+                return json_data(entries)
+        return json_data("UPID:pbs:sync::")
+
+    return handler, calls
+
+
+def test_ensure_remote_creates_when_absent():
+    handler, calls = _recorder({"remote": []})
+
+    make_client(handler).ensure_remote(
+        "joulenap-r1", host="pbs2.local", auth_id="root@pam!jn", password="s", fingerprint="aa:bb"
+    )
+
+    assert [(m, p) for m, p, _b in calls] == [
+        ("GET", "/api2/json/config/remote"),
+        ("POST", "/api2/json/config/remote"),
+    ]
+    body = calls[-1][2]
+    assert "name=joulenap-r1" in body
+    assert "auth-id=root%40pam%21jn" in body  # PBS 4.x field name, form-encoded
+    assert "fingerprint=aa%3Abb" in body
+    assert "port" not in body  # the default is left out
+
+
+def test_ensure_remote_replaces_an_existing_one():
+    handler, calls = _recorder({"remote": [{"name": "joulenap-r1"}]})
+
+    make_client(handler).ensure_remote(
+        "joulenap-r1", host="pbs2.local", auth_id="root@pam!jn", password="s", port=8123
+    )
+
+    # Delete-then-create: a route whose peer or direction changed must not be patched.
+    assert [(m, p) for m, p, _b in calls] == [
+        ("GET", "/api2/json/config/remote"),
+        ("DELETE", "/api2/json/config/remote/joulenap-r1"),
+        ("POST", "/api2/json/config/remote"),
+    ]
+    assert "port=8123" in calls[-1][2]
+
+
+def test_pull_sync_job_omits_the_direction():
+    handler, calls = _recorder({"sync": []})
+
+    make_client(handler).ensure_sync_job(
+        "joulenap-r1", remote="joulenap-r1", remote_store="offsite", store="backup"
+    )
+
+    body = calls[-1][2]
+    assert "store=backup" in body and "remote-store=offsite" in body
+    # Pull is PBS's default; omitting it keeps the call identical to what servers without
+    # push support accept.
+    assert "sync-direction" not in body
+
+
+def test_push_sync_job_carries_the_direction_through_delete_and_run():
+    handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
+    client = make_client(handler)
+
+    client.ensure_sync_job(
+        "joulenap-r1",
+        remote="joulenap-r1",
+        remote_store="backup",
+        store="offsite",
+        direction="push",
+    )
+    upid = client.run_sync_job("joulenap-r1", direction="push")
+
+    # A pull and a push job of the same id live in different config sections, so the delete
+    # and the run both have to say which one they mean.
+    assert calls[1][:2] == ("DELETE", "/api2/json/config/sync/joulenap-r1")
+    assert "sync-direction=push" in calls[1][2]
+    assert "sync-direction=push" in calls[2][2]  # the POST that recreates it
+    assert calls[-1][:2] == ("POST", "/api2/json/admin/sync/joulenap-r1/run")
+    assert "sync-direction=push" in calls[-1][2]
+    assert upid.startswith("UPID:")
+
+
 def test_wait_task_success_and_failure():
     def ok(request: httpx.Request) -> httpx.Response:
         return json_data({"status": "stopped", "exitstatus": "OK"})
