@@ -88,6 +88,9 @@
   --jn-route-violet: #9d7bd8;
   --jn-route-teal: #2fa7a0;
   --jn-route-pink: #d06ca8;
+  /* Behind a modal dialog. Lighter in the light theme: a near-black wash over a white page
+     reads as an error state rather than as "this is on top". */
+  --jn-backdrop: rgba(4, 6, 9, 0.62);
 }
 :root[data-theme='light'] {
   color-scheme: light;
@@ -121,6 +124,7 @@
   --jn-route-violet: #7a56b8;
   --jn-route-teal: #1f847e;
   --jn-route-pink: #b34d89;
+  --jn-backdrop: rgba(20, 24, 30, 0.45);
 }
 
 * {

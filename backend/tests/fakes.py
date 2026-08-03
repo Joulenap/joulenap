@@ -106,8 +106,10 @@ class FakePbs:
         gc_log_lines: list[str] | None = None,
         verify_log_lines: list[str] | None = None,
         active_tasks_seq: list[list[dict]] | None = None,
+        fail_exit_status: str = "error",
     ):
         self.fail_task = fail_task
+        self.fail_exit_status = fail_exit_status
         self.gc_started = False
         self.verify_started = False
         self.stopped: list[str] = []  # upids passed to stop_task
@@ -176,8 +178,12 @@ class FakePbs:
         if should_cancel is not None and should_cancel():
             raise TaskCancelled(f"Wait for task {upid} cancelled")
         if self.fail_task:
-            raise TaskError("gc failed", exit_status="error")
+            raise TaskError("gc failed", exit_status=self.fail_exit_status)
         return {"status": "stopped", "exitstatus": "OK"}
+
+    def task_log(self, upid: str, start: int = 0, limit: int = 5000) -> list[tuple[int, str]]:
+        """Re-read of a finished task's log — what the sync step uses to name a failure."""
+        return list(enumerate(self.log_lines[start:], start=start + 1))
 
     def stop_task(self, upid: str) -> None:
         self.stopped.append(upid)

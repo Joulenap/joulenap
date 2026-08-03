@@ -13,6 +13,7 @@ from fakes import FakeBox, FakePbs, FakePve, make_deps
 from sqlalchemy import select
 
 from app.config import Config, PbsDevice, PveDevice, Route, RouteSource
+from app.connectors.errors import ConnectorError
 from app.connectors.pve import Guest
 from app.core.config_store import ConfigStore
 from app.db import session_scope
@@ -225,6 +226,46 @@ def test_a_failed_sync_task_fails_the_run(temp_db):
     assert status == RunStatus.FAILURE
     assert steps[StepName.SYNC] == StepStatus.FAILURE
     assert StepName.GC not in steps  # the failure unwinds before maintenance
+
+
+def _raise(*_args, **_kwargs):
+    raise ConnectorError("task log unavailable")
+
+
+def test_a_sync_that_only_warned_says_what_the_warning_was(temp_db):
+    # PBS reports a partially-failed sync as exitstatus "WARNINGS: 1", which on its own tells
+    # the user nothing; the cause is in the task log. Both real-world ones look like this.
+    config = _config("sync")
+    pbs1 = FakePbs(
+        fail_task=True,
+        fail_exit_status="WARNINGS: 1",
+        log_lines=[
+            "sync group ct/109 failed",
+            "WARN: group 'ct/109' not owned by remote user 'joulenap@pbs' on target",
+        ],
+    )
+    deps, *_ = _deps(pbs1=pbs1)
+
+    run_id = _run(config, deps)
+
+    with session_scope() as session:
+        error = session.get(Run, run_id).error
+    assert "WARNINGS: 1" in error
+    assert "not owned by remote user" in error
+    assert "UPID" not in error  # the raw upid stays on the step, not in the summary
+
+
+def test_a_sync_failure_with_an_unreadable_log_still_names_the_status(temp_db):
+    config = _config("sync")
+    pbs1 = FakePbs(fail_task=True, fail_exit_status="WARNINGS: 1")
+    pbs1.task_log = _raise  # the re-read is best-effort; a second failure must not mask the first
+    deps, *_ = _deps(pbs1=pbs1)
+
+    run_id = _run(config, deps)
+
+    with session_scope() as session:
+        error = session.get(Run, run_id).error
+    assert "WARNINGS: 1" in error
 
 
 def test_cancel_stops_the_running_sync(temp_db):

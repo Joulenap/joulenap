@@ -748,6 +748,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     Object.assign(CONFIG, JSON.parse(init.body))
     body = CONFIG
   }
+  // Read through to the live list rather than the table's snapshot, which route CRUD replaces.
+  if (key === 'GET /routes') body = CONFIG.routes
   if (body === undefined && key.startsWith('GET /logs')) body = LOGS
   if (body === undefined && bare === '/logs') body = LOGS
   // Query-dependent fixtures: the guest panel asks per PVE, and an expanded history row asks
@@ -760,6 +762,30 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     body = run
       ? (TASKLOG_BY_RUN[Number(run)] ?? { run_id: Number(run), lines: [] })
       : TASKLOG
+  }
+  // Route CRUD really mutates CONFIG.routes, unlike the rest of the writes below: the route
+  // editor's whole point is that a saved route shows up in the strip and the topology on the
+  // next config read, and a stub that answered {ok:true} would make that look broken.
+  if (key === 'POST /routes' && typeof init?.body === 'string') {
+    const created = JSON.parse(init.body) as Route
+    if (CONFIG.routes.some((r) => r.id === created.id)) {
+      return new Response(JSON.stringify({ detail: `Route '${created.id}' already exists` }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    CONFIG.routes = [...CONFIG.routes, created]
+    body = created
+  }
+  const editId = /^\/routes\/([^/]+)$/.exec(bare)?.[1]
+  if (editId && method === 'PUT' && typeof init?.body === 'string') {
+    const updated = JSON.parse(init.body) as Route
+    CONFIG.routes = CONFIG.routes.map((r) => (r.id === editId ? updated : r))
+    body = updated
+  }
+  if (editId && method === 'DELETE') {
+    CONFIG.routes = CONFIG.routes.filter((r) => r.id !== editId)
+    return new Response(null, { status: 204 })
   }
   // ROUTES is keyed on exact paths, so /runs/{id} needs its own match.
   const runId = method === 'GET' ? /^\/runs\/(\d+)$/.exec(bare)?.[1] : undefined

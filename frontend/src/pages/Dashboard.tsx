@@ -6,9 +6,12 @@ import { useConfig } from '../config/ConfigContext'
 import { useGuestsAll } from '../hooks/useGuestsAll'
 import { useRuns } from '../hooks/useRuns'
 import { useTaskLog } from '../hooks/useTaskLog'
+import { runKindLabelKey } from '../utils/status'
+import { ActionDialog, type ActionSpec } from './dashboard/ActionDialog'
 import { ActivityLog } from './dashboard/ActivityLog'
 import { GuestLastBackup } from './dashboard/GuestLastBackup'
 import { ManualRunPanel, type ManualAction } from './dashboard/ManualRunPanel'
+import { RouteModal } from './dashboard/RouteModal'
 import { RouteStrip } from './dashboard/RouteStrip'
 import { RunHistory } from './dashboard/RunHistory'
 import { Topology } from './dashboard/Topology'
@@ -52,20 +55,94 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
     return () => clearInterval(id)
   }, [])
 
+  // `null` = closed; `{route: null}` = the create form.
+  const [editing, setEditing] = useState<{ route: Route | null } | null>(null)
+  const [action, setAction] = useState<ActionSpec | null>(null)
+  // A dialog closes on confirm, so a rejected action has nowhere of its own to report from.
+  const [actionError, setActionError] = useState<string | null>(null)
+
   const afterRouteChange = () => {
     reload().catch(() => {})
     refreshStatus().catch(() => {})
   }
 
-  // TODO(M10): every dialog on this page. The buttons are wired to their subjects already,
-  // so M10 only has to replace these with the modal that collects the power-off toggle.
-  const openRouteEditor = (_route: Route | null) => {}
-  const openManualRun = (_action: ManualAction) => {}
-  const openPower = (_pbs: PbsDevice, _online: boolean) => {}
-  const openStop = (_run: RunSummary) => {}
+  /** Fire an action, then re-read the state it changed. */
+  const run = (work: Promise<unknown>) => {
+    setActionError(null)
+    work
+      .then(() => refreshStatus())
+      .catch((e: Error) =>
+        setActionError(t('dashboard.confirm.failed', { reason: e.message })),
+      )
+  }
+
+  const routeOptions = routes.map((r) => ({ value: r.id, label: r.name || r.id }))
+  const pbsOptions = (config?.pbss ?? []).map((p) => ({ value: p.id, label: p.id }))
+  const powerOffLabel = t('dashboard.confirm.powerOffAfter')
+
+  const openRouteEditor = (route: Route | null) => setEditing({ route })
+
+  const openManualRun = (kind: ManualAction) => {
+    if (kind === 'route') {
+      setAction({
+        title: t('dashboard.confirm.routeTitle'),
+        select: {
+          label: t('dashboard.confirm.routeLabel'),
+          options: routeOptions,
+          emptyNote: t('dashboard.confirm.noRoutes'),
+        },
+        toggle: powerOffLabel,
+        confirmLabel: t('dashboard.confirm.routeYes'),
+        // `keep_on` is the inverse of the toggle — see api/client.ts.
+        onConfirm: (id, powerOff) => run(api.runRoute(id, !powerOff)),
+      })
+      return
+    }
+    const gc = kind === 'gc'
+    setAction({
+      title: t(gc ? 'dashboard.confirm.gcTitle' : 'dashboard.confirm.verifyTitle'),
+      note: t(gc ? 'dashboard.confirm.gcNote' : 'dashboard.confirm.verifyNote'),
+      select: {
+        label: t('dashboard.confirm.gcLabel'),
+        options: pbsOptions,
+        emptyNote: t('dashboard.confirm.noPbs'),
+      },
+      toggle: powerOffLabel,
+      confirmLabel: t(gc ? 'dashboard.confirm.gcYes' : 'dashboard.confirm.verifyYes'),
+      onConfirm: (id, powerOff) => run(api.runMaintenance(id, kind, !powerOff)),
+    })
+  }
+
+  const openPower = (pbs: PbsDevice, online: boolean) =>
+    setAction({
+      title: t(online ? 'dashboard.confirm.offTitle' : 'dashboard.confirm.onTitle'),
+      note: online
+        ? t('dashboard.confirm.offMsg')
+        : t('dashboard.confirm.onNote', { pbs: pbs.id }),
+      confirmLabel: t(online ? 'dashboard.confirm.offYes' : 'dashboard.confirm.onYes'),
+      onConfirm: () => run(api.pbsPower(pbs.id, online ? 'poweroff' : 'wake')),
+    })
+
+  const openStop = (run_: RunSummary) =>
+    setAction({
+      title: t('dashboard.confirm.stopRouteTitle', {
+        name: run_.route_name || t(runKindLabelKey(run_.kind)),
+      }),
+      note: t('dashboard.confirm.stopRouteMsg'),
+      toggle: powerOffLabel,
+      confirmLabel: t('dashboard.stopRun'),
+      danger: true,
+      // stopRun takes power_off directly, unlike runRoute's inverted keep_on.
+      onConfirm: (_choice, powerOff) => run(api.stopRun(run_.id, powerOff)),
+    })
 
   return (
     <div className="jn-home">
+      {actionError && (
+        <div className="form-banner" role="alert">
+          {actionError}
+        </div>
+      )}
       <div className="grid-top">
         <Topology
           routes={routes}
@@ -115,6 +192,22 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
           <ActivityLog logs={logs} />
         </div>
       </section>
+
+      {editing && (
+        <RouteModal
+          route={editing.route}
+          routes={routes}
+          pves={config?.pves ?? []}
+          pbss={config?.pbss ?? []}
+          groups={groups}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            afterRouteChange()
+          }}
+        />
+      )}
+      {action && <ActionDialog spec={action} onClose={() => setAction(null)} />}
     </div>
   )
 }

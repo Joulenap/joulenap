@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..config import Config, PbsDevice, Route
+from ..connectors.errors import TaskError
 from ..connectors.pbs import DatastoreStatus
 from ..db.models import LogLevel, RunKind, RunStatus, StepName
 from ..notify.messages import RunContext
@@ -53,6 +54,26 @@ def _require_pbs(config: Config, pbs_id: str, route: Route) -> PbsDevice:
 
 
 # --- sync --------------------------------------------------------------------
+
+
+def _task_reason(pbs, upid: str) -> str:
+    """The first warning/error line of a finished task's log, or "" if it can't be read.
+
+    PBS reports a sync that partially failed as ``exitstatus: "WARNINGS: 1"``, which on its
+    own says nothing — the two causes seen on real hardware ("group … not owned by remote
+    user … on target" for a push, "snapshot … older than the newest on the sync target" for a
+    pull) are only in the task log. Best-effort by design: this runs on a path that is already
+    failing, so a second failure here must not replace the original one.
+    """
+    try:
+        lines = pbs.task_log(upid)
+    except Exception:  # noqa: BLE001 - the real error is the caller's, not this lookup's
+        return ""
+    for _n, text in lines:
+        upper = text.upper()
+        if "WARN" in upper or "ERROR" in upper:
+            return text.strip()
+    return ""
 
 
 def _sync_body(
@@ -97,7 +118,18 @@ def _sync_body(
             )
             upid = pbs.run_sync_job(name)
             step.detail = upid
-            _wait_or_stop(pbs, upid, recorder, deps, StepName.SYNC.value, "pbs")
+            try:
+                _wait_or_stop(pbs, upid, recorder, deps, StepName.SYNC.value, "pbs")
+            except TaskError as exc:
+                # The bare "Task UPID:… finished with status 'WARNINGS: 1'" is unreadable and
+                # is what the run row, the history and the notification all end up showing.
+                reason = _task_reason(pbs, upid)
+                raise TaskError(
+                    f"sync {route.sync_direction} {source.id} -> {target.id} failed"
+                    f" ({exc.exit_status or 'unknown status'})"
+                    + (f": {reason}" if reason else ""),
+                    exit_status=exc.exit_status,
+                ) from exc
 
     # Maintenance runs on the target: it is the box that just gained snapshots, whichever
     # side pushed or pulled them.
