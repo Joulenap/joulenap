@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from cryptography.exceptions import UnsupportedAlgorithm
 
 from ..connectors import net, ssh, tls
 from ..connectors.discovery import derive_pbs_from_storage, detect_mac
@@ -22,7 +23,12 @@ from ..connectors.errors import ApiError
 from ..connectors.pbs import get_fingerprint
 from ..connectors.provision import PbsProvisioner, PveProvisioner
 from ..connectors.pve import PveClient
-from ..connectors.sshkey import authorized_keys_line, generate_keypair, install_public_key
+from ..connectors.sshkey import (
+    authorized_keys_line,
+    generate_keypair,
+    install_public_key,
+    public_key_from,
+)
 from ..connectors.wol import send_magic_packet
 
 _PBS_PROBE_TIMEOUT = 3.0
@@ -166,13 +172,29 @@ def wol_test(*, mac: str, host: str = "", iface: str = "") -> dict[str, Any]:
 
 
 def ssh_keygen(*, key_path: Path) -> dict[str, Any]:
-    """Generate the app's ed25519 keypair; return the public key, the restricted
-    authorized_keys line to install (forced poweroff command), and where it was written."""
-    public_key = generate_keypair(key_path)
+    """Return the app's ed25519 keypair, generating it only if there isn't one already.
+
+    Get-or-create, not create: every PbsDevice's ``ssh_key_path`` defaults to this one file, so
+    regenerating on the second wizard run would leave the *first* PBS with an authorized_keys
+    line no private key matches any more — power-off would fail on a box that had been working,
+    with nothing in the UI to say why. A file that exists but can't be parsed is replaced: it
+    can't be the key any PBS trusts either, so there is nothing to preserve.
+
+    Returns the public key, the restricted authorized_keys line to install (forced poweroff
+    command), where it lives, and whether this call created it.
+    """
+    try:
+        return _key_result(public_key_from(key_path), key_path, created=False)
+    except (OSError, ValueError, UnsupportedAlgorithm):
+        return _key_result(generate_keypair(key_path), key_path, created=True)
+
+
+def _key_result(public_key: str, key_path: Path, *, created: bool) -> dict[str, Any]:
     return {
         "public_key": public_key,
         "authorized_keys_line": authorized_keys_line(public_key),
         "key_path": str(key_path),
+        "created": created,
     }
 
 

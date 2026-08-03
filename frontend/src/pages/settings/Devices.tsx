@@ -15,6 +15,8 @@ import {
   pveCardMeta,
   routesUsing,
 } from '../../utils/deviceForm'
+import { AddPbsWizard } from '../../wizard/AddPbsWizard'
+import { AddPveWizard } from '../../wizard/AddPveWizard'
 import { DeviceModal } from './DeviceModal'
 
 // The mockup's two card glyphs, inline so they follow `currentColor` and need no asset.
@@ -247,23 +249,10 @@ export function Devices({ status }: { status: StatusResponse | null }) {
         />
       )}
 
-      {/* The guided add flows are M12. Saying so beats a half-built form, and the YAML editor
-          is a real answer in the meantime. */}
-      {adding && (
-        <Modal
-          title={t(adding === 'pves' ? `${ns}.addPve` : `${ns}.addPbs`)}
-          onClose={() => setAdding(null)}
-          footer={
-            <button type="button" className="btn btn-accent" onClick={() => setAdding(null)}>
-              {t(`${ns}.gotIt`)}
-            </button>
-          }
-        >
-          <div className="modal-bd">
-            <p className="modal-note">{t(`${ns}.addSoon`)}</p>
-          </div>
-        </Modal>
-      )}
+      {/* Each "+ Add" button already knows its kind, so it picks its flow directly. Both
+          wizards reload the config themselves, so the cards appear without a round trip here. */}
+      {adding === 'pves' && <AddPveWizard onClose={() => setAdding(null)} />}
+      {adding === 'pbss' && <AddPbsWizard onClose={() => setAdding(null)} />}
 
       {guard && (
         <Modal

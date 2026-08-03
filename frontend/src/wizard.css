@@ -1,0 +1,205 @@
+/* The device wizard, ported from design/overhaul/src/wiz2.html.
+ *
+ * Only what that mockup adds on top of what already exists: the flows render inside
+ * components/Modal.tsx, so the dialog chrome, the `.modal`-scoped form controls, `.frow`,
+ * `.field`, `.help`, `.radio-row`, `.tglrow`, `.warn`, `.modal-note` and `.form-banner` all
+ * come from dashboard.css / settings.css unchanged.
+ *
+ * The stepper is `.wsteps`/`.wstep`, NOT the mockup's `.steps`/`.step`: dashboard.css already
+ * owns those two for the run-step timeline in the history rows, and a wizard rendered from the
+ * homepage would inherit them.
+ *
+ * Every colour is a --jn-* token, so both palettes follow for free (theme.test.ts enforces it).
+ */
+
+.wsteps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 14px 18px 0;
+}
+.wstep {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.wstep .sn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text-faint);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  flex: none;
+}
+.wstep .sl {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--jn-text-faint);
+  white-space: nowrap;
+}
+.wstep.cur .sn {
+  background: var(--jn-accent);
+  border-color: var(--jn-accent);
+  color: var(--jn-accent-ink);
+}
+.wstep.cur .sl {
+  color: var(--jn-text);
+}
+.wstep.done .sn {
+  border-color: var(--jn-green);
+  color: var(--jn-green);
+}
+.wstep.done .sl {
+  color: var(--jn-text-dim);
+}
+.wstep-line {
+  flex: 1;
+  height: 1px;
+  background: var(--jn-border);
+  margin: 0 10px;
+  min-width: 14px;
+}
+/* The labels are the first thing worth dropping when the dialog is narrow: the numbered
+   circles and the accent still say where you are. */
+@media (max-width: 560px) {
+  .wstep .sl {
+    display: none;
+  }
+}
+
+/* The mockup's amber callout. `.form-warn` in dashboard.css is a bare amber *line* under a
+   field, not this box, and `.form-banner` is the red one — neither is this. */
+.warn {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--jn-amber) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--jn-amber) 45%, transparent);
+  border-radius: 8px;
+  padding: 10px 13px;
+  font-size: 12.5px;
+  color: var(--jn-text-mid);
+  line-height: 1.5;
+}
+.warn .wi {
+  color: var(--jn-amber);
+  flex: none;
+}
+
+/* A confirmed result carried into the next step ("Connected · token created"). */
+.okline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--jn-green);
+}
+.okline .mono {
+  color: var(--jn-text-dim);
+  font-size: 12px;
+}
+
+/* What the wizard discovered about the device, for the user to read rather than type. */
+.detected {
+  background: var(--jn-panel-alt);
+  border: 1px solid var(--jn-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
+.detected .t {
+  font-weight: 600;
+}
+.detected .m {
+  color: var(--jn-text-faint);
+  font-size: 12.5px;
+}
+
+/* One PBS storage found in the PVE's config: facts on the left, the action on the right. */
+.found {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--jn-panel-alt);
+  border: 1px solid var(--jn-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.found + .found {
+  margin-top: 8px;
+}
+.found .fi {
+  flex: 1;
+  min-width: 0;
+}
+.found .t {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.found .t .mono {
+  font-weight: 400;
+  font-size: 11.5px;
+  color: var(--jn-text-faint);
+}
+.found .m {
+  color: var(--jn-text-faint);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.found .linked {
+  color: var(--jn-green);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The public key, shown for copying. Scrolls rather than wrapping — a wrapped key line is
+   easy to mis-paste. */
+.keyblock {
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--jn-text-mid);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* One line of the final step's report. */
+.testline {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  padding: 4px 0;
+  line-height: 1.5;
+}
+.testline .ok {
+  color: var(--jn-green);
+  flex: none;
+}
+.testline .bad {
+  color: var(--jn-red);
+  flex: none;
+}
+
+/* MAC field + its Detect/Test buttons on one row. */
+.inline-row {
+  display: flex;
+  gap: 8px;
+}
+.inline-row input {
+  flex: 1;
+  min-width: 0;
+}

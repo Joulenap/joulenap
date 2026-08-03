@@ -229,11 +229,15 @@ export const api = {
   wizardInterfaces: () => req<NetInterface[]>('GET', '/wizard/interfaces'),
   wizardDetectMac: (host: string) =>
     req<{ mac: string | null }>('POST', '/wizard/wol/detect-mac', { host }),
+  // Get-or-create: `created` is false when the key already on disk was reused, which is what
+  // adding a second PBS does — regenerating would strand the first one's authorized_keys.
   wizardKeygen: () =>
-    req<{ public_key: string; authorized_keys_line: string; key_path: string }>(
-      'POST',
-      '/wizard/ssh/keygen',
-    ),
+    req<{
+      public_key: string
+      authorized_keys_line: string
+      key_path: string
+      created: boolean
+    }>('POST', '/wizard/ssh/keygen'),
   wizardSshInstall: (body: Record<string, unknown>) =>
     req<{ installed: boolean }>('POST', '/wizard/ssh/install', body),
   wizardSshHostkey: (host: string, port = 22) =>

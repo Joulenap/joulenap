@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -71,9 +73,37 @@ def test_ssh_keygen_generates_real_key(client):
     body = r.json()
     assert body["public_key"].startswith("ssh-ed25519 ")
     assert body["key_path"].endswith("id_ed25519")
+    assert body["created"] is True
     # The restricted line to paste/install locks the key to poweroff only.
     assert body["authorized_keys_line"].startswith('command="systemctl poweroff",')
     assert body["authorized_keys_line"].endswith(body["public_key"])
+
+
+def test_ssh_keygen_reuses_an_existing_key(client):
+    """Adding a second PBS must not invalidate the first one's power-off: every device's
+    ssh_key_path points at this same file, so a regenerated key would leave the first PBS
+    trusting a public half no private key matches any more."""
+    first = client.post("/api/wizard/ssh/keygen").json()
+    key_file = Path(first["key_path"])
+    written = key_file.read_bytes()
+
+    second = client.post("/api/wizard/ssh/keygen").json()
+
+    assert second["public_key"] == first["public_key"]
+    assert second["created"] is False
+    assert key_file.read_bytes() == written  # not rewritten, byte for byte
+
+
+def test_ssh_keygen_replaces_an_unreadable_key(client):
+    """A file that isn't a usable private key can't be what any PBS trusts either, so there
+    is nothing to preserve — generate over it rather than failing the whole flow."""
+    key_file = Path(client.post("/api/wizard/ssh/keygen").json()["key_path"])
+    key_file.write_text("not a private key")
+
+    body = client.post("/api/wizard/ssh/keygen").json()
+
+    assert body["created"] is True
+    assert body["public_key"].startswith("ssh-ed25519 ")
 
 
 def test_ssh_install_passes_through(client, monkeypatch):

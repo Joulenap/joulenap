@@ -331,6 +331,110 @@
       "errSave": "Impossibile salvare la route."
     }
   },
+  "wizard": {
+    "pve": {
+      "title": "Aggiungi Proxmox VE",
+      "connected": "Connesso",
+      "tokenCreated": "token {{id}} creato",
+      "cluster": "Cluster · {{count}} nodi ({{nodes}})",
+      "standalone": "Standalone · nodo {{nodes}}",
+      "storagesFound": "Storage PBS trovati nella configurazione di questo PVE",
+      "noStorages": "Nessuno storage PBS trovato in questo PVE. Aggiungi lo storage in PVE e ripeti, oppure aggiungi un PBS da Impostazioni → Dispositivi.",
+      "datastore": "datastore {{datastore}}",
+      "alreadyRegistered": "Già registrato in Joulenap",
+      "newStorage": "Nuovo — non ancora registrato in Joulenap · fingerprint acquisita",
+      "willLink": "Verrà collegato",
+      "configureNow": "Configura ora",
+      "storagesHelp": "Uno storage già registrato viene collegato automaticamente, senza passaggi aggiuntivi.",
+      "oneAtATime": "Si configura un solo PBS nuovo per volta — aggiungi gli altri da Impostazioni → Dispositivi → + Aggiungi.",
+      "pbsReachable": "{{host}} raggiungibile · fingerprint presa dalla configurazione dello storage",
+      "readyTitle": "Dispositivi pronti",
+      "readyBody": "Nessuna route configurata: creane una da “+ Nuova route” in home — sorgenti, orario, guest e retention si scelgono lì."
+    },
+    "pbs": {
+      "title": "Aggiungi Proxmox Backup Server",
+      "connected": "Connesso · fingerprint fissata",
+      "orphan": "Nessun PVE registrato invia backup a {{id}}: le route di tipo Backup verso di lui non sono disponibili finché non aggiungi lo storage in PVE e ripeti “+ Aggiungi → Proxmox VE”. Le route Sync, Verify ed External funzionano subito."
+    },
+    "step": {
+      "pve": {
+        "connection": "Connessione",
+        "discovery": "Scoperta PBS",
+        "configurePbs": "Configura PBS",
+        "finish": "Fine"
+      },
+      "pbs": {
+        "connection": "Connessione",
+        "wake": "Accensione",
+        "power": "Spegnimento",
+        "verification": "Verifica"
+      }
+    },
+    "nav": {
+      "connect": "Connetti e continua →",
+      "next": "Avanti →",
+      "back": "← Indietro",
+      "finish": "Fine"
+    },
+    "cred": {
+      "root": "Root temporaneo (consigliato)",
+      "token": "Token API esistente",
+      "pveLabel": "Credenziali PVE",
+      "pveHelp": "Le credenziali root servono solo ora per creare il token dedicato — non vengono mai salvate.",
+      "pbsLabel": "Credenziali PBS",
+      "pbsHelp": "Usate solo per creare il token dedicato, assegnargli i permessi che servono alle route Sync e installare la chiave SSH — mai salvate.",
+      "pbsInPveHelp": "Il PBS è una macchina diversa dal PVE: servono le sue credenziali. Root serve solo ora per creare il token e installare la chiave SSH — mai salvato."
+    },
+    "field": {
+      "name": "Nome",
+      "nameHelp": "Il nome mostrato ovunque in Joulenap. Lettere minuscole, cifre, . _ e -",
+      "user": "Utente",
+      "password": "Password",
+      "tokenId": "Token ID",
+      "tokenSecret": "Token secret",
+      "mac": "MAC (Wake-on-LAN)",
+      "wolIface": "Interfaccia WoL",
+      "fingerprintPlaceholder": "rilevata alla connessione"
+    },
+    "wake": {
+      "detect": "Rileva",
+      "test": "Prova",
+      "macHelp": "Rilevato via ARP mentre il PBS è acceso. Se è spento, inseriscilo a mano.",
+      "macDetected": "✓ Rilevato via ARP — il PBS è acceso adesso.",
+      "wolSent": "✓ Magic packet inviato a {{broadcast}} — controlla se la macchina si accende.",
+      "biosWarning": "Abilita il Wake-on-LAN nel BIOS del PBS e armalo nel sistema operativo (ethtool -s <nic> wol g, persistente) — Joulenap non può farlo da remoto."
+    },
+    "power": {
+      "managed": "Joulenap gestisce l'alimentazione (WoL + spegnimento)",
+      "managedHint": "Disattiva per un PBS sempre acceso (una VM o uno in cloud): Joulenap si limita a schedulare verso di lui e i passi di accensione e spegnimento vengono saltati."
+    },
+    "ssh": {
+      "title": "Chiave SSH per lo spegnimento",
+      "reused": "Viene riusata la chiave che Joulenap ha già — generarne una nuova romperebbe lo spegnimento sulle macchine che già si fidano di questa.",
+      "autoInstall": "Installa automaticamente con le credenziali root (temporanee)",
+      "hostKeyWhy": "Conferma la host key del PBS prima che venga inviata la password di root; viene poi salvata in known_hosts.",
+      "hostKeyTrusted": "Host key salvata"
+    },
+    "report": {
+      "pveApi": "{{id}} · API raggiungibile, token valido",
+      "pbsConfigured": "{{id}} · token creato · SSH ok · MAC salvato",
+      "pbsApi": "API raggiungibile · datastore {{datastore}} ok",
+      "wake": "Wake-on-LAN pronto · MAC {{mac}}",
+      "sshInstalled": "Chiave SSH installata · host key salvata",
+      "sshManual": "Chiave SSH pronta — incolla la riga qui sopra nell'authorized_keys del PBS",
+      "unmanaged": "PBS sempre acceso: Joulenap non lo accende né lo spegne mai",
+      "linked": "Storage PVE collegati: {{list}}"
+    },
+    "err": {
+      "idRequired": "Il nome è obbligatorio.",
+      "idPattern": "Usa lettere minuscole, cifre, punti, trattini bassi o trattini, iniziando con una lettera o una cifra.",
+      "idTaken": "“{{id}}” è già usato da un altro dispositivo.",
+      "passwordRequired": "La password è obbligatoria per il setup con root temporaneo.",
+      "tokenRequired": "Servono sia il token ID sia il secret.",
+      "installNeedsRoot": "L'installazione automatica della chiave richiede le credenziali root. Passa a root temporaneo, oppure disattiva l'opzione e incolla la riga a mano.",
+      "hostKeyNotTrusted": "Conferma prima la host key del PBS — la password di root viene inviata solo su una connessione la cui host key è stata verificata."
+    }
+  },
   "settings": {
     "nav": {
       "localization": "Localizzazione",

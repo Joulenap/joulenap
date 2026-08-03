@@ -8,7 +8,7 @@ import { Dashboard } from '../pages/Dashboard'
 import { Settings, type Tab } from '../pages/Settings'
 import { useStatus } from '../hooks/useStatus'
 import { c } from '../theme'
-import { WizardProvider } from '../wizard/WizardContext'
+import { AddPveWizard } from '../wizard/AddPveWizard'
 import { Header } from './Header'
 import { UnsavedGuardProvider, useUnsavedGuard } from './UnsavedGuard'
 
@@ -49,6 +49,7 @@ function ShellInner() {
   const [view, setView] = useState<View>('main')
   const [settingsTab, setSettingsTab] = useState<Tab>('devices')
   const [upd, setUpd] = useState<Awaited<ReturnType<typeof api.update>> | null>(null)
+  const [setupOpen, setSetupOpen] = useState(false)
 
   const openSettings = (tab: Tab) => {
     setSettingsTab(tab)
@@ -57,7 +58,6 @@ function ShellInner() {
 
   // Fresh install: with no PVE or no PBS there is nothing a route could connect, so nothing
   // can run. Only nagged on the homepage, not while the user is in Settings fixing it.
-  // TODO(M12): point the CTA at the "Add PVE / Add PBS" flows once they exist.
   const notConfigured =
     view === 'main' && !!config && (!config.pves.length || !config.pbss.length)
 
@@ -76,7 +76,17 @@ function ShellInner() {
           just make labelled fields harder to scan. */}
       <div style={{ maxWidth: view === 'main' ? 1400 : 1220, margin: '0 auto' }}>
         {stale && <Banner tone="red">⚠ {t('common.backendUnreachable')}</Banner>}
-        {notConfigured && <Banner tone="amber">⚙ {t('common.notConfigured')}</Banner>}
+        {/* The first-run CTA: flow A also covers the PBS, so one button is the whole setup.
+            It opens from the shell rather than from Settings so a fresh install never has to
+            find the tab first. */}
+        {notConfigured && (
+          <Banner tone="amber">
+            <span style={{ flex: 1 }}>⚙ {t('common.notConfigured')}</span>
+            <button type="button" className="btn btn-accent" onClick={() => setSetupOpen(true)}>
+              {t('common.runSetup')}
+            </button>
+          </Banner>
+        )}
         <Header
           status={status}
           view={view}
@@ -130,21 +140,18 @@ function ShellInner() {
             </>
           )}
         </footer>
+        {setupOpen && <AddPveWizard onClose={() => setSetupOpen(false)} />}
       </div>
     </div>
   )
 }
 
 export function AppShell() {
-  // WizardProvider sits above the view switch so setup-wizard progress survives navigation;
-  // it unmounts with AppShell on logout, clearing the secrets it holds (see WizardContext).
   return (
     <ConfigProvider>
-      <WizardProvider>
-        <UnsavedGuardProvider>
-          <ShellInner />
-        </UnsavedGuardProvider>
-      </WizardProvider>
+      <UnsavedGuardProvider>
+        <ShellInner />
+      </UnsavedGuardProvider>
     </ConfigProvider>
   )
 }

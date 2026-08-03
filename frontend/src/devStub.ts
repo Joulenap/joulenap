@@ -640,10 +640,18 @@ const RUN_DETAIL: Record<number, RunDetail> = {
 // fixture above, for consistency.
 const WIZARD_PBS_FINGERPRINT = 'aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99'
 
+// Two storages on purpose, so one run of flow A shows both halves of step 2: `pbs-backup`
+// points at the registered pbs-01 (host + datastore match, so it auto-links and step 3 is
+// skipped) while `pbs-archive` is unknown and offers "Configure now". Three nodes so the
+// cluster line has something to say.
 const WIZARD_PVE_CONNECT: PveConnectResult = {
   connected: true,
   version: '8.2.4',
-  nodes: [{ node: 'pve', status: 'online' }],
+  nodes: [
+    { node: 'alpha-1', status: 'online' },
+    { node: 'alpha-2', status: 'online' },
+    { node: 'alpha-3', status: 'online' },
+  ],
   storages: [
     {
       storage: 'pbs-backup',
@@ -651,6 +659,13 @@ const WIZARD_PVE_CONNECT: PveConnectResult = {
       port: 8007,
       datastore: 'backup',
       fingerprint: WIZARD_PBS_FINGERPRINT,
+    },
+    {
+      storage: 'pbs-archive',
+      host: '192.168.1.52',
+      port: 8007,
+      datastore: 'archive',
+      fingerprint: '99:88:77:66:55:44:33:22:11:00:ff:ee:dd:cc:bb:aa',
     },
   ],
   token: { id: 'root@pam!joulenap', secret: 'stub-pve-token-secret' },
@@ -680,11 +695,20 @@ const WIZARD_INTERFACES: NetInterface[] = [
 
 const WIZARD_DETECT_MAC: { mac: string | null } = { mac: 'AA:BB:CC:DD:EE:FF' }
 
-const WIZARD_KEYGEN: { public_key: string; authorized_keys_line: string; key_path: string } = {
+// `created: false` — the stub always answers as if a key were already on disk, which is the
+// second-PBS case and the one whose wording ("reusing the existing key") needs looking at.
+const WIZARD_KEYGEN: {
+  public_key: string
+  authorized_keys_line: string
+  key_path: string
+  created: boolean
+} = {
   public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly stub',
   authorized_keys_line:
-    'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly joulenap@stub',
+    'command="systemctl poweroff",no-port-forwarding,no-x11-forwarding,no-agent-forwarding,' +
+    'no-pty ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly joulenap',
   key_path: '/app/data/id_ed25519',
+  created: false,
 }
 
 const WIZARD_SSH_INSTALL: { installed: boolean } = { installed: true }
@@ -822,6 +846,21 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // Device CRUD mutates too, for the same reason as routes above: the Devices tab's whole
   // point is that an edit or a removal shows up on the next config read. The removal guard
   // needs the real 409 payload, so it is reproduced here rather than answered {ok:true}.
+  // ...and creation mutates, because that is the only thing the wizard's last step produces:
+  // without it a whole flow ends on a report about devices that are nowhere to be seen.
+  const created = method === 'POST' ? /^\/devices\/(pves|pbss)$/.exec(bare) : null
+  if (created && typeof init?.body === 'string') {
+    const section = created[1] as 'pves' | 'pbss'
+    const made = JSON.parse(init.body) as { id: string }
+    if ((CONFIG[section] as { id: string }[]).some((d) => d.id === made.id)) {
+      return new Response(JSON.stringify({ detail: `Device '${made.id}' already exists` }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    ;(CONFIG[section] as unknown[]) = [...CONFIG[section], made]
+    body = made
+  }
   const device = /^\/devices\/(pves|pbss)\/([^/]+)$/.exec(bare)
   if (device) {
     const [, section, id] = device as unknown as [string, 'pves' | 'pbss', string]

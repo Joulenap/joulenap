@@ -30,6 +30,16 @@ ROLE_PRIVS = "VM.Audit,VM.Backup,Datastore.Audit,Datastore.AllocateSpace,Datasto
 #   - Audit on /system: read-only node status (CPU / RAM / network for the dashboard).
 PBS_DATASTORE_ROLE = "DatastoreAdmin"
 PBS_SYSTEM_ROLE = "Audit"
+# ...and what a Sync route needs on /remote, where Joulenap creates the remote entry and the
+# sync job itself. RemoteAdmin is Remote.Audit+Modify+Read — enough for the remote and a PULL
+# job; a PUSH job additionally needs Remote.DatastoreBackup, which RemoteSyncPushOperator
+# carries (found on real hardware at GATE1: without it POST /config/sync is refused).
+#
+# This has to happen here, in the one-time root step: PBS answers *400 Unprivileged API tokens
+# can't set ACL items* to `PUT /access/acl` from any token, no matter which roles it holds. So
+# it can never be added later from the stored token — a PBS provisioned without these grants
+# has to be re-provisioned with root, or granted by hand on its console.
+PBS_REMOTE_ROLES = ("RemoteAdmin", "RemoteSyncPushOperator")
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "DELETE"})
 
@@ -194,10 +204,13 @@ class PbsProvisioner(_Provisioner):
         self, username: str, password: str, datastore: str, token_name: str = "joulenap"
     ) -> CreatedToken:
         """Full quick-setup flow: log in, create the token, grant it built-in roles —
-        DatastoreAdmin on the datastore (GC + status) and Audit on /system (node load).
-        No role creation — PBS doesn't expose role management via the API."""
+        DatastoreAdmin on the datastore (GC + status), Audit on /system (node load) and both
+        /remote roles Sync routes need. No role creation — PBS doesn't expose role management
+        via the API."""
         self.login(username, password)
         token = self.create_token(username, token_name)
         self.grant_acl(token.token_id, f"/datastore/{datastore}", PBS_DATASTORE_ROLE)
         self.grant_acl(token.token_id, "/system", PBS_SYSTEM_ROLE)
+        for role in PBS_REMOTE_ROLES:
+            self.grant_acl(token.token_id, "/remote", role)
         return token

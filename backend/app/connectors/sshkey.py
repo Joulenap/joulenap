@@ -39,6 +39,21 @@ def authorized_keys_line(public_key: str) -> str:
     return f"{_KEY_OPTIONS} {public_key.strip()}"
 
 
+def public_key_from(key_path: Path, comment: str = _KEY_COMMENT) -> str:
+    """Read ``key_path`` and return its OpenSSH public line, in the same form
+    :func:`generate_keypair` returns.
+
+    Raises ``OSError``/``ValueError`` if the file is missing or is not a usable private key —
+    the caller decides whether that means "generate one" or "fail".
+    """
+    key = serialization.load_ssh_private_key(key_path.read_bytes(), password=None)
+    public_bytes = key.public_key().public_bytes(
+        encoding=serialization.Encoding.OpenSSH,
+        format=serialization.PublicFormat.OpenSSH,
+    )
+    return f"{public_bytes.decode('ascii')} {comment}"
+
+
 def generate_keypair(key_path: Path, comment: str = _KEY_COMMENT) -> str:
     """Generate an ed25519 keypair, write the private key to ``key_path`` (mode 0600),
     and return the OpenSSH public key line. Overwrites any existing key at that path."""

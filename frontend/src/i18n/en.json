@@ -331,6 +331,110 @@
       "errSave": "Couldn't save the route."
     }
   },
+  "wizard": {
+    "pve": {
+      "title": "Add Proxmox VE",
+      "connected": "Connected",
+      "tokenCreated": "token {{id}} created",
+      "cluster": "Cluster · {{count}} nodes ({{nodes}})",
+      "standalone": "Standalone · node {{nodes}}",
+      "storagesFound": "PBS storages found in this PVE's configuration",
+      "noStorages": "No PBS storage found in this PVE. Add the storage in PVE and run this again, or add a PBS on its own from Settings → Devices.",
+      "datastore": "datastore {{datastore}}",
+      "alreadyRegistered": "Already registered in Joulenap",
+      "newStorage": "New — not yet registered in Joulenap · fingerprint captured",
+      "willLink": "Will be linked",
+      "configureNow": "Configure now",
+      "storagesHelp": "An already-registered storage is linked automatically, with no extra steps.",
+      "oneAtATime": "One new PBS is configured per run — add the others from Settings → Devices → + Add.",
+      "pbsReachable": "{{host}} reachable · fingerprint pinned from the storage config",
+      "readyTitle": "Devices ready",
+      "readyBody": "No route is configured yet: create one from “+ New route” on the homepage — sources, time, guests and retention are chosen there."
+    },
+    "pbs": {
+      "title": "Add Proxmox Backup Server",
+      "connected": "Connected · fingerprint pinned",
+      "orphan": "No registered PVE sends backups to {{id}}: Backup routes to it are unavailable until you add the storage in PVE and run “+ Add → Proxmox VE” again. Sync, Verify and External routes work right away."
+    },
+    "step": {
+      "pve": {
+        "connection": "Connection",
+        "discovery": "PBS discovery",
+        "configurePbs": "Configure PBS",
+        "finish": "Finish"
+      },
+      "pbs": {
+        "connection": "Connection",
+        "wake": "Wake-up",
+        "power": "Power-off",
+        "verification": "Verification"
+      }
+    },
+    "nav": {
+      "connect": "Connect and continue →",
+      "next": "Next →",
+      "back": "← Back",
+      "finish": "Finish"
+    },
+    "cred": {
+      "root": "Transient root (recommended)",
+      "token": "Existing API token",
+      "pveLabel": "PVE credentials",
+      "pveHelp": "Root credentials are used only now to create the dedicated token — they are never stored.",
+      "pbsLabel": "PBS credentials",
+      "pbsHelp": "Used only to create the dedicated token, grant it what Sync routes need and install the SSH key — never stored.",
+      "pbsInPveHelp": "The PBS is a different machine from the PVE: it needs its own credentials. Root is used only now to create the token and install the SSH key — never stored."
+    },
+    "field": {
+      "name": "Name",
+      "nameHelp": "The name shown everywhere in Joulenap. Lower-case letters, digits, . _ and -",
+      "user": "User",
+      "password": "Password",
+      "tokenId": "Token ID",
+      "tokenSecret": "Token secret",
+      "mac": "MAC (Wake-on-LAN)",
+      "wolIface": "WoL interface",
+      "fingerprintPlaceholder": "detected on connect"
+    },
+    "wake": {
+      "detect": "Detect",
+      "test": "Test",
+      "macHelp": "Detected via ARP while the PBS is powered on. If it is off, type it in.",
+      "macDetected": "✓ Detected via ARP — the PBS is on right now.",
+      "wolSent": "✓ Magic packet sent to {{broadcast}} — watch whether the box wakes.",
+      "biosWarning": "Enable Wake-on-LAN in the PBS BIOS and arm it in the OS (ethtool -s <nic> wol g, persistent) — Joulenap cannot do this remotely."
+    },
+    "power": {
+      "managed": "Joulenap manages power (WoL + power-off)",
+      "managedHint": "Turn this off for an always-on PBS (a VM, or a cloud-hosted one): Joulenap only schedules against it, and the wake-up and power-off steps are skipped."
+    },
+    "ssh": {
+      "title": "SSH key for power-off",
+      "reused": "Reusing the key Joulenap already has — generating a new one would break power-off on the boxes that already trust this one.",
+      "autoInstall": "Install automatically with the (transient) root credentials",
+      "hostKeyWhy": "Confirm the PBS host key before the root password is sent; it is then stored in known_hosts.",
+      "hostKeyTrusted": "Host key stored"
+    },
+    "report": {
+      "pveApi": "{{id}} · API reachable, token valid",
+      "pbsConfigured": "{{id}} · token created · SSH ok · MAC saved",
+      "pbsApi": "API reachable · datastore {{datastore}} ok",
+      "wake": "Wake-on-LAN armed · MAC {{mac}}",
+      "sshInstalled": "SSH key installed · host key stored",
+      "sshManual": "SSH key ready — paste the line above into the PBS's authorized_keys",
+      "unmanaged": "Always-on PBS: Joulenap never wakes or powers it off",
+      "linked": "PVE storages linked: {{list}}"
+    },
+    "err": {
+      "idRequired": "A name is required.",
+      "idPattern": "Use lower-case letters, digits, dots, underscores or dashes, starting with a letter or digit.",
+      "idTaken": "“{{id}}” is already taken by another device.",
+      "passwordRequired": "A password is required for transient-root setup.",
+      "tokenRequired": "Both the token ID and its secret are required.",
+      "installNeedsRoot": "Installing the key automatically needs the root credentials. Switch to transient root, or turn the toggle off and paste the line yourself.",
+      "hostKeyNotTrusted": "Confirm the PBS host key first — the root password is only sent over a connection whose host key you have checked."
+    }
+  },
   "settings": {
     "nav": {
       "localization": "Localization",

@@ -233,6 +233,9 @@ def wol_test(body: WolTestRequest) -> dict[str, Any]:
     )
 
 
-# TODO(M12): the scoped per-device flows — a PVE's PBS discovery feeding straight into a
-# device entry, and the transient-root ACL grant a push sync route needs on the peer — are
-# the frontend wizard's business and land with it.
+# The per-device flows (M12) are orchestrated by the frontend wizard out of these same
+# stateless calls and finalised with POST /api/devices/{kind} — there is no wizard-owned
+# device state to keep on this side. The one thing that had to move into the wizard's
+# transient-root step is the /remote ACL grant a Sync route needs on the peer: PBS refuses
+# ACL writes from a token, so `PbsProvisioner.provision_token` now makes it while it still
+# holds the root ticket.

@@ -10,6 +10,7 @@ import pytest
 from app.connectors.errors import ApiError
 from app.connectors.provision import (
     PBS_DATASTORE_ROLE,
+    PBS_REMOTE_ROLES,
     PBS_SYSTEM_ROLE,
     ROLE_ID,
     PbsProvisioner,
@@ -180,13 +181,39 @@ def test_pbs_provision_token_grants_datastore_scoped_acl():
     assert token.secret == "pbs-secret"
     # PBS has no custom-role API, so we must NOT attempt to create one...
     assert not any(p.endswith("/access/roles") for _m, p, _d in calls)
-    # ...and the token gets two built-in grants (PBS param names): DatastoreAdmin on the
+    # ...and the token gets built-in grants (PBS param names): DatastoreAdmin on the
     # datastore (GC/status) and Audit on /system (node load), both bound to the token.
-    acls = {d["path"]: d for m, p, d in calls if m == "PUT" and p.endswith("/access/acl")}
-    assert acls["/datastore/backup"]["role"] == PBS_DATASTORE_ROLE
-    assert acls["/datastore/backup"]["auth-id"] == "root@pam!joulenap"
-    assert acls["/system"]["role"] == PBS_SYSTEM_ROLE
-    assert acls["/system"]["auth-id"] == "root@pam!joulenap"
+    acls = _acls(calls)
+    assert ("/datastore/backup", PBS_DATASTORE_ROLE) in acls
+    assert ("/system", PBS_SYSTEM_ROLE) in acls
+    assert all(
+        d["auth-id"] == "root@pam!joulenap"
+        for m, p, d in calls
+        if m == "PUT" and p.endswith("/access/acl")
+    )
+
+
+def test_pbs_provision_token_grants_both_remote_roles_for_sync():
+    """Sync routes have Joulenap create the remote entry and the sync job itself, and PBS
+    refuses ACL writes from a token — so if these two grants don't happen here, while the
+    root ticket is still held, they can never happen over the API at all. RemoteAdmin alone
+    covers pull; push additionally needs Remote.DatastoreBackup (RemoteSyncPushOperator)."""
+    calls: list = []
+    PbsProvisioner(
+        "pbs.local", transport=httpx.MockTransport(_pbs_handler(calls))
+    ).provision_token("root@pam", "pw", "backup")
+
+    acls = _acls(calls)
+    for role in PBS_REMOTE_ROLES:
+        assert ("/remote", role) in acls
+
+
+def _acls(calls: list) -> list[tuple[str, str]]:
+    """The (path, role) pairs granted, in order. A list, not a dict: /remote takes two roles
+    and keying by path would silently drop one."""
+    return [
+        (d["path"], d["role"]) for m, p, d in calls if m == "PUT" and p.endswith("/access/acl")
+    ]
 
 
 def test_wizard_pbs_provision_defaults_realm_for_bare_username():
