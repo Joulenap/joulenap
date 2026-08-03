@@ -5,6 +5,7 @@ import './i18n'
 import './index.css'
 import './responsive.css'
 import './dashboard.css'
+import './settings.css'
 
 // The stub fakes an authenticated session, so exactly two things may load it:
 //   - dev server with `--mode stub` (`import.meta.env.DEV` is false for any `vite build`);

@@ -64,33 +64,11 @@
   grid-template-columns: 84px 96px 1fr;
 }
 
-/* Settings */
+/* Settings. M11 replaced the left sidebar with top tabs, so .jn-settings-nav / -navbtn /
+   -rail / -hint went with it (grepped: no other consumer). What is left is the pane
+   wrapper; everything inside it lives in settings.css, ported from the mockup. */
 .jn-settings {
-  display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 22px;
-  align-items: start;
   padding-bottom: 28px;
-}
-.jn-settings-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  position: sticky;
-  top: 22px;
-}
-.jn-settings-navbtn {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  width: 100%;
-  text-align: left;
-}
-.jn-settings-rail {
-  width: 3px;
-  align-self: stretch;
-  min-height: 30px;
-  flex: 0 0 auto;
 }
 
 @media (max-width: 900px) {
@@ -133,29 +111,5 @@
   }
   .jn-log-row > :nth-child(3) {
     grid-column: 1 / -1;
-  }
-
-  .jn-settings {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-  /* Nav becomes a 2x3 grid of compact buttons above the content. `sticky` is dropped:
-   * on a phone a pinned nav eats a third of the viewport. */
-  .jn-settings-nav {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    position: static;
-  }
-  .jn-settings-navbtn {
-    gap: 8px;
-    min-width: 0;
-  }
-  .jn-settings-rail {
-    min-height: 22px;
-  }
-  /* The hint line is first-run guidance for desktop; it cannot survive a ~170px button. */
-  .jn-settings-hint {
-    display: none;
   }
 }

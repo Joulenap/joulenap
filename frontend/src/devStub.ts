@@ -96,6 +96,17 @@ const DEVICES: DeviceLists = {
       api_token_secret: '***REDACTED***',
       storages: { 'pbs-01': 'pbs-backup' },
     },
+    {
+      // Deliberately used by no route: without it every Remove button in the mockup's
+      // scenario hits the guard-rail and the happy path is unreachable against the stub.
+      id: 'pve-spare',
+      host: '192.168.1.13',
+      port: 8006,
+      verify_tls: true,
+      api_token_id: 'joulenap@pve!routes',
+      api_token_secret: '***REDACTED***',
+      storages: {},
+    },
   ],
   pbss: [
     {
@@ -250,6 +261,7 @@ const STATUS: StatusResponse = {
     { id: 'pve-alpha', online: true },
     { id: 'pve-beta', online: true },
     { id: 'pve-lab', online: true },
+    { id: 'pve-spare', online: false },
   ],
   pbss: [
     {
@@ -725,6 +737,15 @@ const ROUTES: Record<string, unknown> = {
   'POST /wizard/ssh/hostkey': WIZARD_SSH_HOSTKEY,
   'POST /wizard/ssh/trust': WIZARD_SSH_TRUST,
   'POST /wizard/wol/test': WIZARD_WOL_TEST,
+  // Delivery outcomes come back as 200, one entry per enabled channel — one failing, so the
+  // Notifications tab's per-channel report has both states to render.
+  'POST /notify/test': {
+    channels: [
+      { channel: 'telegram', ok: true, error: null },
+      { channel: 'ntfy', ok: false, error: 'Name or service not known: ntfy.lan' },
+    ],
+  },
+  'POST /config/api-key': { api_key: 'jn_r0d94q7km2c8vt1zx5w3nbhy6f41c' },
 }
 
 const realFetch = globalThis.fetch.bind(globalThis)
@@ -748,8 +769,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     Object.assign(CONFIG, JSON.parse(init.body))
     body = CONFIG
   }
-  // Read through to the live list rather than the table's snapshot, which route CRUD replaces.
+  // Read through to the live lists rather than the table's snapshot, which route and device
+  // CRUD replace.
   if (key === 'GET /routes') body = CONFIG.routes
+  if (key === 'GET /devices') body = { pves: CONFIG.pves, pbss: CONFIG.pbss }
   if (body === undefined && key.startsWith('GET /logs')) body = LOGS
   if (body === undefined && bare === '/logs') body = LOGS
   // Query-dependent fixtures: the guest panel asks per PVE, and an expanded history row asks
@@ -786,6 +809,58 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (editId && method === 'DELETE') {
     CONFIG.routes = CONFIG.routes.filter((r) => r.id !== editId)
     return new Response(null, { status: 204 })
+  }
+  // The kill-switch mutates for the same reason: its whole point is the persistent banner the
+  // shell draws from /status, and a stub that answered {ok:true} would make it look dead.
+  if (key === 'POST /scheduler/toggle' && typeof init?.body === 'string') {
+    const { enabled } = JSON.parse(init.body) as { enabled: boolean }
+    CONFIG.app.scheduler_enabled = enabled
+    STATUS.scheduler_enabled = enabled
+    STATUS.state = enabled ? (STATUS.running ? 'running' : 'idle') : 'paused'
+    body = { enabled, next_runs: STATUS.next_runs.map((n) => ({ route_id: n.route_id, at: n.at })) }
+  }
+  // Device CRUD mutates too, for the same reason as routes above: the Devices tab's whole
+  // point is that an edit or a removal shows up on the next config read. The removal guard
+  // needs the real 409 payload, so it is reproduced here rather than answered {ok:true}.
+  const device = /^\/devices\/(pves|pbss)\/([^/]+)$/.exec(bare)
+  if (device) {
+    const [, section, id] = device as unknown as [string, 'pves' | 'pbss', string]
+    const list = CONFIG[section] as { id: string }[]
+    if (method === 'PUT' && typeof init?.body === 'string') {
+      const updated = JSON.parse(init.body) as { id: string }
+      ;(CONFIG[section] as unknown[]) = list.map((d) => (d.id === id ? updated : d))
+      body = updated
+    }
+    if (method === 'DELETE') {
+      const used = CONFIG.routes
+        .filter((r) =>
+          section === 'pbss'
+            ? r.target === id || r.source_pbs === id
+            : r.sources.some((s) => s.pve === id),
+        )
+        .map((r) => r.name || r.id)
+      if (used.length) {
+        return new Response(
+          JSON.stringify({
+            detail: {
+              message: `'${id}' is used by ${used.length} route(s). Change or delete them first — removing the device would break them.`,
+              routes: used,
+            },
+          }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      ;(CONFIG[section] as unknown[]) = list.filter((d) => d.id !== id)
+      return new Response(null, { status: 204 })
+    }
+  }
+  // A connection test answers what the real endpoint answers: a one-liner for the card.
+  const devTest = /^\/devices\/(pves|pbss)\/([^/]+)\/test$/.exec(bare)
+  if (devTest && method === 'POST') {
+    body =
+      devTest[1] === 'pves'
+        ? { ok: true, detail: '12 guest(s) visible' }
+        : { ok: true, detail: 'datastore backup: 62% used' }
   }
   // ROUTES is keyed on exact paths, so /runs/{id} needs its own match.
   const runId = method === 'GET' ? /^\/runs\/(\d+)$/.exec(bare)?.[1] : undefined

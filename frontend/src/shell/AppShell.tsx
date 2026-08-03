@@ -47,7 +47,7 @@ function ShellInner() {
   const { status, refresh, stale } = useStatus()
   const { guard } = useUnsavedGuard()
   const [view, setView] = useState<View>('main')
-  const [settingsTab, setSettingsTab] = useState<Tab>('localization')
+  const [settingsTab, setSettingsTab] = useState<Tab>('devices')
   const [upd, setUpd] = useState<Awaited<ReturnType<typeof api.update>> | null>(null)
 
   const openSettings = (tab: Tab) => {
@@ -80,7 +80,7 @@ function ShellInner() {
         <Header
           status={status}
           view={view}
-          onToggleView={() => guard(() => (view === 'main' ? openSettings('localization') : setView('main')))}
+          onToggleView={() => guard(() => (view === 'main' ? openSettings('devices') : setView('main')))}
           onLogout={logout}
         />
         {/* Below the header, not above it: these two describe the running app, and the pill
@@ -100,7 +100,12 @@ function ShellInner() {
         ) : view === 'main' ? (
           <Dashboard status={status} refreshStatus={refresh} />
         ) : (
-          <Settings onClose={() => setView('main')} initialTab={settingsTab} />
+          <Settings
+            onClose={() => setView('main')}
+            initialTab={settingsTab}
+            status={status}
+            refreshStatus={refresh}
+          />
         )}
         <footer
           style={{

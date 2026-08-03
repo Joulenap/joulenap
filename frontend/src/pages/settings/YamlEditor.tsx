@@ -11,7 +11,7 @@ import { api, ApiError } from '../../api/client'
 import { Spinner } from '../../components/Spinner'
 import { useConfig } from '../../config/ConfigContext'
 import { useRegisterDirty } from '../../shell/UnsavedGuard'
-import { c, currentTheme, ghostBtn, mono, panelStyle, primaryBtn } from '../../theme'
+import { c, currentTheme, mono } from '../../theme'
 import { copyToClipboard } from '../../utils/clipboard'
 
 // This module is loaded lazily (see Advanced.tsx) so CodeMirror lands in its own chunk and
@@ -143,76 +143,84 @@ export function YamlEditor() {
     setNote(ok ? 'copied' : 'copyFailed')
   }
 
+  /**
+   * Download the document as a file. The buffer is used rather than a fresh GET so what
+   * lands on disk is what is on screen, unsaved edits included.
+   *
+   * It is the *redacted* document — `GET /config/yaml` masks every secret — so this is a
+   * readable copy for reference or a diff, not a restorable backup. The help text says so.
+   */
+  function onExport() {
+    const blob = new Blob([view.current?.state.doc.toString() ?? text], {
+      type: 'application/yaml',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'config.yaml'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const ns = 'settings.advanced'
 
   return (
-    <div style={{ ...panelStyle, padding: '24px 26px', maxWidth: 640, marginTop: 18 }}>
-      <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
-        {t(`${ns}.yamlTitle`)}
-      </span>
-      <span style={{ display: 'block', fontSize: 13, color: c.textDim, lineHeight: 1.5, marginBottom: 16 }}>
-        {t(`${ns}.yamlSubtitle`)}
-      </span>
-
-      {loadErr && <div style={{ fontSize: 12, color: c.red }}>{loadErr}</div>}
-      {saved === null && !loadErr && <Spinner />}
-
-      <div
-        ref={host}
-        style={{
-          display: saved === null ? 'none' : 'block',
-          background: c.inputBg,
-          border: `1px solid ${c.inputBorder}`,
-          borderRadius: 8,
-          overflow: 'hidden',
-        }}
-      />
-
-      <div style={{ fontSize: 11, color: c.textFaint, lineHeight: 1.5, marginTop: 8 }}>
-        {t(`${ns}.yamlHint`)}
+    <section className="panel">
+      <div className="panel-hd">
+        <h2>config.yaml</h2>
+        <div className="panel-actions">
+          <span className="panel-hint">{t(`${ns}.yamlSubtitle`)}</span>
+          <button type="button" className="btn btn-sm" onClick={onExport} disabled={saved === null}>
+            ⭳ {t(`${ns}.export`)}
+          </button>
+        </div>
       </div>
+      <div className="panel-bd stack tight">
+        {loadErr && <span className="err-note">{loadErr}</span>}
+        {saved === null && !loadErr && <Spinner />}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-        <button
-          onClick={() => void onApply()}
-          disabled={!dirty || busy}
+        <div
+          ref={host}
           style={{
-            ...primaryBtn,
-            padding: '10px 24px',
-            background: dirty ? c.accent : c.btnBg,
-            color: dirty ? c.accentInk : c.textMuted,
-            border: dirty ? 'none' : `1px solid ${c.btnBorder}`,
-            cursor: dirty && !busy ? 'pointer' : 'not-allowed',
+            display: saved === null ? 'none' : 'block',
+            background: c.inputBg,
+            border: `1px solid ${c.inputBorder}`,
+            borderRadius: 8,
+            overflow: 'hidden',
           }}
-        >
-          {t(`${ns}.yamlApply`)}
-        </button>
-        <button onClick={() => void onCopy()} style={{ ...ghostBtn, padding: '10px 18px' }}>
-          {t(`${ns}.copy`)}
-        </button>
-        {note === 'saved' && !dirty && (
-          <span style={{ fontSize: 12, color: c.green }}>{t(`${ns}.yamlSaved`)}</span>
-        )}
-        {note === 'copied' && <span style={{ fontSize: 12, color: c.green }}>{t(`${ns}.copied`)}</span>}
-        {note === 'copyFailed' && (
-          <span style={{ fontSize: 12, color: c.red }}>{t(`${ns}.copyFailed`)}</span>
+        />
+
+        <span className="help">{t(`${ns}.yamlHint`)}</span>
+        <span className="help">{t(`${ns}.exportHint`)}</span>
+
+        <div className="save-row">
+          <button type="button" className="btn" style={{ marginRight: 'auto' }} onClick={() => void onCopy()}>
+            {t(`${ns}.copy`)}
+          </button>
+          {note === 'saved' && !dirty && <span className="ok-note">{t(`${ns}.yamlSaved`)}</span>}
+          {note === 'copied' && <span className="ok-note">{t(`${ns}.copied`)}</span>}
+          {note === 'copyFailed' && <span className="err-note">{t(`${ns}.copyFailed`)}</span>}
+          {dirty && <span className="help">{t('common.unsavedChanges')}</span>}
+          <button
+            type="button"
+            className="btn btn-accent"
+            disabled={!dirty || busy}
+            onClick={() => void onApply()}
+          >
+            {t(`${ns}.yamlApply`)}
+          </button>
+        </div>
+
+        {err && (
+          <pre
+            role="alert"
+            style={{ fontSize: 12, color: c.red, fontFamily: mono, whiteSpace: 'pre-wrap', margin: 0 }}
+          >
+            {err}
+          </pre>
         )}
       </div>
-      {err && (
-        <pre
-          role="alert"
-          style={{
-            fontSize: 12,
-            color: c.red,
-            fontFamily: mono,
-            whiteSpace: 'pre-wrap',
-            margin: '10px 0 0',
-          }}
-        >
-          {err}
-        </pre>
-      )}
-    </div>
+    </section>
   )
 }
 

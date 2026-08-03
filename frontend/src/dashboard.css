@@ -948,9 +948,11 @@
   cursor: pointer;
 }
 
-/* ---- Form controls. Scoped to .modal: the rest of the app styles its inputs inline
-        (theme.ts), and a bare input/select rule here would reach into every Settings tab. --- */
+/* ---- Form controls. Scoped to .modal: Login and the wizard still style their inputs
+        inline (theme.ts), and a bare input/select rule here would reach into them. The
+        Settings tabs have their own equivalent block, scoped to .jn-settings. --- */
 .modal input[type='text'],
+.modal input[type='password'],
 .modal input[type='number'],
 .modal input[type='time'] {
   background: var(--jn-input-bg);

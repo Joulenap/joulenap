@@ -1,43 +1,102 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ApiError } from '../../api/client'
+import { ApiError, api } from '../../api/client'
 import type { Config } from '../../api/types'
 import { Spinner } from '../../components/Spinner'
 import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
 import { useRegisterDirty } from '../../shell/UnsavedGuard'
-import { c, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
 
-// Config knobs the backend honours but no other screen exposes (re-review 11.8). Everything
-// else remains reachable through the YAML editor below, which is code-split so CodeMirror
-// only downloads when this tab is opened.
+// CodeMirror is code-split so it only downloads when this tab is opened.
 const YamlEditor = lazy(() => import('./YamlEditor'))
 
-// The backup mode, bandwidth limit and the keep-last/keep-yearly slots used to live here
-// because 0.9 had one global backup job. They are per-route now (route modal -> Advanced,
-// M10), so this tab is down to the settings that really are application-wide.
+const ns = 'settings.advanced'
+
+// One card, one Save. The backup mode, bandwidth limit and retention slots that used to live
+// here belong to a route now (route modal -> Advanced, M10); what is left really is
+// application-wide, and the update check joined it from the Integrations tab (NOTES).
 interface Draft {
-  history_days: number
+  port: number
   session_days: number
   https_only: boolean
-  port: number
+  history_days: number
+  update_check: boolean
 }
 
 function draftOf(config: Config): Draft {
   return {
-    history_days: config.maintenance.history.retention_days,
+    port: config.app.port,
     session_days: config.app.session.max_age_days,
     https_only: config.app.session.https_only,
-    port: config.app.port,
+    history_days: config.maintenance.history.retention_days,
+    update_check: config.app.update_check,
   }
 }
 
-export function Advanced() {
+export function Advanced({ refreshStatus }: { refreshStatus: () => void }) {
+  return (
+    <div>
+      <SchedulerSwitch refreshStatus={refreshStatus} />
+      <Application />
+      <Suspense fallback={<Spinner />}>
+        <YamlEditor />
+      </Suspense>
+    </div>
+  )
+}
+
+/**
+ * The global kill-switch, and the only place it lives (NOTES: no mirror on the homepage).
+ *
+ * It writes through `POST /api/scheduler/toggle`, not the config PUT: that endpoint is what
+ * actually arms and disarms the APScheduler jobs. `refreshStatus` re-reads /status so the
+ * shell's persistent "scheduler paused" banner appears with the click rather than up to five
+ * seconds later.
+ */
+function SchedulerSwitch({ refreshStatus }: { refreshStatus: () => void }) {
+  const { t } = useTranslation()
+  const { config, reload } = useConfig()
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const on = Boolean(config?.app.scheduler_enabled)
+
+  async function toggle() {
+    setBusy(true)
+    setErr(null)
+    try {
+      await api.toggleScheduler(!on)
+      await reload()
+      refreshStatus()
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-hd">
+        <h2>{t(`${ns}.schedulerTitle`)}</h2>
+      </div>
+      <div className="panel-bd stack tight">
+        <label className="tglrow">
+          <Toggle on={on} onClick={() => void (busy ? null : toggle())} size="sm" />
+          <span>{t(`${ns}.schedulerLabel`)}</span>
+        </label>
+        <span className="help">{t(`${ns}.schedulerHint`)}</span>
+        {err && <span className="err-note">{err}</span>}
+      </div>
+    </section>
+  )
+}
+
+function Application() {
   const { t } = useTranslation()
   const { config, save } = useConfig()
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
-  const [savedNote, setSavedNote] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -51,13 +110,11 @@ export function Advanced() {
   }, [config, draft])
   useRegisterDirty(dirty)
 
-  const ns = 'settings.advanced'
-
   if (!config || !draft) return null
 
   function patch(next: Partial<Draft>) {
     setDraft((d) => (d ? { ...d, ...next } : d))
-    setSavedNote(false)
+    setSaved(false)
     setErr(null)
   }
 
@@ -71,14 +128,12 @@ export function Advanced() {
         app: {
           ...config.app,
           port: draft.port,
+          update_check: draft.update_check,
           session: { max_age_days: draft.session_days, https_only: draft.https_only },
         },
-        maintenance: {
-          ...config.maintenance,
-          history: { retention_days: draft.history_days },
-        },
+        maintenance: { ...config.maintenance, history: { retention_days: draft.history_days } },
       })
-      setSavedNote(true)
+      setSaved(true)
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {
@@ -86,114 +141,77 @@ export function Advanced() {
     }
   }
 
-  const numberField = (
+  const num = (
     key: keyof Draft,
     label: string,
-    hint: string,
-    opts?: { min?: number; max?: number },
-  ) => (
-    <label style={{ display: 'block' }}>
-      <span style={labelStyle}>{label}</span>
-      <input
-        type="number"
-        value={String(draft[key])}
-        min={opts?.min ?? 0}
-        max={opts?.max}
-        onChange={(e) => {
-          let n = Math.floor(Number(e.target.value)) || 0
-          n = Math.max(opts?.min ?? 0, n)
-          if (opts?.max != null) n = Math.min(opts.max, n)
-          patch({ [key]: n } as Partial<Draft>)
-        }}
-        style={{ ...inputStyle, maxWidth: 200 }}
-      />
-      <span style={{ display: 'block', fontSize: 11, color: c.textFaint, marginTop: 5, lineHeight: 1.5 }}>
-        {hint}
-      </span>
-    </label>
-  )
-
-  const section = (title: string, body: React.ReactNode) => (
-    <div
-      style={{
-        background: c.panelAlt,
-        border: `1px solid ${c.borderSoft}`,
-        borderRadius: 10,
-        padding: '16px 18px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-      }}
-    >
-      <span style={{ fontSize: 14, fontWeight: 600, color: c.textMid }}>{title}</span>
-      {body}
-    </div>
-  )
+    hint?: string,
+    opts: { min?: number; max?: number } = {},
+  ) => {
+    const min = opts.min ?? 0
+    return (
+      <div className="field" key={key}>
+        <label htmlFor={`app-${key}`}>{label}</label>
+        <input
+          id={`app-${key}`}
+          type="number"
+          className="in-mono"
+          min={min}
+          max={opts.max}
+          value={String(draft[key])}
+          onChange={(e) => {
+            let n = Math.floor(Number(e.target.value)) || 0
+            n = Math.max(min, n)
+            if (opts.max != null) n = Math.min(opts.max, n)
+            patch({ [key]: n } as Partial<Draft>)
+          }}
+        />
+        {hint && <span className="help">{hint}</span>}
+      </div>
+    )
+  }
 
   return (
-    <div>
-      <div style={{ ...panelStyle, padding: '24px 26px', maxWidth: 640 }}>
-        <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
-          {t(`${ns}.title`)}
-        </span>
-        <span style={{ display: 'block', fontSize: 13, color: c.textDim, lineHeight: 1.5, marginBottom: 22 }}>
-          {t(`${ns}.subtitle`)}
-        </span>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {section(
-            t(`${ns}.historySection`),
-            numberField('history_days', t(`${ns}.historyDays`), t(`${ns}.historyDaysHint`)),
-          )}
-
-          {section(
-            t(`${ns}.serverSection`),
-            <>
-              <span style={{ fontSize: 12, color: c.amber, lineHeight: 1.5, marginTop: -6 }}>
-                {t(`${ns}.restartHint`)}
-              </span>
-              {numberField('port', t(`${ns}.port`), t(`${ns}.portHint`), { min: 1, max: 65535 })}
-              {numberField('session_days', t(`${ns}.sessionDays`), t(`${ns}.sessionDaysHint`), {
-                min: 1,
-              })}
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <Toggle on={draft.https_only} onClick={() => patch({ https_only: !draft.https_only })} />
-                <span>
-                  <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>
-                    {t(`${ns}.httpsOnly`)}
-                  </span>
-                  <span style={{ display: 'block', fontSize: 11, color: c.textFaint, marginTop: 3, lineHeight: 1.5 }}>
-                    {t(`${ns}.httpsOnlyHint`)}
-                  </span>
-                </span>
-              </div>
-            </>,
-          )}
+    <section className="panel">
+      <div className="panel-hd">
+        <h2>{t(`${ns}.appTitle`)}</h2>
+      </div>
+      <div className="panel-bd stack">
+        <div className="frow3">
+          {num('port', t(`${ns}.port`), t(`${ns}.portHint`), { min: 1, max: 65535 })}
+          {num('session_days', t(`${ns}.sessionDays`), undefined, { min: 1 })}
+          <div className="field">
+            <span className="lab">{t(`${ns}.cookie`)}</span>
+            <label className="tglrow" style={{ height: 35 }}>
+              <Toggle on={draft.https_only} onClick={() => patch({ https_only: !draft.https_only })} size="sm" />
+              <span>{t(`${ns}.httpsOnly`)}</span>
+            </label>
+            <span className="help">{t(`${ns}.httpsOnlyHint`)}</span>
+          </div>
+          {num('history_days', t(`${ns}.historyDays`), t(`${ns}.historyDaysHint`))}
+          <div className="field span2">
+            <span className="lab">{t(`${ns}.updates`)}</span>
+            <label className="tglrow">
+              <Toggle on={draft.update_check} onClick={() => patch({ update_check: !draft.update_check })} size="sm" />
+              <span>{t(`${ns}.updateCheck`)}</span>
+            </label>
+            <span className="help">{t(`${ns}.updateCheckHint`)}</span>
+          </div>
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 22 }}>
+        <div className="save-row">
+          <span className="help spacer">{t(`${ns}.restartHint`)}</span>
+          {err && <span className="err-note">{err}</span>}
+          {saved && !dirty && <span className="ok-note">{t(`${ns}.saved`)}</span>}
+          {dirty && !err && <span className="help">{t('common.unsavedChanges')}</span>}
           <button
-            onClick={() => void onSave()}
+            type="button"
+            className="btn btn-accent"
             disabled={!dirty || busy}
-            style={{
-              ...primaryBtn,
-              padding: '10px 24px',
-              background: dirty ? c.accent : c.btnBg,
-              color: dirty ? c.accentInk : c.textMuted,
-              border: dirty ? 'none' : `1px solid ${c.btnBorder}`,
-              cursor: dirty && !busy ? 'pointer' : 'not-allowed',
-            }}
+            onClick={() => void onSave()}
           >
             {t('common.save')}
           </button>
-          {savedNote && !dirty && <span style={{ fontSize: 12, color: c.green }}>{t(`${ns}.saved`)}</span>}
-          {err && <span style={{ fontSize: 12, color: c.red }}>{err}</span>}
         </div>
       </div>
-
-      <Suspense fallback={<Spinner />}>
-        <YamlEditor />
-      </Suspense>
-    </div>
+    </section>
   )
 }

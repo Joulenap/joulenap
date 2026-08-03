@@ -1,29 +1,51 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, ApiError } from '../../api/client'
+import { ApiError, api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
-import { c, ghostBtn, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
+import { Dropdown, type Option } from '../../components/Dropdown'
+import { useConfig } from '../../config/ConfigContext'
+import { useRegisterDirty } from '../../shell/UnsavedGuard'
+import { TIMEZONES } from '../../utils/timezones'
 
+const LANGS = [
+  { value: 'en', label: 'English' },
+  { value: 'it', label: 'Italiano' },
+]
+
+const ns = 'settings.account'
+
+/**
+ * Credentials + Localization, the two panels the mockup puts on this tab. The dedicated
+ * "Localization" tab is gone; its language/timezone panel moved here verbatim, including the
+ * rule that keeps a hand-edited IANA name that is not in the curated list.
+ */
 export function Account() {
+  return (
+    <div>
+      <Credentials />
+      <Localization />
+    </div>
+  )
+}
+
+function Credentials() {
   const { t } = useTranslation()
   const { username, setUsername } = useAuth()
 
-  const [editing, setEditing] = useState(false)
   const [user, setUser] = useState(username ?? '')
   const [current, setCurrent] = useState('')
   const [pass, setPass] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
-  const [savedNote, setSavedNote] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  function startEdit() {
-    setUser(username ?? '')
-    setCurrent('')
-    setPass('')
-    setSavedNote(false)
-    setErr(null)
-    setEditing(true)
-  }
+  const dirty = user !== (username ?? '') || pass !== '' || confirm !== ''
+  useRegisterDirty(dirty)
+
+  useEffect(() => setUser(username ?? ''), [username])
+
+  const mismatch = pass !== '' && confirm !== pass
 
   async function onSave() {
     setBusy(true)
@@ -31,8 +53,10 @@ export function Account() {
     try {
       const u = await api.updateAccount(current, user.trim() || (username ?? ''), pass || undefined)
       setUsername(u.username)
-      setEditing(false)
-      setSavedNote(true)
+      setCurrent('')
+      setPass('')
+      setConfirm('')
+      setSaved(true)
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {
@@ -40,87 +64,172 @@ export function Account() {
     }
   }
 
-  const readField = (label: string, value: string, masked = false) => (
-    <div>
-      <span style={labelStyle}>{label}</span>
-      <div
-        style={{
-          background: c.inputBg,
-          border: `1px solid ${c.border}`,
-          borderRadius: 7,
-          color: c.textMid,
-          padding: '10px 12px',
-          fontSize: 14,
-          fontFamily: masked ? "'IBM Plex Mono', monospace" : undefined,
-          letterSpacing: masked ? '.18em' : undefined,
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  )
+  const edit = (v: () => void) => {
+    v()
+    setSaved(false)
+    setErr(null)
+  }
 
   return (
-    <div style={{ ...panelStyle, padding: '24px 26px', maxWidth: 580 }}>
-      <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
-        {t('settings.account.title')}
-      </span>
-      <span style={{ display: 'block', fontSize: 13, color: c.textDim, lineHeight: 1.5, marginBottom: 24 }}>
-        {t('settings.account.subtitle')}
-      </span>
+    <section className="panel">
+      <div className="panel-hd">
+        <h2>{t(`${ns}.title`)}</h2>
+        <span className="panel-hint">{t(`${ns}.subtitle`)}</span>
+      </div>
+      <div className="panel-bd stack">
+        <div className="frow">
+          <div className="field">
+            <label htmlFor="acc-user">{t(`${ns}.username`)}</label>
+            <input
+              id="acc-user"
+              value={user}
+              autoComplete="username"
+              onChange={(e) => edit(() => setUser(e.target.value))}
+            />
+          </div>
+          {/* The mockup has no current-password field, but PUT /api/account requires one
+              (BE-S9) — without it the form cannot save at all. */}
+          <div className="field">
+            <label htmlFor="acc-current">{t(`${ns}.currentPassword`)}</label>
+            <input
+              id="acc-current"
+              type="password"
+              value={current}
+              autoComplete="current-password"
+              onChange={(e) => edit(() => setCurrent(e.target.value))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="acc-new">{t(`${ns}.newPassword`)}</label>
+            <input
+              id="acc-new"
+              type="password"
+              value={pass}
+              placeholder={t(`${ns}.keepPlaceholder`)}
+              autoComplete="new-password"
+              onChange={(e) => edit(() => setPass(e.target.value))}
+            />
+          </div>
+          <div className={`field${mismatch ? ' err' : ''}`}>
+            <label htmlFor="acc-confirm">{t(`${ns}.confirmPassword`)}</label>
+            <input
+              id="acc-confirm"
+              type="password"
+              value={confirm}
+              autoComplete="new-password"
+              onChange={(e) => edit(() => setConfirm(e.target.value))}
+            />
+            {mismatch && <span className="err-note">{t(`${ns}.mismatch`)}</span>}
+          </div>
+        </div>
+        <div className="save-row">
+          {err && <span className="err-note">{err}</span>}
+          {saved && !dirty && <span className="ok-note">{t(`${ns}.saved`)}</span>}
+          {dirty && !err && <span className="help">{t('common.unsavedChanges')}</span>}
+          <button
+            type="button"
+            className="btn btn-accent"
+            disabled={busy || !current || !dirty || mismatch}
+            onClick={() => void onSave()}
+          >
+            {t('common.save')}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
 
-      {!editing ? (
-        <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 360, marginBottom: 24 }}>
-            {readField(t('settings.account.username'), username ?? '—')}
-            {readField(t('settings.account.password'), '••••••••', true)}
+function Localization() {
+  const { t } = useTranslation()
+  const { config, save } = useConfig()
+  const savedLang = config?.app.language ?? 'en'
+  const savedTz = config?.app.timezone ?? ''
+  const [lang, setLang] = useState(savedLang)
+  const [tz, setTz] = useState(savedTz)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const dirty = lang !== savedLang || tz !== savedTz
+  useRegisterDirty(dirty)
+
+  // Resync the draft when the saved config changes — after our own save, or an external
+  // reload — or the dropdowns and the dirty check drift from the real config (FE-M7).
+  useEffect(() => {
+    setLang(savedLang)
+    setTz(savedTz)
+  }, [savedLang, savedTz])
+
+  // "Automatic" first, then the curated list. A valid IANA name outside it (hand-edited
+  // config) is kept, so saving cannot silently drop it.
+  const tzOptions: Option[] = [
+    { value: '', label: t('settings.localization.timezoneAuto') },
+    ...(savedTz && !TIMEZONES.includes(savedTz) ? [{ value: savedTz, label: savedTz }] : []),
+    ...TIMEZONES.map((z) => ({ value: z, label: z })),
+  ]
+
+  async function onSave() {
+    if (!config) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await save({ ...config, app: { ...config.app, language: lang, timezone: tz } })
+      setNote(true)
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-hd">
+        <h2>{t('settings.localization.title')}</h2>
+      </div>
+      <div className="panel-bd stack">
+        <div className="frow">
+          <div className="field">
+            <span className="lab">{t('settings.localization.language')}</span>
+            <Dropdown
+              value={lang}
+              options={LANGS}
+              onChange={(v) => {
+                setLang(v)
+                setNote(false)
+                setErr(null)
+              }}
+            />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
-            <button onClick={startEdit} style={{ ...ghostBtn, padding: '10px 22px' }}>
-              {t('common.edit')}
-            </button>
-            {savedNote && <span style={{ fontSize: 12, color: c.green }}>{t('settings.account.saved')}</span>}
+          <div className="field">
+            <span className="lab">{t('settings.localization.timezone')}</span>
+            <Dropdown
+              value={tz}
+              options={tzOptions}
+              mono
+              onChange={(v) => {
+                setTz(v)
+                setNote(false)
+                setErr(null)
+              }}
+            />
+            <span className="help">{t('settings.localization.timezoneHint')}</span>
           </div>
-        </>
-      ) : (
-        <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 360, marginBottom: 22 }}>
-            <label style={{ display: 'block' }}>
-              <span style={labelStyle}>{t('settings.account.currentPassword')}</span>
-              <input
-                type="password"
-                value={current}
-                onChange={(e) => setCurrent(e.target.value)}
-                autoComplete="current-password"
-                style={inputStyle}
-              />
-            </label>
-            <label style={{ display: 'block' }}>
-              <span style={labelStyle}>{t('settings.account.username')}</span>
-              <input value={user} onChange={(e) => setUser(e.target.value)} autoComplete="off" style={inputStyle} />
-            </label>
-            <label style={{ display: 'block' }}>
-              <span style={labelStyle}>{t('settings.account.newPassword')}</span>
-              <input
-                type="password"
-                value={pass}
-                onChange={(e) => setPass(e.target.value)}
-                placeholder={t('settings.account.keepPlaceholder')}
-                style={inputStyle}
-              />
-            </label>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={onSave} disabled={busy || !current} style={{ ...primaryBtn, padding: '10px 24px' }}>
-              {t('common.save')}
-            </button>
-            <button onClick={() => setEditing(false)} style={{ ...ghostBtn, padding: '10px 20px' }}>
-              {t('common.cancel')}
-            </button>
-            {err && <span style={{ fontSize: 12, color: c.red }}>{err}</span>}
-          </div>
-        </>
-      )}
-    </div>
+        </div>
+        <div className="save-row">
+          {err && <span className="err-note">{err}</span>}
+          {note && !dirty && <span className="ok-note">{t('settings.localization.saved')}</span>}
+          {dirty && !err && <span className="help">{t('common.unsavedChanges')}</span>}
+          <button
+            type="button"
+            className="btn btn-accent"
+            disabled={!dirty || busy}
+            onClick={() => void onSave()}
+          >
+            {t('common.save')}
+          </button>
+        </div>
+      </div>
+    </section>
   )
 }

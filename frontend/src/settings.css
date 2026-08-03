@@ -1,0 +1,341 @@
+/* Settings stylesheet, ported from the mockup `design/overhaul/src/set2.html`.
+ *
+ * Same reasoning as dashboard.css (M09): the mockup is the literal visual spec for five
+ * tabs, so it is copied rather than re-derived as style objects. Every colour is a --jn-*
+ * token, so both themes follow automatically.
+ *
+ * dashboard.css is global and already defines .panel / .panel-hd / .panel-bd / .btn /
+ * .btn-accent / .field / .frow / .tglrow / .seg / .seg-btn / .modal-* / .dot / .state-* /
+ * .mono — none of them is redefined here. Only what the Settings mockup adds lives below.
+ *
+ * Inline `style` beats these rules regardless of specificity (same warning as
+ * responsive.css): a property that varies by breakpoint must not also be set inline.
+ */
+
+/* ---- Page + top tabs --------------------------------------------------------- */
+.page-title {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 6px 0 14px;
+}
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  /* The five tabs fit any desktop width; below ~560px they scroll sideways rather than
+     wrapping into a second row that shifts every pane down. */
+  overflow-x: auto;
+  border-bottom: 1px solid var(--jn-border);
+  margin-bottom: 20px;
+}
+.tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--jn-text-dim);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 9px 14px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover {
+  color: var(--jn-text);
+}
+.tab.on {
+  color: var(--jn-accent);
+  border-bottom-color: var(--jn-accent);
+}
+.tab:focus-visible {
+  outline: 2px solid var(--jn-accent);
+  outline-offset: -2px;
+}
+
+/* Panels stack down the pane; dashboard.css's .panel has no margin because the homepage
+   spaces them with grid/flex gaps. */
+.jn-settings .panel {
+  margin-bottom: 18px;
+}
+.jn-settings .panel:last-child {
+  margin-bottom: 0;
+}
+.panel-hint {
+  color: var(--jn-text-faint);
+  font-size: 12.5px;
+}
+/* dashboard.css scopes `.help` to `.field`, but Settings hangs explanatory lines directly off
+   a panel body or a modal section too — same look, one rule less specific. */
+.help {
+  font-size: 12px;
+  color: var(--jn-text-faint);
+  line-height: 1.5;
+}
+.panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+/* Vertical stack of fields/rows inside a panel body — the mockup writes this inline on
+   almost every .panel-bd. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.stack.tight {
+  gap: 12px;
+}
+
+/* ---- Buttons the homepage doesn't have --------------------------------------- */
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+.btn-danger-ghost {
+  color: var(--jn-red);
+}
+.btn-danger-ghost:hover {
+  color: var(--jn-red);
+  border-color: color-mix(in srgb, var(--jn-red) 50%, transparent);
+}
+
+/* ---- Device cards (the Devices tab) ------------------------------------------ */
+.dev-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 12px;
+}
+.dev-card {
+  background: var(--jn-panel-alt);
+  border: 1px solid var(--jn-border);
+  border-radius: 10px;
+  padding: 13px 15px;
+}
+.dev-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dev-ico {
+  color: var(--jn-text-dim);
+  display: inline-flex;
+  flex: none;
+}
+.dev-name {
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dev-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--jn-text-dim);
+  border: 1px solid var(--jn-input-border);
+  white-space: nowrap;
+  flex: none;
+}
+.dev-host {
+  font-size: 12px;
+  color: var(--jn-text-dim);
+  margin-top: 3px;
+  word-break: break-all;
+}
+.dev-meta {
+  font-size: 12px;
+  color: var(--jn-text-faint);
+  margin-top: 5px;
+}
+.dev-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 8px 0 11px;
+}
+.dev-actions {
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--jn-divider);
+  padding-top: 11px;
+}
+/* Pushes what follows to the right edge — the device card's Remove, the save row's
+   status text. Not `.grow`: dashboard.css already owns that name (a guest row). */
+.spacer {
+  flex: 1;
+}
+
+/* ---- Notification channel cards ---------------------------------------------- */
+.chan {
+  border: 1px solid var(--jn-border);
+  border-radius: 10px;
+  background: var(--jn-panel-alt);
+}
+.chan-hd {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 15px;
+  cursor: pointer;
+}
+.chan-hd.static {
+  cursor: default;
+}
+.chan-name {
+  font-weight: 600;
+  flex: 1;
+}
+.chan-hint {
+  font-size: 11.5px;
+  color: var(--jn-text-faint);
+}
+.chan-fields {
+  border-top: 1px solid var(--jn-divider);
+  padding: 14px 15px;
+}
+/* The custom-Apprise list: one input per stored URL with its remove button. */
+.url-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.url-row > input {
+  flex: 1;
+}
+
+/* ---- Save row ---------------------------------------------------------------- */
+.save-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--jn-divider);
+  padding-top: 14px;
+  flex-wrap: wrap;
+}
+.save-row .help {
+  font-size: 12px;
+  color: var(--jn-text-faint);
+}
+.save-row.bare {
+  border-top: none;
+  padding-top: 0;
+}
+.ok-note {
+  font-size: 12px;
+  color: var(--jn-green);
+}
+.err-note {
+  font-size: 12px;
+  color: var(--jn-red);
+}
+
+/* ---- Code / snippet blocks ---------------------------------------------------- */
+.yaml {
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--jn-text-mid);
+  overflow-x: auto;
+  /* `pre`, not `pre-wrap`: the copy button reads innerText, and wrapping would fold the
+     YAML indentation the snippet depends on. */
+  white-space: pre;
+  margin: 0;
+}
+
+/* The Integrations picker sizes to its four labels instead of stretching, unlike the
+   homepage's segmented controls. */
+.seg-inline {
+  display: inline-flex;
+}
+.seg-inline .seg-btn {
+  flex: none;
+  padding: 6px 14px;
+}
+
+/* ---- Forms ------------------------------------------------------------------- */
+.frow3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px 24px;
+}
+.span2 {
+  grid-column: span 2;
+}
+.in-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+/* Section heading inside the device modal. */
+.msec {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--jn-text-muted);
+  border-bottom: 1px solid var(--jn-border-soft);
+  padding-bottom: 5px;
+}
+
+/* Form controls, scoped to the Settings pane exactly as dashboard.css scopes its own set
+   to `.modal` — unscoped these would reach into Login and the wizard, which are still
+   inline-styled. */
+.jn-settings input[type='text'],
+.jn-settings input[type='password'],
+.jn-settings input[type='number'],
+.jn-settings select,
+.jn-settings textarea {
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13.5px;
+  font-family: inherit;
+  width: 100%;
+}
+.jn-settings textarea {
+  resize: vertical;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.jn-settings input:focus,
+.jn-settings select:focus,
+.jn-settings textarea:focus {
+  outline: none;
+  border-color: var(--jn-accent);
+}
+.jn-settings input:focus-visible,
+.jn-settings select:focus-visible,
+.jn-settings textarea:focus-visible {
+  outline: 2px solid var(--jn-accent);
+  outline-offset: 2px;
+}
+.jn-settings input::placeholder,
+.jn-settings textarea::placeholder {
+  color: var(--jn-text-muted);
+}
+.jn-settings input[readonly] {
+  color: var(--jn-text-mid);
+}
+
+@media (max-width: 640px) {
+  .frow,
+  .frow3 {
+    grid-template-columns: 1fr;
+  }
+  .span2 {
+    grid-column: auto;
+  }
+}
