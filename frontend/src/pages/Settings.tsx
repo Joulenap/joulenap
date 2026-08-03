@@ -4,18 +4,14 @@ import { useUnsavedGuard } from '../shell/UnsavedGuard'
 import { c } from '../theme'
 import { Account } from './settings/Account'
 import { Advanced } from './settings/Advanced'
-import { BackupSafety } from './settings/BackupSafety'
 import { Integrations, UpdateCheck } from './settings/Integrations'
 import { Localization } from './settings/Localization'
 import { Notifications } from './settings/Notifications'
-import { SetupWizard } from './settings/SetupWizard'
 
 export type Tab =
   | 'localization'
   | 'account'
   | 'notifications'
-  | 'setup'
-  | 'safety'
   | 'integrations'
   | 'advanced'
 
@@ -23,8 +19,6 @@ const NAV: { key: Tab }[] = [
   { key: 'localization' },
   { key: 'account' },
   { key: 'notifications' },
-  { key: 'setup' },
-  { key: 'safety' },
   { key: 'integrations' },
   { key: 'advanced' },
 ]
@@ -33,8 +27,9 @@ export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
   const { t } = useTranslation()
   const { guard } = useUnsavedGuard()
   // Settings is remounted each time the shell switches to it (unmounted on the main view), so
-  // this initial value applies afresh every open — the dashboard's "Run setup wizard" CTA
-  // opens straight on the setup tab, while the gear opens Localization as before.
+  // this initial value applies afresh every open. The gear opens Localization.
+  // TODO(M11): the five new top tabs (Devices / Account / Notifications / Integrations /
+  // Advanced) replace this sidebar; Setup and Localization disappear into them.
   const [tab, setTab] = useState<Tab>(_props.initialTab ?? 'localization')
 
   return (
@@ -96,8 +91,6 @@ export function Settings(_props: { onClose: () => void; initialTab?: Tab }) {
         {tab === 'localization' && <Localization />}
         {tab === 'account' && <Account />}
         {tab === 'notifications' && <Notifications />}
-        {tab === 'setup' && <SetupWizard />}
-        {tab === 'safety' && <BackupSafety />}
         {tab === 'integrations' && (
           <>
             <Integrations />

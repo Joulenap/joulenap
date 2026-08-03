@@ -15,7 +15,9 @@
       "title": "Ignorare le modifiche non salvate?",
       "body": "Hai modifiche non ancora salvate qui. Uscendo ora andranno perse.",
       "confirm": "Ignora le modifiche"
-    }
+    },
+    "schedulerPaused": "Scheduler in pausa — nessuna route verrà eseguita finché non lo riattivi in Impostazioni → Avanzate.",
+    "configError": "Non è stato possibile convertire la tua vecchia configurazione, quindi Joulenap è partito senza dispositivi e senza route. Non salvare nulla prima di averlo risolto. {{reason}}"
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
@@ -51,8 +53,12 @@
     "gcRunning": "GC in corso",
     "verifyRunning": "Verifica in corso",
     "monitorRunning": "Controllo job PBS",
-    "idle": "inattivo",
-    "timerDisabled": "timer disattivato"
+    "idle": "A riposo",
+    "timerDisabled": "timer disattivato",
+    "runningRoute": "In esecuzione · {{route}}",
+    "idleNext": "A riposo · prossima {{when}}",
+    "paused": "Scheduler in pausa",
+    "syncRunning": "Sync in corso"
   },
   "dashboard": {
     "manualJobs": "Job manuali",
@@ -176,17 +182,20 @@
       "monitorMsg": "Il PBS verrà svegliato (fino a {{timeout}}s). Joulenap osserverà i job avviati da PVE/PBS e lo spegnerà quando avranno finito.",
       "monitorYes": "Avvia ciclo",
       "keepOn": "Mantieni il PBS acceso dopo il job",
-    "stopTitle": "Interrompere il job in corso?",
-    "stopMsg": "Verrà richiesta l'interruzione del {{job}} in corso, insieme all'operazione in esecuzione sul server. I dati già scritti vengono mantenuti; l'esecuzione viene registrata come interrotta.",
-    "stopYes": "Interrompi",
-    "stopPowerOff": "Spegni il PBS dopo l'interruzione",
+      "stopTitle": "Interrompere il job in corso?",
+      "stopMsg": "Verrà richiesta l'interruzione del {{job}} in corso, insieme all'operazione in esecuzione sul server. I dati già scritti vengono mantenuti; l'esecuzione viene registrata come interrotta.",
+      "stopYes": "Interrompi",
+      "stopPowerOff": "Spegni il PBS dopo l'interruzione",
       "onTitle": "Accendere il PBS?",
       "onMsg": "Verrà inviato un pacchetto Wake-on-LAN al server. L'avvio può richiedere fino a {{timeout}} secondi.",
       "onYes": "Accendi PBS",
       "offTitle": "Spegnere il PBS?",
       "offMsg": "Il PBS verrà spento ora. Lo scheduler lo riattiverà automaticamente per il prossimo backup pianificato.",
       "offYes": "Spegni PBS"
-    }
+    },
+    "kindSync": "Sync",
+    "placeholderTitle": "Homepage in costruzione",
+    "placeholderBody": "La homepage basata sulle route arriva nel prossimo passo. Joulenap vede {{pves}} Proxmox VE e {{pbss}} backup server; route e storico restano raggiungibili via API."
   },
   "settings": {
     "nav": {

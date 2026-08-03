@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../../api/client'
 import type { Config } from '../../api/types'
-import { Dropdown } from '../../components/Dropdown'
 import { Spinner } from '../../components/Spinner'
 import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
@@ -14,11 +13,10 @@ import { c, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
 // only downloads when this tab is opened.
 const YamlEditor = lazy(() => import('./YamlEditor'))
 
+// The backup mode, bandwidth limit and the keep-last/keep-yearly slots used to live here
+// because 0.9 had one global backup job. They are per-route now (route modal -> Advanced,
+// M10), so this tab is down to the settings that really are application-wide.
 interface Draft {
-  mode: 'snapshot' | 'suspend' | 'stop'
-  bwlimit: number
-  keep_last: number
-  keep_yearly: number
   history_days: number
   session_days: number
   https_only: boolean
@@ -27,10 +25,6 @@ interface Draft {
 
 function draftOf(config: Config): Draft {
   return {
-    mode: config.backup.mode,
-    bwlimit: config.backup.bwlimit,
-    keep_last: config.backup.retention.keep_last,
-    keep_yearly: config.backup.retention.keep_yearly,
     history_days: config.maintenance.history.retention_days,
     session_days: config.app.session.max_age_days,
     https_only: config.app.session.https_only,
@@ -78,16 +72,6 @@ export function Advanced() {
           ...config.app,
           port: draft.port,
           session: { max_age_days: draft.session_days, https_only: draft.https_only },
-        },
-        backup: {
-          ...config.backup,
-          mode: draft.mode,
-          bwlimit: draft.bwlimit,
-          retention: {
-            ...config.backup.retention,
-            keep_last: draft.keep_last,
-            keep_yearly: draft.keep_yearly,
-          },
         },
         maintenance: {
           ...config.maintenance,
@@ -157,41 +141,6 @@ export function Advanced() {
         </span>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {section(
-            t(`${ns}.backupSection`),
-            <>
-              <label style={{ display: 'block' }}>
-                <span style={labelStyle}>{t(`${ns}.mode`)}</span>
-                <div style={{ maxWidth: 200 }}>
-                  <Dropdown
-                    value={draft.mode}
-                    options={[
-                      { value: 'snapshot', label: t(`${ns}.modeSnapshot`) },
-                      { value: 'suspend', label: t(`${ns}.modeSuspend`) },
-                      { value: 'stop', label: t(`${ns}.modeStop`) },
-                    ]}
-                    onChange={(v) => patch({ mode: v as Draft['mode'] })}
-                  />
-                </div>
-                <span style={{ display: 'block', fontSize: 11, color: c.textFaint, marginTop: 5, lineHeight: 1.5 }}>
-                  {t(`${ns}.modeHint`)}
-                </span>
-              </label>
-              {numberField('bwlimit', t(`${ns}.bwlimit`), t(`${ns}.bwlimitHint`))}
-            </>,
-          )}
-
-          {section(
-            t(`${ns}.retentionSection`),
-            <>
-              <span style={{ fontSize: 12, color: c.textFaint, lineHeight: 1.5, marginTop: -6 }}>
-                {t(`${ns}.retentionHint`)}
-              </span>
-              {numberField('keep_last', t(`${ns}.keepLast`), t(`${ns}.keepLastHint`))}
-              {numberField('keep_yearly', t(`${ns}.keepYearly`), t(`${ns}.keepYearlyHint`))}
-            </>,
-          )}
-
           {section(
             t(`${ns}.historySection`),
             numberField('history_days', t(`${ns}.historyDays`), t(`${ns}.historyDaysHint`)),

@@ -3,16 +3,24 @@
 import type {
   AuthStatus,
   Config,
+  DashboardResponse,
+  DeviceKind,
+  DeviceLists,
+  DeviceTestResult,
   GuestInfo,
   LogLine,
+  MaintenanceQueued,
   NetInterface,
   NotifyTestResult,
   PbsDerive,
   PveConnectResult,
+  Route,
   RunDetail,
+  RunQueued,
   RunSummary,
   StatusResponse,
   TaskLogResponse,
+  ToggleResponse,
   UserInfo,
 } from './types'
 
@@ -136,8 +144,11 @@ export const api = {
       password: password || null,
     }),
 
-  // dashboard
+  // homepage
   status: () => req<StatusResponse>('GET', '/status'),
+  // The read-only widget/monitoring view (API-key auth for external dashboards, session auth
+  // works too). Not what the UI polls — that's /status.
+  dashboard: () => req<DashboardResponse>('GET', '/dashboard'),
   getConfig: () => req<Config>('GET', '/config'),
   putConfig: (config: Config) => req<Config>('PUT', '/config', config),
   // Raw config.yaml (redacted) for the Advanced tab's editor; PUT goes through the same
@@ -146,21 +157,59 @@ export const api = {
   putConfigYaml: (text: string) => req<Config>('PUT', '/config/yaml', { yaml: text }),
   generateApiKey: () => req<{ api_key: string }>('POST', '/config/api-key'),
   deleteApiKey: () => req<void>('DELETE', '/config/api-key'),
-  guests: () => req<GuestInfo[]>('GET', '/guests'),
+  // vmids collide across PVEs, so the backend refuses to guess which one you meant.
+  guests: (pve: string) => req<GuestInfo[]>('GET', `/guests?pve=${encodeURIComponent(pve)}`),
   toggleScheduler: (enabled: boolean) =>
-    req<{ enabled: boolean; next_run: string | null }>('POST', '/scheduler/toggle', { enabled }),
-  runBackup: (keepOn: boolean) => req<{ run_id: number }>('POST', '/backup/run', { keep_on: keepOn }),
-  runGc: (keepOn: boolean) => req<{ run_id: number }>('POST', '/gc/run', { keep_on: keepOn }),
-  cancelJob: (runId: number, powerOff: boolean) =>
-    req<{ run_id: number }>('POST', '/jobs/cancel', { run_id: runId, power_off: powerOff }),
-  powerOn: () => req<{ ok: boolean }>('POST', '/power/on'),
-  powerOff: () => req<{ ok: boolean }>('POST', '/power/off'),
-  wolTest: () => req<{ sent: boolean; mac: string }>('POST', '/wol/test'),
+    req<ToggleResponse>('POST', '/scheduler/toggle', { enabled }),
   notifyTest: () => req<NotifyTestResult>('POST', '/notify/test'),
   logs: (limit = 100) => req<LogLine[]>('GET', `/logs?limit=${limit}`),
-  runs: (limit = 50) => req<RunSummary[]>('GET', `/runs?limit=${limit}`),
+  // `route` filters on the recorded route id, so history stays readable after a route is
+  // deleted (the chip disappears, the rows don't).
+  runs: (limit = 50, route?: string) =>
+    req<RunSummary[]>(
+      'GET',
+      `/runs?limit=${limit}${route ? `&route=${encodeURIComponent(route)}` : ''}`,
+    ),
   run: (id: number) => req<RunDetail>('GET', `/runs/${id}`),
   taskLog: (after = 0) => req<TaskLogResponse>('GET', `/tasklog?after=${after}`),
+  // 202 = accepted, not stopped: cancellation is cooperative, poll GET /runs/{id} for the end.
+  // Note the asymmetry with runRoute below — this one takes power_off *directly*.
+  stopRun: (runId: number, powerOff: boolean) =>
+    req<{ run_id: number }>('POST', `/runs/${runId}/stop`, { power_off: powerOff }),
+
+  // routes
+  routes: () => req<Route[]>('GET', '/routes'),
+  createRoute: (route: Route) => req<Route>('POST', '/routes', route),
+  // The body's id wins: renaming a route is a delete + create as far as history is concerned.
+  updateRoute: (id: string, route: Route) =>
+    req<Route>('PUT', `/routes/${encodeURIComponent(id)}`, route),
+  deleteRoute: (id: string) => req<void>('DELETE', `/routes/${encodeURIComponent(id)}`),
+  // 202: runs execute one at a time, so `queued` > 0 means it is waiting its turn. `keep_on`
+  // is inverted relative to stopRun's `power_off` — the backend takes both, spelled this way.
+  runRoute: (id: string, keepOn: boolean) =>
+    req<RunQueued>('POST', `/routes/${encodeURIComponent(id)}/run`, { keep_on: keepOn }),
+
+  // devices
+  devices: () => req<DeviceLists>('GET', '/devices'),
+  // A secret sent as REDACTED resolves against the stored one on PUT and 422s on POST, so a
+  // "duplicate this device" affordance must blank the token field, not echo the mask.
+  createDevice: (kind: DeviceKind, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>('POST', `/devices/${kind}`, body),
+  updateDevice: (kind: DeviceKind, id: string, body: Record<string, unknown>) =>
+    req<Record<string, unknown>>('PUT', `/devices/${kind}/${encodeURIComponent(id)}`, body),
+  // 409 carries {message, routes[]} — the removal guard lists the routes still using it.
+  deleteDevice: (kind: DeviceKind, id: string) =>
+    req<void>('DELETE', `/devices/${kind}/${encodeURIComponent(id)}`),
+  // A failure is a 502 with the reason, not a 200 with ok:false.
+  testDevice: (kind: DeviceKind, id: string) =>
+    req<DeviceTestResult>('POST', `/devices/${kind}/${encodeURIComponent(id)}/test`),
+  pbsPower: (id: string, action: 'wake' | 'poweroff') =>
+    req<{ ok: boolean }>('POST', `/devices/pbss/${encodeURIComponent(id)}/power`, { action }),
+  // One-off GC / verify on a box rather than a route ("Run GC" / "Run verify" on the homepage).
+  runMaintenance: (id: string, action: 'gc' | 'verify', keepOn: boolean) =>
+    req<MaintenanceQueued>('POST', `/devices/pbss/${encodeURIComponent(id)}/${action}`, {
+      keep_on: keepOn,
+    }),
 
   // wizard
   wizardPveConnect: (body: Record<string, unknown>) =>
@@ -190,5 +239,12 @@ export const api = {
     ),
   wizardSshTrust: (body: Record<string, unknown>) =>
     req<{ trusted: boolean }>('POST', '/wizard/ssh/trust', body),
-  wizardReset: () => req<{ ok: boolean }>('POST', '/wizard/reset'),
+  // Stateless: tests a MAC the wizard has just detected, before there is a device to save it
+  // on. Waking a *configured* box is pbsPower(id, 'wake').
+  wizardWolTest: (mac: string, host = '', iface = '') =>
+    req<{ sent: boolean; mac: string; broadcast: string }>('POST', '/wizard/wol/test', {
+      mac,
+      host,
+      iface,
+    }),
 }

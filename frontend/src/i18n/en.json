@@ -15,7 +15,9 @@
       "title": "Discard unsaved changes?",
       "body": "You have edits here that haven't been saved. Leaving now discards them.",
       "confirm": "Discard changes"
-    }
+    },
+    "schedulerPaused": "Scheduler paused — no route will run until you switch it back on in Settings → Advanced.",
+    "configError": "Your old configuration could not be converted, so Joulenap started with no devices and no routes. Don't save anything until it's fixed. {{reason}}"
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
@@ -51,8 +53,12 @@
     "gcRunning": "GC running",
     "verifyRunning": "Verify running",
     "monitorRunning": "Watching PBS jobs",
-    "idle": "idle",
-    "timerDisabled": "timer disabled"
+    "idle": "Idle",
+    "timerDisabled": "timer disabled",
+    "runningRoute": "Running · {{route}}",
+    "idleNext": "Idle · next {{when}}",
+    "paused": "Scheduler paused",
+    "syncRunning": "Sync running"
   },
   "dashboard": {
     "manualJobs": "Manual jobs",
@@ -176,17 +182,20 @@
       "monitorMsg": "The PBS will be woken (up to {{timeout}}s). Joulenap will watch the jobs PVE/PBS start on their own and power it off once they finish.",
       "monitorYes": "Run watch cycle",
       "keepOn": "Keep PBS powered on after the job",
-    "stopTitle": "Stop the running job?",
-    "stopMsg": "The {{job}} in progress will be told to stop, and the task running on the server is cancelled with it. Data already written is kept; the run is recorded as aborted.",
-    "stopYes": "Stop job",
-    "stopPowerOff": "Power the PBS off after stopping",
+      "stopTitle": "Stop the running job?",
+      "stopMsg": "The {{job}} in progress will be told to stop, and the task running on the server is cancelled with it. Data already written is kept; the run is recorded as aborted.",
+      "stopYes": "Stop job",
+      "stopPowerOff": "Power the PBS off after stopping",
       "onTitle": "Power on the PBS?",
       "onMsg": "A Wake-on-LAN packet will be sent to the server. Startup can take up to {{timeout}} seconds.",
       "onYes": "Power on PBS",
       "offTitle": "Power off the PBS?",
       "offMsg": "The PBS will be shut down now. The scheduler will wake it automatically for the next scheduled backup.",
       "offYes": "Power off PBS"
-    }
+    },
+    "kindSync": "Sync",
+    "placeholderTitle": "Homepage under construction",
+    "placeholderBody": "The route-centric homepage lands in the next step. Joulenap can see {{pves}} Proxmox VE and {{pbss}} backup server(s); routes and history are reachable through the API in the meantime."
   },
   "settings": {
     "nav": {
