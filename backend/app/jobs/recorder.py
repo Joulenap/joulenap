@@ -130,12 +130,17 @@ class RunRecorder:
 
     def skip_step(self, name: StepName, detail: str | None = None) -> None:
         """Record a step that was intentionally not run (e.g. GC when the toggle is off)."""
+        # Both ends from one clock read: letting ``started_at`` fall back to its column
+        # default means it is evaluated at flush, i.e. *after* this call, and a skipped step
+        # ends up finishing before it started — a negative duration in the timeline.
+        now = _utcnow()
         self._session.add(
             RunStep(
                 run_id=self.run.id,
                 name=name,
                 status=StepStatus.SKIPPED,
-                finished_at=_utcnow(),
+                started_at=now,
+                finished_at=now,
                 detail=detail,
             )
         )

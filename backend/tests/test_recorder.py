@@ -34,6 +34,21 @@ def test_step_still_auto_succeeds_on_clean_exit(temp_db):
     assert steps[StepName.WAKE] == StepStatus.SUCCESS
 
 
+def test_a_skipped_step_does_not_finish_before_it_started(temp_db):
+    # started_at used to come from the column default, which SQLAlchemy evaluates at flush —
+    # i.e. after the finished_at passed here — so every skipped step had a negative duration.
+    with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
+        recorder.skip_step(StepName.GC, "GC disabled for this route")
+        run_id = recorder.run_id
+        recorder.finish(RunStatus.SUCCESS)
+
+    with session_scope() as session:
+        step = next(s for s in session.get(Run, run_id).steps if s.name == StepName.GC)
+        assert step.status == StepStatus.SKIPPED
+        assert step.started_at is not None and step.finished_at is not None
+        assert (step.finished_at - step.started_at).total_seconds() == 0
+
+
 class _SpySession:
     """Minimal session double: first commit raises; tracks close()."""
 
