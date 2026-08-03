@@ -92,7 +92,7 @@ def _sync_body(
                 store=executor.datastore,
                 direction=route.sync_direction,
             )
-            upid = pbs.run_sync_job(name, direction=route.sync_direction)
+            upid = pbs.run_sync_job(name)
             step.detail = upid
             _wait_or_stop(pbs, upid, recorder, deps, StepName.SYNC.value, "pbs")
 

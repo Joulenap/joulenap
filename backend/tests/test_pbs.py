@@ -135,7 +135,7 @@ def test_pull_sync_job_omits_the_direction():
     assert "sync-direction" not in body
 
 
-def test_push_sync_job_carries_the_direction_through_delete_and_run():
+def test_push_sync_job_sends_the_direction_only_in_the_job_body():
     handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
     client = make_client(handler)
 
@@ -146,16 +146,36 @@ def test_push_sync_job_carries_the_direction_through_delete_and_run():
         store="offsite",
         direction="push",
     )
-    upid = client.run_sync_job("joulenap-r1", direction="push")
+    upid = client.run_sync_job("joulenap-r1")
 
-    # A pull and a push job of the same id live in different config sections, so the delete
-    # and the run both have to say which one they mean.
+    # Verified against a live PBS 4.2: `sync-direction` describes the job, so only the create
+    # takes it. The delete and the run answer 400 "schema does not allow additional
+    # properties" if it is sent, and resolve the job from its id alone.
     assert calls[1][:2] == ("DELETE", "/api2/json/config/sync/joulenap-r1")
-    assert "sync-direction=push" in calls[1][2]
+    assert "sync-direction" not in calls[1][2]
     assert "sync-direction=push" in calls[2][2]  # the POST that recreates it
     assert calls[-1][:2] == ("POST", "/api2/json/admin/sync/joulenap-r1/run")
-    assert "sync-direction=push" in calls[-1][2]
+    assert "sync-direction" not in calls[-1][2]
     assert upid.startswith("UPID:")
+
+
+def test_the_sync_existence_check_lists_both_directions():
+    handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
+
+    make_client(handler).ensure_sync_job(
+        "joulenap-r1",
+        remote="joulenap-r1",
+        remote_store="backup",
+        store="offsite",
+        direction="push",
+    )
+
+    # PBS's default sync listing hides push jobs, so without `all` an existing push job is
+    # never seen, never deleted, and the create that follows fails with "job already exists"
+    # on every run after the first.
+    assert calls[0][:2] == ("GET", "/api2/json/config/sync")
+    assert "sync-direction=all" in calls[0][2]
+    assert calls[1][0] == "DELETE"
 
 
 def test_wait_task_success_and_failure():

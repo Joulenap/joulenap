@@ -150,8 +150,8 @@ class FakePbs:
     def ensure_sync_job(self, job_id: str, **kwargs) -> None:
         self.sync_jobs[job_id] = kwargs
 
-    def run_sync_job(self, job_id: str, *, direction: str = "pull") -> str:
-        self.sync_runs.append({"id": job_id, "direction": direction})
+    def run_sync_job(self, job_id: str) -> str:
+        self.sync_runs.append({"id": job_id})
         return "UPID:pbs:sync"
 
     def wait_task(

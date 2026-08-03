@@ -126,7 +126,9 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
             "direction": "pull",
         }
     }
-    assert pbs1.sync_runs == [{"id": "joulenap-r1", "direction": "pull"}]
+    # The run call carries no direction (PBS resolves the job by id); the direction lives in
+    # the job body above, and *which* box ran it is the real proof of the semantics.
+    assert pbs1.sync_runs == [{"id": "joulenap-r1"}]
     # The source is never touched by the job — it is only kept awake.
     assert (pbs2.remotes, pbs2.sync_jobs, pbs2.sync_runs) == ({}, {}, [])
     status, steps = _load(run_id)
@@ -150,7 +152,7 @@ def test_push_sync_runs_the_job_on_the_source(temp_db):
         "store": "offsite",
         "direction": "push",
     }
-    assert pbs2.sync_runs == [{"id": "joulenap-r1", "direction": "push"}]
+    assert pbs2.sync_runs == [{"id": "joulenap-r1"}]
     assert (pbs1.remotes, pbs1.sync_jobs, pbs1.sync_runs) == ({}, {}, [])
     assert _load(run_id)[0] == RunStatus.SUCCESS
 
@@ -421,7 +423,7 @@ def test_a_sync_route_wakes_both_boxes_and_powers_both_off(temp_config, temp_db)
 
     assert sorted(box.wol) == ["pbs1", "pbs2"]
     assert sorted(box.poweroffs) == ["pbs1", "pbs2"]
-    assert fakes["pbs1"].sync_runs == [{"id": "joulenap-r1", "direction": "pull"}]
+    assert fakes["pbs1"].sync_runs == [{"id": "joulenap-r1"}]
     with session_scope() as session:
         run = session.scalars(select(Run)).one()
     assert (run.status, run.kind, run.route_id) == (RunStatus.SUCCESS, RunKind.SYNC, "r1")

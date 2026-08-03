@@ -189,24 +189,19 @@ class PbsClient:
         """Create ``/config/{section}/{name}``, replacing any object of that name.
 
         Delete-then-create rather than PUT: the update endpoints take their own updater
-        schemas, and a pull and a push sync job with the same id live in *different* config
-        sections — so editing a route's direction or its peer is only correct as a rebuild.
-        Everything about the object is derived from the route on every run anyway.
+        schemas, and everything about the object is derived from the route on every run.
+
+        ``sync-direction`` is a field of the job *body* and nothing else. PBS rejects it as
+        an unknown parameter on the delete (and run) calls, so neither sends it. Listing is
+        the one place it must be passed: the default listing hides push jobs, so without
+        ``all`` an existing push job is never seen, never deleted, and the create that
+        follows fails with "job already exists" on every run after the first.
         """
-        existing = self._api.request("GET", f"/config/{section}") or []
+        params = {"sync-direction": "all"} if section == "sync" else None
+        existing = self._api.request("GET", f"/config/{section}", params=params) or []
         if any((e.get("name") or e.get("id")) == name for e in existing):
-            self._api.request("DELETE", f"/config/{section}/{name}", params=self._direction(data))
+            self._api.request("DELETE", f"/config/{section}/{name}")
         self._api.request("POST", f"/config/{section}", data=data)
-
-    @staticmethod
-    def _direction(data: dict[str, Any]) -> dict[str, Any] | None:
-        """The ``sync-direction`` of a job body, as params for the delete/run calls.
-
-        Only ever set for push: pull is PBS's default and omitting it keeps these calls
-        identical to what servers without push support accept.
-        """
-        value = data.get("sync-direction")
-        return {"sync-direction": value} if value else None
 
     def ensure_remote(
         self,
@@ -253,12 +248,13 @@ class PbsClient:
             data["sync-direction"] = "push"
         self._replace("sync", job_id, data)
 
-    def run_sync_job(self, job_id: str, *, direction: str = "pull") -> str:
-        """Run a sync job now; returns the task UPID."""
-        data: dict[str, Any] = {}
-        if direction == "push":
-            data["sync-direction"] = "push"
-        return self._api.request("POST", f"/admin/sync/{job_id}/run", data=data or None)
+    def run_sync_job(self, job_id: str) -> str:
+        """Run a sync job now; returns the task UPID.
+
+        No ``sync-direction``: a job id is unique across both directions, so PBS resolves a
+        push job from the id alone and rejects the parameter here as unknown.
+        """
+        return self._api.request("POST", f"/admin/sync/{job_id}/run")
 
     def task_status(self, upid: str) -> dict[str, Any]:
         return self._api.request("GET", f"/nodes/{self.node}/tasks/{upid}/status")
