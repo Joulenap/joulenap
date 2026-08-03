@@ -77,6 +77,9 @@ def _sync_body(
             f"(job on {executor.id} as '{name}')",
         )
         with deps.connect_pbs(executor) as pbs:
+            # Order matters: the job has to go before the remote it references, or PBS
+            # refuses the remote's delete and the route breaks on its second run.
+            pbs.delete_sync_job(name)
             pbs.ensure_remote(
                 name,
                 host=peer.host,

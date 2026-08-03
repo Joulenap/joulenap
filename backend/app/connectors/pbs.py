@@ -226,6 +226,17 @@ class PbsClient:
             data["fingerprint"] = fingerprint
         self._replace("remote", name, data)
 
+    def delete_sync_job(self, job_id: str) -> None:
+        """Drop the sync job ``job_id`` if it exists.
+
+        Must run *before* the remote is replaced: PBS refuses to delete a remote a sync job
+        still points at ("remote 'x' is used by sync job 'y'"), so rebuilding the pair in the
+        other order fails on every run after the first — for pull and push alike.
+        """
+        existing = self._api.request("GET", "/config/sync", params={"sync-direction": "all"}) or []
+        if any(e.get("id") == job_id for e in existing):
+            self._api.request("DELETE", f"/config/sync/{job_id}")
+
     def ensure_sync_job(
         self,
         job_id: str,

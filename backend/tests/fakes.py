@@ -116,6 +116,9 @@ class FakePbs:
         self.remotes: dict[str, dict] = {}
         self.sync_jobs: dict[str, dict] = {}
         self.sync_runs: list[dict] = []
+        # Ordered method names: PBS refuses to delete a remote a sync job still references,
+        # so the sequence is load-bearing and a test pins it.
+        self.sync_calls: list[str] = []
         self.log_lines = log_lines or []
         self.fail_datastore = fail_datastore
         self.gc_log_lines = gc_log_lines
@@ -145,9 +148,15 @@ class FakePbs:
         return "UPID:pbs:verify"
 
     def ensure_remote(self, name: str, **kwargs) -> None:
+        self.sync_calls.append("ensure_remote")
         self.remotes[name] = kwargs
 
+    def delete_sync_job(self, job_id: str) -> None:
+        self.sync_calls.append("delete_sync_job")
+        self.sync_jobs.pop(job_id, None)
+
     def ensure_sync_job(self, job_id: str, **kwargs) -> None:
+        self.sync_calls.append("ensure_sync_job")
         self.sync_jobs[job_id] = kwargs
 
     def run_sync_job(self, job_id: str) -> str:

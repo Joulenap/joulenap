@@ -129,6 +129,10 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
     # The run call carries no direction (PBS resolves the job by id); the direction lives in
     # the job body above, and *which* box ran it is the real proof of the semantics.
     assert pbs1.sync_runs == [{"id": "joulenap-r1"}]
+    # The job is dropped before the remote is rebuilt. PBS refuses to delete a remote that a
+    # sync job still references, so the reverse order fails on every run after the first —
+    # a sync route that works once and then never again.
+    assert pbs1.sync_calls == ["delete_sync_job", "ensure_remote", "ensure_sync_job"]
     # The source is never touched by the job — it is only kept awake.
     assert (pbs2.remotes, pbs2.sync_jobs, pbs2.sync_runs) == ({}, {}, [])
     status, steps = _load(run_id)

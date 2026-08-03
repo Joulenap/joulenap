@@ -159,6 +159,26 @@ def test_push_sync_job_sends_the_direction_only_in_the_job_body():
     assert upid.startswith("UPID:")
 
 
+def test_delete_sync_job_removes_an_existing_job_in_either_direction():
+    handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
+
+    make_client(handler).delete_sync_job("joulenap-r1")
+
+    assert [(m, p) for m, p, _b in calls] == [
+        ("GET", "/api2/json/config/sync"),
+        ("DELETE", "/api2/json/config/sync/joulenap-r1"),
+    ]
+    assert "sync-direction=all" in calls[0][2]  # or a push job is invisible here too
+
+
+def test_delete_sync_job_is_a_no_op_when_there_is_none():
+    handler, calls = _recorder({"sync": []})
+
+    make_client(handler).delete_sync_job("joulenap-r1")
+
+    assert [m for m, _p, _b in calls] == ["GET"]
+
+
 def test_the_sync_existence_check_lists_both_directions():
     handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
 
