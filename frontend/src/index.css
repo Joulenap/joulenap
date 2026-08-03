@@ -83,6 +83,11 @@
   --jn-menu-bg: #161b22;
   --jn-menu-border: #2c343d;
   --jn-info: #8aa6c0;
+  /* Route palette: the extra hues a route can be painted in beyond accent/blue/amber.
+     Used by the kind badges (external/verify) and by M10's colour swatches. */
+  --jn-route-violet: #9d7bd8;
+  --jn-route-teal: #2fa7a0;
+  --jn-route-pink: #d06ca8;
 }
 :root[data-theme='light'] {
   color-scheme: light;
@@ -113,6 +118,9 @@
   --jn-menu-bg: #ffffff;
   --jn-menu-border: #dfe3e8;
   --jn-info: #46688c;
+  --jn-route-violet: #7a56b8;
+  --jn-route-teal: #1f847e;
+  --jn-route-pink: #b34d89;
 }
 
 * {

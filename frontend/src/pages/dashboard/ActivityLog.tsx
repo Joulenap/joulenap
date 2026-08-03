@@ -3,7 +3,6 @@ import type { LogLine } from '../../api/types'
 import { c, mono } from '../../theme'
 import { fmtClock } from '../../utils/format'
 
-// Shared with RunHistory, which renders the same log lines nested inside an expanded run.
 export const LEVELS: Record<string, { color: string; bg: string }> = {
   INFO: { color: c.info, bg: 'rgba(138,166,192,.13)' },
   OK: { color: c.green, bg: 'rgba(63,178,127,.14)' },
@@ -19,8 +18,10 @@ export const colHead: React.CSSProperties = {
   color: c.textFaint,
 }
 
-// The flat activity stream. The surrounding panel, the view switch and the scroll container
-// live in HistoryCard, which renders either this or RunHistory.
+// The flat activity stream: Joulenap's own narration, one line per event. It is no longer
+// an alternative view of the run history — the two are separate panels now, since a run's
+// own steps and task output are read by expanding its history row. Dashboard supplies the
+// panel chrome around it.
 export function ActivityLog({ logs }: { logs: LogLine[] }) {
   const { t } = useTranslation()
   return (

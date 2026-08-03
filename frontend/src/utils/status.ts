@@ -96,6 +96,14 @@ const RUN_STATUS: Record<string, RunStatusStyle> = {
   failure: { labelKey: 'dashboard.runFailure', color: 'var(--jn-red)', bg: 'rgba(229,103,91,.14)' },
   aborted: { labelKey: 'dashboard.runAborted', color: 'var(--jn-amber)', bg: 'rgba(224,169,43,.14)' },
   running: { labelKey: 'dashboard.runRunning', color: 'var(--jn-blue)', bg: 'rgba(59,130,246,.14)' },
+  // Steps only, never a whole run: a power-off that was deliberately not performed. Its
+  // `detail` carries the reason ("left on: still needed by another run"), so the timeline
+  // must not paint it blue as if it were still going.
+  skipped: {
+    labelKey: 'dashboard.runSkipped',
+    color: 'var(--jn-text-faint)',
+    bg: 'rgba(127,136,147,.14)',
+  },
 }
 
 /** Badge styling + label key for a run or step status; unknown values read as running. */

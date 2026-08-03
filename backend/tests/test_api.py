@@ -338,6 +338,7 @@ def test_guests_lists_one_pves_cluster(app_ctx):
             "status": "running",
             "node": "n1",
             "last_backup": None,
+            "pbs_ids": [],
         }
     ]
 
@@ -369,6 +370,41 @@ def test_guests_include_cached_last_backup(app_ctx):
     # Served as UTC-aware (with an offset) so the frontend converts it to local time.
     assert datetime.fromisoformat(guests[0]["last_backup"]) == datetime.fromtimestamp(
         epoch, tz=UTC
+    )
+
+
+def test_guests_name_every_pbs_holding_a_backup(app_ctx):
+    """The homepage's guest panel chips one PBS per copy — a synced guest lists both.
+
+    Also pins that the cache is read per *PVE*: the same vmid on another PVE must not leak
+    its PBSs into this listing.
+    """
+    from app.db.guest_backups import upsert_last_backups
+
+    client, app = app_ctx
+    _inject(
+        app,
+        pves={
+            "pve-alpha": FakePve(
+                guests=[
+                    Guest(vmid=100, name="synced", type="lxc", status="running", node="n1"),
+                    Guest(vmid=101, name="local", type="qemu", status="running", node="n1"),
+                ]
+            )
+        },
+    )
+    older, newer = 1_700_000_000, 1_700_009_999
+    with session_scope() as session:
+        upsert_last_backups(session, "pve-alpha", "pbs-01", {100: older, 101: newer})
+        upsert_last_backups(session, "pve-alpha", "pbs-02", {100: newer})
+        upsert_last_backups(session, "pve-beta", "pbs-02", {100: newer})
+
+    by_vmid = {g["vmid"]: g for g in client.get("/api/guests?pve=pve-alpha").json()}
+    assert by_vmid[100]["pbs_ids"] == ["pbs-01", "pbs-02"]
+    assert by_vmid[101]["pbs_ids"] == ["pbs-01"]
+    # Newest across the copies, not the first row found.
+    assert datetime.fromisoformat(by_vmid[100]["last_backup"]) == datetime.fromtimestamp(
+        newer, tz=UTC
     )
 
 
@@ -482,6 +518,27 @@ def test_tasklog_returns_lines_and_supports_after_cursor(app_ctx):
     # `after` the last id returns no further lines (incremental polling is a no-op when idle).
     last_id = body["lines"][-1]["id"]
     assert client.get(f"/api/tasklog?after={last_id}").json()["lines"] == []
+
+
+def test_tasklog_can_read_an_older_run_by_id(app_ctx):
+    """The homepage expands a *finished* history row, which is never the newest run."""
+    client, app = app_ctx
+    pve = FakePve(guests=[_guest(100)], log_lines=["first run line"])
+    _inject(app, pves={"pve-alpha": pve, "pve-beta": FakePve(guests=[_guest(200)])})
+    first = _run_route(client, app, "nightly")
+
+    pve.log_lines = ["second run line"]
+    second = _run_route(client, app, "nightly")
+
+    # The default cursor follows the newest run...
+    assert client.get("/api/tasklog").json()["run_id"] == second
+    # ...and `run` overrides it without disturbing the response shape.
+    body = client.get(f"/api/tasklog?run={first}").json()
+    assert body["run_id"] == first
+    assert "first run line" in [line["text"] for line in body["lines"]]
+
+    # A run that logged nothing echoes its own id rather than null: the caller named it.
+    assert client.get("/api/tasklog?run=99999").json() == {"run_id": 99999, "lines": []}
 
 
 # --- per-device status enrichment --------------------------------------------

@@ -334,34 +334,91 @@ const DASHBOARD: DashboardResponse = {
   ],
 }
 
-// One PVE's guests. GET /api/guests requires ?pve=, but the stub keys on the path alone, so
-// every PVE gets this list — enough for the read-only guest panel's grouping and search.
-const GUESTS: GuestInfo[] = [
-  {
-    vmid: 100,
-    name: 'nextcloud-production-primary',
-    type: 'lxc',
-    status: 'running',
-    node: 'alpha-1',
-    last_backup: '2026-07-09T02:04:00Z',
-  },
-  {
-    vmid: 101,
-    name: 'homeassistant',
-    type: 'qemu',
-    status: 'running',
-    node: 'alpha-1',
-    last_backup: null,
-  },
-  {
-    vmid: 102,
-    name: 'pihole',
-    type: 'lxc',
-    status: 'stopped',
-    node: 'alpha-2',
-    last_backup: '2026-07-09T02:07:00Z',
-  },
-]
+// One list per PVE, keyed by device id: GET /api/guests requires ?pve=, and the guest panel
+// groups by PVE, so a single shared list would make every group identical. `pve-alpha` spans
+// two nodes (the cluster sub-label in the topology reads the distinct node values), carries
+// one guest synced onto both backup servers, one never backed up, and one deliberately long
+// name for the ellipsis.
+const GUESTS: Record<string, GuestInfo[]> = {
+  'pve-alpha': [
+    {
+      vmid: 100,
+      name: 'nextcloud-production-primary',
+      type: 'lxc',
+      status: 'running',
+      node: 'alpha-1',
+      last_backup: '2026-07-09T02:04:00Z',
+      pbs_ids: ['pbs-01'],
+    },
+    {
+      vmid: 101,
+      name: 'homeassistant',
+      type: 'qemu',
+      status: 'running',
+      node: 'alpha-1',
+      last_backup: null,
+      pbs_ids: [],
+    },
+    {
+      vmid: 102,
+      name: 'pihole',
+      type: 'lxc',
+      status: 'stopped',
+      node: 'alpha-2',
+      last_backup: '2026-07-09T02:07:00Z',
+      pbs_ids: ['pbs-01', 'pbs-02'],
+    },
+  ],
+  'pve-beta': [
+    {
+      vmid: 200,
+      name: 'media-server',
+      type: 'qemu',
+      status: 'running',
+      node: 'beta',
+      last_backup: '2026-07-08T02:44:00Z',
+      pbs_ids: ['pbs-01', 'pbs-02'],
+    },
+    {
+      vmid: 201,
+      name: 'jellyfin',
+      type: 'lxc',
+      status: 'running',
+      node: 'beta',
+      last_backup: '2026-07-08T02:46:00Z',
+      pbs_ids: ['pbs-01'],
+    },
+  ],
+  'pve-lab': [
+    {
+      vmid: 130,
+      name: 'k3s-master',
+      type: 'qemu',
+      status: 'running',
+      node: 'lab',
+      last_backup: '2026-07-04T04:05:00Z',
+      pbs_ids: ['pbs-01'],
+    },
+    {
+      vmid: 131,
+      name: 'k3s-worker',
+      type: 'qemu',
+      status: 'running',
+      node: 'lab',
+      last_backup: '2026-07-04T04:12:00Z',
+      pbs_ids: ['pbs-01'],
+    },
+    {
+      vmid: 132,
+      name: 'sandbox',
+      type: 'lxc',
+      status: 'stopped',
+      node: 'lab',
+      last_backup: '2026-07-04T04:17:00Z',
+      pbs_ids: ['pbs-01'],
+    },
+  ],
+}
 
 const LOGS: LogLine[] = [
   {
@@ -413,6 +470,56 @@ const TASKLOG: TaskLogResponse = {
       ts: '2026-07-09T21:30:04Z',
     },
   ],
+}
+
+// GET /api/tasklog?run=<id>: what an expanded *finished* history row shows. Run 44 failed,
+// so its tail carries the ERROR line the row's badge only hints at.
+const TASKLOG_BY_RUN: Record<number, TaskLogResponse> = {
+  45: {
+    run_id: 45,
+    lines: [
+      {
+        id: 11,
+        step: 'sync',
+        source: 'pbs',
+        text: 'INFO: sync group vm/100 done, 3 snapshots, 12.4 GiB transferred',
+        ts: '2026-07-05T05:12:00Z',
+      },
+      {
+        id: 12,
+        step: 'sync',
+        source: 'pbs',
+        text: 'INFO: sync group ct/102 done, 2 snapshots, 4.1 GiB transferred',
+        ts: '2026-07-05T05:31:00Z',
+      },
+      {
+        id: 13,
+        step: 'sync',
+        source: 'pbs',
+        text: 'TASK OK',
+        ts: '2026-07-05T05:41:00Z',
+      },
+    ],
+  },
+  44: {
+    run_id: 44,
+    lines: [
+      {
+        id: 8,
+        step: 'gc',
+        source: 'pbs',
+        text: 'INFO: starting garbage collection on store backup',
+        ts: '2026-07-08T22:28:00Z',
+      },
+      {
+        id: 9,
+        step: 'gc',
+        source: 'pbs',
+        text: 'ERROR: connection reset by peer while reading chunk index',
+        ts: '2026-07-08T22:30:46Z',
+      },
+    ],
+  },
 }
 
 // Run history: one of each outcome plus a sync, so the route column, the type column, the
@@ -603,8 +710,7 @@ const ROUTES: Record<string, unknown> = {
   // a real dumper only if a screenshot needs block style.
   'GET /config/yaml': { yaml: JSON.stringify(CONFIG, null, 2) },
   'PUT /config/yaml': CONFIG,
-  'GET /guests': GUESTS,
-  'GET /tasklog': TASKLOG,
+  // /guests and /tasklog are answered from their query string below, not from this table.
   'GET /runs': RUNS,
   'GET /routes': ROUTE_LIST,
   'GET /devices': DEVICES,
@@ -629,7 +735,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (!path.startsWith('/api/')) return realFetch(input as RequestInfo, init)
 
   const method = (init?.method ?? 'GET').toUpperCase()
-  const bare = path.slice(4).split('?')[0]
+  const [bare, search] = (() => {
+    const [p, q = ''] = path.slice(4).split('?')
+    return [p, new URLSearchParams(q)] as const
+  })()
   const key = `${method} ${bare}`
 
   let body: unknown = ROUTES[key]
@@ -641,6 +750,17 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (body === undefined && key.startsWith('GET /logs')) body = LOGS
   if (body === undefined && bare === '/logs') body = LOGS
+  // Query-dependent fixtures: the guest panel asks per PVE, and an expanded history row asks
+  // for one run's task log rather than the newest.
+  if (body === undefined && key === 'GET /guests') {
+    body = GUESTS[search.get('pve') ?? ''] ?? []
+  }
+  if (body === undefined && key === 'GET /tasklog') {
+    const run = search.get('run')
+    body = run
+      ? (TASKLOG_BY_RUN[Number(run)] ?? { run_id: Number(run), lines: [] })
+      : TASKLOG
+  }
   // ROUTES is keyed on exact paths, so /runs/{id} needs its own match.
   const runId = method === 'GET' ? /^\/runs\/(\d+)$/.exec(bare)?.[1] : undefined
   if (runId !== undefined && body === undefined) {

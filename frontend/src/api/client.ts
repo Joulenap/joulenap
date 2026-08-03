@@ -171,7 +171,10 @@ export const api = {
       `/runs?limit=${limit}${route ? `&route=${encodeURIComponent(route)}` : ''}`,
     ),
   run: (id: number) => req<RunDetail>('GET', `/runs/${id}`),
-  taskLog: (after = 0) => req<TaskLogResponse>('GET', `/tasklog?after=${after}`),
+  // Without `run` this follows the newest run that has lines — the live tail. With it, that
+  // run's lines: a history row expands a *finished* run, which is never the newest.
+  taskLog: (after = 0, run?: number) =>
+    req<TaskLogResponse>('GET', `/tasklog?after=${after}${run ? `&run=${run}` : ''}`),
   // 202 = accepted, not stopped: cancellation is cooperative, poll GET /runs/{id} for the end.
   // Note the asymmetry with runRoute below — this one takes power_off *directly*.
   stopRun: (runId: number, powerOff: boolean) =>

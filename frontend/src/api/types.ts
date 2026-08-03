@@ -133,6 +133,8 @@ export interface GuestInfo {
   status: string
   node: string // always set — a standalone PVE is a one-node cluster to the API
   last_backup: string | null
+  // Which backup servers hold a copy, sorted. More than one when a sync route copied it on.
+  pbs_ids: string[]
 }
 
 // --- dashboard (frozen public contract, also read by Homepage/Homarr/Dashy/Glance) ---------
