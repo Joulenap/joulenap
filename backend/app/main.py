@@ -35,6 +35,12 @@ from .notify.messages import build_interrupted_message
 
 log = logging.getLogger("joulenap.main")
 
+#: How long shutdown waits for a startup thread. Both only make one notification round-trip, so
+#: this is generous; it exists so a black-holing channel can't hang the process on exit. Kept
+#: comfortably under Docker's 10s SIGTERM→SIGKILL grace, so a hung channel costs a slow stop
+#: rather than a killed one.
+_STARTUP_THREAD_JOIN_TIMEOUT = 5.0
+
 def _frontend_dir() -> Path:
     """Directory of the built SPA (Vite output) served as static files.
 
@@ -86,24 +92,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Detect scheduled runs missed while the process was down (BE-R1). Off the startup
     # path on a daemon thread so a slow/black-holing notification channel can't delay the app
     # becoming ready, and wrapped so it can never crash boot.
-    threading.Thread(
-        target=_startup_missed_run_check,
-        args=(store.config, scheduler, app.state.notifier),
-        daemon=True,
-        name="missed-backup-check",
-    ).start()
+    startup_threads = [
+        threading.Thread(
+            target=_startup_missed_run_check,
+            args=(store.config, scheduler, app.state.notifier),
+            daemon=True,
+            name="missed-backup-check",
+        )
+    ]
     # Alert on any run a restart interrupted (BE-R2) — same off-thread, boot-safe pattern.
     if interrupted_alerts:
-        threading.Thread(
-            target=_send_startup_alerts,
-            args=(store.config, app.state.notifier, interrupted_alerts),
-            daemon=True,
-            name="interrupted-run-alert",
-        ).start()
+        startup_threads.append(
+            threading.Thread(
+                target=_send_startup_alerts,
+                args=(store.config, app.state.notifier, interrupted_alerts),
+                daemon=True,
+                name="interrupted-run-alert",
+            )
+        )
+    for thread in startup_threads:
+        thread.start()
     try:
         yield
     finally:
         scheduler.shutdown()
+        # Both read the DB and/or send notifications, so shutdown waits for them instead of
+        # abandoning a half-sent alert — and, in tests, instead of leaving a thread that
+        # outlives its app and touches the *next* test's database.
+        # ponytail: the job service's queue worker is deliberately NOT joined — it may be
+        # mid-backup, and blocking shutdown on a running vzdump is worse than dropping the
+        # thread on process exit. Give JobService a stop() if that ever stops being true.
+        for thread in startup_threads:
+            thread.join(timeout=_STARTUP_THREAD_JOIN_TIMEOUT)
+            if thread.is_alive():
+                log.warning("Startup thread '%s' did not finish before shutdown", thread.name)
 
 
 def _startup_missed_run_check(

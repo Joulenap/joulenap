@@ -122,6 +122,11 @@ conversion that is lossy, and for the two breaking changes outside the interface
 - **An interface translated into Italian had English gaps in it**, including a backup-mode dropdown
   under a translated label, a schedule that lost its preposition, and six counts that spelled their
   plural in English ("1 events").
+- **A restart could throw away the alert it had just started sending.** The startup checks for a
+  missed scheduled run and for a run an earlier restart interrupted send their notifications off the
+  boot path, and shutting down did not wait for them — so stopping the container quickly after
+  starting it could drop the alert halfway out. Shutdown now waits for them, briefly and with a
+  ceiling, so a hung notification channel still cannot hold the process open.
 
 ### Security
 

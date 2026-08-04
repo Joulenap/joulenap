@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,26 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 from app import paths
+
+
+@pytest.fixture(autouse=True)
+def no_leaked_threads():
+    """Fail the test that leaves one of the app's threads running behind it.
+
+    A thread outliving its test used to keep using the database while the next test tore the
+    engine down and built its own — the whole flaky-suite finding (R2). Threads are cheap to
+    watch and impossible to reason about after the fact, so the suite refuses to carry one
+    across a test boundary rather than hoping it finishes in time.
+
+    Enumerating rather than matching known names on purpose: it covers a thread nobody has
+    written yet. Anything that parks bounds itself (``release.wait(timeout=5)``), so the join
+    below is a formality unless something is genuinely stuck.
+    """
+    before = set(threading.enumerate())
+    yield
+    for thread in set(threading.enumerate()) - before:
+        thread.join(timeout=6)
+        assert not thread.is_alive(), f"test leaked a live thread: {thread.name}"
 
 
 @pytest.fixture

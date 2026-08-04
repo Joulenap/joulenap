@@ -68,9 +68,17 @@ def init_db(db_file: Path | None = None) -> None:
 
 
 def _ensure_ready() -> sessionmaker[Session]:
+    """The session factory, or a clear error if the app never called :func:`init_db`.
+
+    Deliberately does *not* initialise lazily. Doing so ran ``create_all`` against
+    ``paths.db_path()`` — the real database — from whatever thread happened to ask first,
+    and two of them at once collide (``create_all`` reflects once, then issues CREATEs, so
+    the loser raises *table X already exists*). Failing loudly makes a caller that outlived
+    its setup obvious instead of silently rebuilding a schema somewhere else.
+    """
     if _SessionLocal is None:
-        init_db()
-    assert _SessionLocal is not None
+        # ASCII on purpose: this can surface on a Windows console with a cp1252 codepage.
+        raise RuntimeError("Database is not initialised - call init_db() first")
     return _SessionLocal
 
 

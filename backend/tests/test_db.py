@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select, text
 
 from app.db import session_scope
 from app.db.models import LogEvent, LogLevel, Run, RunKind, RunStatus, RunTrigger
+
+
+def test_using_the_db_before_init_raises_instead_of_initialising_it(monkeypatch):
+    """No lazy init_db(): it used to build the schema at paths.db_path() — the *real*
+    database — whenever a caller (typically a thread outliving its setup) got there first,
+    and two at once collided with "table X already exists". That was the flaky suite (R2)."""
+    from app.db import base
+
+    monkeypatch.setattr(base, "_SessionLocal", None)
+    with pytest.raises(RuntimeError, match="not initialised"):
+        with session_scope():
+            pass
+    assert base._SessionLocal is None  # and it did not quietly create one on the way out
 
 
 def test_sqlite_pragmas_applied(temp_db):

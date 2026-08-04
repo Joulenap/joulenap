@@ -463,17 +463,36 @@ def _run_route(client, app, route_id: str) -> int:
     assert client.post(f"/api/routes/{route_id}/run").status_code == 202
     service = app.state.job_service
     deadline = time.monotonic() + 5
+    run_id = None
     while time.monotonic() < deadline:
         current = service.current()
         if current is not None and current.run_id is not None:
             run_id = current.run_id
             _wait_run(client, run_id)
-            return run_id
+            break
         if not service.pending() and not service.is_running:
             break
         time.sleep(0.01)
+    # The run *row* is finalised inside the cycle, but the service only lets go afterwards —
+    # power-off, notification, then the lock and `current`. Waiting on the row alone returns
+    # inside that window, so a second run of the same route gets 409 and the worker outlives
+    # the test. Wait for the queue itself to go idle.
+    _drain(app)
+    if run_id is not None:
+        return run_id
     # It already finished before we looked: take the newest run.
     return client.get("/api/runs").json()[0]["id"]
+
+
+def _drain(app, timeout: float = 5) -> None:
+    """Block until the job service is idle: nothing running, queued or holding the lock."""
+    service = app.state.job_service
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if service.current() is None and not service.pending() and not service.is_running:
+            return
+        time.sleep(0.01)
+    raise AssertionError("queue did not drain")
 
 
 def test_run_not_found(app_ctx):
@@ -578,7 +597,7 @@ def test_status_datastore_from_cache_when_offline(app_ctx):
     assert pbss["pbs-02"]["datastore"] is None  # a different box, its own cache row
 
 
-def test_probe_skips_a_device_with_no_host():
+def test_probe_skips_a_device_with_no_host(temp_db):
     from app.api._probe import probe_pbss
     from app.config import Config, PbsDevice
 
