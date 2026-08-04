@@ -14,10 +14,14 @@ from sqlalchemy import select
 from app.config import Config, Route
 from app.db import session_scope
 from app.db.models import Run, RunKind, RunStatus, RunStep, RunTrigger, StepName, StepStatus
+from app.jobs.route_cycle import monitor_detail
 from app.main import create_app
 from app.notify import NotificationService
 from app.notify.apprise_urls import Channel, build_channels
 from app.notify.messages import (
+    _ERRORS,
+    _KIND_LABEL,
+    _MESSAGES,
     GuestSummary,
     RunContext,
     build_interrupted_message,
@@ -171,10 +175,19 @@ def _run(
     status: RunStatus,
     *,
     error: str | None = None,
+    error_key: str | None = None,
+    error_params: str | None = None,
     kind: RunKind = RunKind.CYCLE,
     trigger: RunTrigger = RunTrigger.MANUAL,
 ) -> Run:
-    run = Run(kind=kind, trigger=trigger, status=status, error=error)
+    run = Run(
+        kind=kind,
+        trigger=trigger,
+        status=status,
+        error=error,
+        error_key=error_key,
+        error_params=error_params,
+    )
     run.id = 128
     run.started_at = datetime(2026, 6, 28, 4, 0, 0, tzinfo=UTC)
     run.finished_at = datetime(2026, 6, 28, 4, 1, 23, tzinfo=UTC)
@@ -386,11 +399,11 @@ def test_missed_backup_message_english():
     last = datetime(2026, 7, 8, 4, 0, tzinfo=UTC)
     nxt = datetime(2026, 7, 12, 4, 0, tzinfo=UTC)
     title, body = build_missed_backup_message(Config(), _route(), missed, last, nxt)
-    assert "missed scheduled backup" in title
-    assert "Route: Nightly" in body  # which one, now that every route has its own schedule
+    assert "missed scheduled run" in title
+    assert "Route: Nightly (verify)" in body  # which one, now that every route has its own schedule
     assert "was offline" in body
     assert "Missed run: 2026-07-09 04:00" in body
-    assert "Last backup run: 2026-07-08 04:00" in body
+    assert "Last run: 2026-07-08 04:00" in body
     assert "Next scheduled run: 2026-07-12 04:00" in body
 
 
@@ -400,7 +413,9 @@ def test_missed_backup_message_localized_italian():
     title, body = build_missed_backup_message(
         cfg, _route(), datetime(2026, 7, 9, 4, 0, tzinfo=UTC), None, None
     )
-    assert "mancato" in title
+    # "esecuzione ... mancata", feminine — the agreement the pack spells out per string
+    # rather than templating a noun into it.
+    assert "mancata" in title
     assert "offline" in body
     # A missing last/next time renders as an em dash rather than crashing.
     assert "Esecuzione mancata: 2026-07-09 04:00" in body
@@ -420,7 +435,7 @@ def test_send_missed_backup_dispatches_when_on_failure_enabled():
     )
     assert report.sent is True
     assert report.channels == 5
-    assert fake.payload is not None and "missed scheduled backup" in fake.payload[0]
+    assert fake.payload is not None and "missed scheduled run" in fake.payload[0]
 
 
 def test_send_missed_backup_skipped_when_on_failure_disabled():
@@ -449,7 +464,7 @@ def test_missed_backup_message_renders_every_time_in_the_configured_zone():
         datetime(2026, 7, 10, 2, 0, tzinfo=UTC),
     )
     assert "Missed run: 2026-07-09 04:00 CEST" in body
-    assert "Last backup run: 2026-07-08 04:00 CEST" in body
+    assert "Last run: 2026-07-08 04:00 CEST" in body
     assert "Next scheduled run: 2026-07-10 04:00 CEST" in body
 
 
@@ -586,6 +601,96 @@ def test_test_message_falls_back_to_english_for_unknown_language():
     cfg.app.language = "xx"
     title, _ = build_test_message(cfg)
     assert "test notification" in title
+
+
+# --- the message packs -------------------------------------------------------
+
+
+def _flatten(pack, prefix=""):
+    out = {}
+    for key, value in pack.items():
+        name = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            out.update(_flatten(value, name))
+        else:
+            out[name] = value
+    return out
+
+
+def test_every_language_pack_holds_the_same_keys():
+    """``_pack`` falls back whole-pack, not per-key, so a key present in only one language
+    raises ``KeyError`` inside a live notification send. Nothing else catches that."""
+    for name, packs in (
+        ("_MESSAGES", _MESSAGES),
+        ("_KIND_LABEL", _KIND_LABEL),
+        ("_ERRORS", _ERRORS),
+    ):
+        english = sorted(_flatten(packs["en"]))
+        for language, pack in packs.items():
+            assert sorted(_flatten(pack)) == english, f"{name}: '{language}' differs from 'en'"
+
+
+def test_error_keys_are_rendered_in_the_configured_language():
+    cfg = Config()
+    cfg.app.language = "it"
+    run = _run(
+        RunStatus.FAILURE,
+        error="route 'nightly': pbs 'pbs-01' no longer exists",
+        error_key="pbs_missing",
+        error_params='{"route": "nightly", "pbs": "pbs-01"}',
+    )
+    _, body = build_run_message(RunContext(config=cfg, run=run))
+    assert "Errore: route 'nightly': il pbs 'pbs-01' non esiste più" in body
+
+
+def test_error_rendering_falls_back_to_the_stored_english_text():
+    """The floor under every branch: a pre-1.0 row with no key, a key this version does not
+    know, and a payload whose parameters no longer match the template."""
+    cfg = Config()
+    for key, params in (
+        (None, None),
+        ("no_such_key_in_this_version", '{"a": 1}'),
+        ("pbs_missing", '{"wrong": "params"}'),
+        ("pbs_missing", "not valid json at all"),
+    ):
+        run = _run(RunStatus.FAILURE, error="vzdump exploded", error_key=key, error_params=params)
+        _, body = build_run_message(RunContext(config=cfg, run=run))
+        assert "Error: vzdump exploded" in body, f"key={key!r} params={params!r}"
+
+
+def test_missed_run_message_is_not_worded_for_backups():
+    """catchup fires for every route kind, so a missed sync must not say "missed backup"."""
+    cfg = Config()
+    when = datetime(2026, 6, 28, 4, 0, 0, tzinfo=UTC)
+    title, body = build_missed_backup_message(
+        cfg, _route(kind="sync", target="pbs-02", source_pbs="pbs-01"), when, None, None
+    )
+    assert "backup" not in title.lower()
+    assert "backup" not in body.lower()
+    assert "(sync)" in body
+
+
+def test_monitor_detail_stays_parseable_by_the_notifier():
+    """``build_run_message`` reads the observed count out of the MONITOR step's *detail*
+    (``int(detail.split()[0])``), which ``route_cycle._external_body`` writes as prose. This
+    pins that contract: reword either side and this fails instead of the notification
+    silently flipping to the "no PBS job ran" warning."""
+    cfg = Config()
+    run = _run(RunStatus.SUCCESS, kind=RunKind.MONITOR)
+    run.steps = [
+        RunStep(
+            name=StepName.MONITOR,
+            status=StepStatus.SUCCESS,
+            started_at=run.started_at,
+            detail=monitor_detail(3),
+        )
+    ]
+    _, body = build_run_message(RunContext(config=cfg, run=run))
+    assert "PBS jobs observed: 3" in body
+
+    run.steps[0].detail = monitor_detail(None)
+    _, body = build_run_message(RunContext(config=cfg, run=run))
+    assert "No PBS job ran" in body
 
 
 # --- service dispatch & routing ----------------------------------------------

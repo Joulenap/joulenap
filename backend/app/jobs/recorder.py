@@ -7,6 +7,7 @@ so an in-flight run (and its current step) is visible to ``GET /api/status`` and
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -26,10 +27,25 @@ from ..db.models import (
     StepStatus,
     TaskLogLine,
 )
+from ..notify.messages import LocalizedError
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _error_code(error: str | BaseException) -> tuple[str | None, dict[str, object] | None]:
+    """``(key, params)`` for the ``_ERRORS`` catalogue, or ``(None, None)`` for raw text.
+
+    An exception raised by someone else's library has no key of its own, so it lands under
+    ``unexpected`` with its text as a parameter — translated frame, verbatim payload. A
+    plain string caller keeps the old behaviour: stored as-is, rendered as-is.
+    """
+    if isinstance(error, LocalizedError):
+        return error.key, dict(error.params)
+    if isinstance(error, BaseException):
+        return "unexpected", {"detail": str(error)}
+    return None, None
 
 
 class RunRecorder:
@@ -152,11 +168,23 @@ class RunRecorder:
 
     # --- finalisation --------------------------------------------------------
 
-    def finish(self, status: RunStatus, *, error: str | None = None) -> None:
+    def finish(self, status: RunStatus, *, error: str | BaseException | None = None) -> None:
+        """Close the run out, recording *why* it ended.
+
+        ``error`` takes an exception rather than ``str(exc)`` so a :class:`LocalizedError`
+        can hand over its key and parameters as well as its English text: the message is
+        shown both in a notification and in the history row, and both render it in the
+        configured language from ``error_key``/``error_params``. ``error`` still holds the
+        English sentence — it is what pre-1.0 rows have and the fallback whenever the key
+        cannot be rendered.
+        """
         self.run.status = status
         self.run.finished_at = _utcnow()
         if error is not None:
-            self.run.error = error
+            self.run.error = str(error)
+            key, params = _error_code(error)
+            self.run.error_key = key
+            self.run.error_params = json.dumps(params) if params is not None else None
         self._session.commit()
         self._finished = True
 
@@ -169,5 +197,5 @@ class RunRecorder:
     def __exit__(self, exc_type, exc, _tb) -> None:
         # Safety net: if the job body raised before finishing, mark the run failed.
         if not self._finished:
-            self.finish(RunStatus.FAILURE, error=str(exc) if exc else "unexpected error")
+            self.finish(RunStatus.FAILURE, error=exc or LocalizedError("unknown"))
         self.close()

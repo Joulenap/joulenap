@@ -862,3 +862,55 @@ def test_dashboard_last_run_never_when_only_a_running_one_exists(app_ctx):
     nightly = client.get("/api/dashboard", headers={"X-API-Key": key}).json()["routes"][0]
     assert nightly["last_run_status"] == "never"
     assert nightly["last_run_time"] is None
+
+
+def test_run_history_renders_the_error_in_the_configured_language(app_ctx):
+    """The same failure text is shown in the notification *and* here, so it is stored as a
+    key + params and rendered on read — the UI prints whatever this endpoint returns."""
+    client, app = app_ctx
+    with session_scope() as session:
+        run = Run(
+            kind=RunKind.CYCLE,
+            trigger=RunTrigger.MANUAL,
+            status=RunStatus.FAILURE,
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
+            error="route 'nightly': pbs 'pbs-01' no longer exists",
+            error_key="pbs_missing",
+            error_params='{"route": "nightly", "pbs": "pbs-01"}',
+        )
+        session.add(run)
+        session.flush()
+        run_id = run.id
+
+    assert "no longer exists" in client.get(f"/api/runs/{run_id}").json()["error"]
+
+    store = app.state.config_store
+    cfg = store.config.model_copy(deep=True)
+    cfg.app.language = "it"
+    store.replace(cfg)
+
+    for body in (
+        client.get(f"/api/runs/{run_id}").json(),
+        next(r for r in client.get("/api/runs").json() if r["id"] == run_id),
+    ):
+        assert body["error"] == "route 'nightly': il pbs 'pbs-01' non esiste più"
+
+
+def test_run_history_falls_back_to_the_stored_english_error(app_ctx):
+    """A pre-1.0 row has no key at all; it must still show its message, not an empty cell."""
+    client, _ = app_ctx
+    with session_scope() as session:
+        run = Run(
+            kind=RunKind.CYCLE,
+            trigger=RunTrigger.MANUAL,
+            status=RunStatus.FAILURE,
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
+            error="vzdump exited with code 255",
+        )
+        session.add(run)
+        session.flush()
+        run_id = run.id
+
+    assert client.get(f"/api/runs/{run_id}").json()["error"] == "vzdump exited with code 255"

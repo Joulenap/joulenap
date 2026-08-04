@@ -17,7 +17,7 @@ from ..config import Config, PbsDevice, Route
 from ..connectors.errors import TaskError
 from ..connectors.pbs import DatastoreStatus
 from ..db.models import LogLevel, RunKind, RunStatus, StepName
-from ..notify.messages import RunContext
+from ..notify.messages import LocalizedError, RunContext
 from .backup_cycle import (
     CycleAbort,
     CycleCancelled,
@@ -49,7 +49,7 @@ RUN_KINDS: dict[str, RunKind] = {
 def _require_pbs(config: Config, pbs_id: str, route: Route) -> PbsDevice:
     device = _find_device(config.pbss, pbs_id)
     if device is None:
-        raise CycleAbort(f"route '{route.id}': pbs '{pbs_id}' no longer exists")
+        raise CycleAbort("pbs_missing", route=route.id, pbs=pbs_id)
     return device
 
 
@@ -124,11 +124,13 @@ def _sync_body(
                 # The bare "Task UPID:… finished with status 'WARNINGS: 1'" is unreadable and
                 # is what the run row, the history and the notification all end up showing.
                 reason = _task_reason(pbs, upid)
-                raise TaskError(
-                    f"sync {route.sync_direction} {source.id} -> {target.id} failed"
-                    f" ({exc.exit_status or 'unknown status'})"
-                    + (f": {reason}" if reason else ""),
-                    exit_status=exc.exit_status,
+                raise LocalizedError(
+                    "sync_failed",
+                    direction=route.sync_direction,
+                    source=source.id,
+                    target=target.id,
+                    status=exc.exit_status or "unknown status",
+                    reason=f": {reason}" if reason else "",
                 ) from exc
 
     # Maintenance runs on the target: it is the box that just gained snapshots, whichever
@@ -149,6 +151,18 @@ def _sync_body(
 
 
 # --- external ----------------------------------------------------------------
+
+
+def monitor_detail(observed: int | None) -> str:
+    """The MONITOR step's ``detail``, in the one place that defines its shape.
+
+    ``notify.messages.build_run_message`` reads the count back out of this string
+    (``int(detail.split()[0])``, falling through to the "no PBS job ran" warning on
+    ``ValueError``), so the format is a contract between two modules rather than free text.
+    A test pins the round-trip; reword it here and that test fails instead of the
+    notification quietly reporting the wrong thing.
+    """
+    return "no tasks observed" if observed is None else f"{observed} task(s) observed"
 
 
 def _external_source_pve(config: Config, target: PbsDevice, recorder: RunRecorder) -> str | None:
@@ -181,14 +195,14 @@ def _external_body(
         with deps.connect_pbs(target) as pbs:
             observed = watch_external_tasks(pbs, target.external, cancelled=deps.cancelled)
         if observed is None:
-            step.detail = "no tasks observed"
+            step.detail = monitor_detail(None)
             recorder.log(
                 LogLevel.WARN,
                 f"no PBS task appeared within {target.external.first_task_wait}s "
                 "— check the schedules on PVE/PBS; powering off",
             )
         else:
-            step.detail = f"{observed} task(s) observed"
+            step.detail = monitor_detail(observed)
 
     # Someone else's jobs (hopefully) wrote new snapshots — refresh the caches the dashboard
     # serves while the PBS sleeps, exactly like a managed route does.
@@ -242,12 +256,12 @@ def _run_body(
         recorder.finish(RunStatus.SUCCESS)
     except CycleCancelled:
         # No notification: the user pressed Stop and is standing at the UI.
-        recorder.finish(RunStatus.ABORTED, error="Cancelled by user")
+        recorder.finish(RunStatus.ABORTED, error=LocalizedError("cancelled"))
         return None
     except CycleAbort as exc:
-        recorder.finish(RunStatus.ABORTED, error=str(exc))
+        recorder.finish(RunStatus.ABORTED, error=exc)
     except Exception as exc:  # connector/task failures: the lease leaves the PBS on
-        recorder.finish(RunStatus.FAILURE, error=str(exc))
+        recorder.finish(RunStatus.FAILURE, error=exc)
 
     return RunContext(config=config, run=recorder.run, route=route, datastore=datastore)
 
@@ -257,7 +271,7 @@ def _simple_body(
 ) -> DatastoreStatus | None:
     body = _BODIES.get(route.kind)
     if body is None:
-        raise CycleAbort(f"route '{route.id}': unsupported kind '{route.kind}'")
+        raise CycleAbort("unsupported_kind", route=route.id, kind=route.kind)
     target = _require_pbs(config, route.target, route)
     return body(config, route, target, recorder, deps)
 
@@ -306,7 +320,7 @@ def run_pbs_maintenance(
             # the ones the user is worried about. reverify_days is the per-route pacing knob.
             _route_verify_step(pbs, recorder, deps, outdated_after=0)
         else:
-            raise CycleAbort(f"unsupported maintenance action '{action}'")
+            raise CycleAbort("unsupported_action", action=action)
         return _route_read_datastore(pbs, recorder, deps)
 
     return _run_body(config, None, recorder, body)

@@ -8,6 +8,8 @@ the UI locales but kept deliberately tiny (only the strings that ship in a notif
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING
@@ -96,9 +98,11 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "failure": "❌ Joulenap — sync failed",
             "aborted": "⚠️ Joulenap — sync aborted",
         },
+        # Route-neutral: catchup fires for every kind, so a missed sync or verify must not
+        # be announced as a missed backup. The kind is named on the Route line below.
         "missed": {
-            "title": "⚠️ Joulenap — missed scheduled backup",
-            "intro": "A scheduled backup was skipped because Joulenap was offline when it "
+            "title": "⚠️ Joulenap — missed scheduled run",
+            "intro": "A scheduled route did not run because Joulenap was offline when it "
             "was due.",
         },
         "interrupted": {
@@ -124,7 +128,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "pbs_left_on": "⚠️ PBS left powered on — check it",
             "awake_for": "PBS awake for",
             "missed_run": "Missed run",
-            "last_run": "Last backup run",
+            "last_run": "Last run",
             "next_run": "Next scheduled run",
             "run_no": "Run",
             # Names for the duration breakdown. Only the phases that do the actual work: the
@@ -163,9 +167,9 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "aborted": "⚠️ Joulenap — sincronizzazione interrotta",
         },
         "missed": {
-            "title": "⚠️ Joulenap — backup pianificato mancato",
-            "intro": "Un backup pianificato è stato saltato perché Joulenap era offline "
-            "al momento previsto.",
+            "title": "⚠️ Joulenap — esecuzione pianificata mancata",
+            "intro": "Una route pianificata non è stata eseguita perché Joulenap era "
+            "offline al momento previsto.",
         },
         "interrupted": {
             "title": "⚠️ Joulenap — esecuzione interrotta da un riavvio",
@@ -191,7 +195,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "pbs_left_on": "⚠️ PBS lasciato acceso — controllalo",
             "awake_for": "PBS sveglio da",
             "missed_run": "Esecuzione mancata",
-            "last_run": "Ultimo backup eseguito",
+            "last_run": "Ultima esecuzione",
             "next_run": "Prossima esecuzione pianificata",
             "run_no": "Run",
             "phase_backup": "backup",
@@ -204,6 +208,105 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
     },
 }
 
+#: Why a run failed, as ``str.format`` templates. A run's ``error`` is shown in **two**
+#: places — the notification body and the run-history row — so it is stored as a key plus
+#: parameters (``runs.error_key`` / ``runs.error_params``) and rendered at read time, in the
+#: configured language, by :func:`render_error`. ``runs.error`` still holds the English
+#: rendering: it is what a pre-1.0 row has, and the fallback for anything not in here.
+#:
+#: Deliberately **not** covered: text that came from someone else's software (a PBS task
+#: log, an httpx or paramiko exception). That rides along inside ``unexpected``/``sync``
+#: verbatim — a dictionary of other people's error messages is not a thing to maintain.
+_ERRORS: dict[str, dict[str, str]] = {
+    "en": {
+        "unexpected": "unexpected error: {detail}",
+        "unknown": "unexpected error",
+        "cancelled": "Cancelled by user",
+        "cancelled_waiting": "Cancelled while waiting for PBS '{pbs}'",
+        "interrupted": "Interrupted — Joulenap restarted while the run was in progress",
+        "pbs_missing": "route '{route}': pbs '{pbs}' no longer exists",
+        "pbs_unreachable": (
+            "PBS '{pbs}' ({host}:{port}) not reachable after {attempts} wake "
+            "attempt(s) of {timeout}s each"
+        ),
+        "source_pve_missing": "source pve '{pve}' no longer exists",
+        "no_storage_mapping": (
+            "pve '{pve}' has no storage mapping for pbs '{pbs}' (Datacenter > Storage)"
+        ),
+        "no_guests": "pve '{pve}': no guests selected for backup",
+        "datastore_full": (
+            "PBS '{pbs}' datastore '{datastore}' only {free}% free "
+            "(need >= {threshold}%); skipping backup"
+        ),
+        "target_pbs_missing": "route '{route}': target pbs '{pbs}' no longer exists",
+        "sources_failed": "backup failed for source(s): {sources}",
+        "unsupported_kind": "route '{route}': unsupported kind '{kind}'",
+        "unsupported_action": "unsupported maintenance action '{action}'",
+        "sync_failed": "sync {direction} {source} -> {target} failed ({status}){reason}",
+    },
+    "it": {
+        "unexpected": "errore imprevisto: {detail}",
+        "unknown": "errore imprevisto",
+        "cancelled": "Annullato dall'utente",
+        "cancelled_waiting": "Annullato durante l'attesa del PBS '{pbs}'",
+        "interrupted": "Interrotta — Joulenap si è riavviato mentre l'esecuzione era in corso",
+        "pbs_missing": "route '{route}': il pbs '{pbs}' non esiste più",
+        "pbs_unreachable": (
+            "PBS '{pbs}' ({host}:{port}) non raggiungibile dopo {attempts} tentativi di "
+            "risveglio da {timeout}s ciascuno"
+        ),
+        "source_pve_missing": "il pve sorgente '{pve}' non esiste più",
+        "no_storage_mapping": (
+            "il pve '{pve}' non ha una mappatura storage verso il pbs '{pbs}' "
+            "(Datacenter > Storage)"
+        ),
+        "no_guests": "pve '{pve}': nessun guest selezionato per il backup",
+        "datastore_full": (
+            "il datastore '{datastore}' del PBS '{pbs}' ha solo il {free}% libero "
+            "(serve almeno {threshold}%); backup saltato"
+        ),
+        "target_pbs_missing": "route '{route}': il pbs di destinazione '{pbs}' non esiste più",
+        "sources_failed": "backup fallito per la/e sorgente/i: {sources}",
+        "unsupported_kind": "route '{route}': tipo '{kind}' non supportato",
+        "unsupported_action": "azione di manutenzione '{action}' non supportata",
+        "sync_failed": (
+            "sincronizzazione {direction} {source} -> {target} fallita ({status}){reason}"
+        ),
+    },
+}
+
+def _run_error(language: str, run: Run) -> str | None:
+    """A run's failure message in ``language``, from the stored key when it has one.
+
+    The API renders the same thing for the history row (``api.schemas.RunSummary.of``); this
+    is the notification's half. Both fall back to ``run.error``, the English rendering the
+    recorder always stores.
+    """
+    params: Mapping[str, object] | None = None
+    if run.error_params:
+        try:
+            decoded = json.loads(run.error_params)
+        except ValueError:
+            decoded = None
+        params = decoded if isinstance(decoded, dict) else None
+    return render_error(language, run.error_key, params, run.error)
+
+
+class LocalizedError(Exception):
+    """An error that remembers *what* went wrong, not just how it reads in English.
+
+    ``str(exc)`` still yields the English sentence, so every existing ``error=str(exc)``
+    path and every log line keeps working unchanged; ``key``/``params`` ride alongside so
+    the recorder can persist them and the message can be rebuilt in the user's language
+    when it is read back.
+    """
+
+    def __init__(self, key: str, /, **params: object) -> None:
+        self.key = key
+        self.params = params
+        super().__init__(render_error("en", key, params) or key)
+
+
 _STATUS_EVENT = {
     RunStatus.SUCCESS: "success",
     RunStatus.FAILURE: "failure",
@@ -213,6 +316,30 @@ _STATUS_EVENT = {
 
 def _pack(language: str) -> dict[str, dict[str, str]]:
     return _MESSAGES.get(language, _MESSAGES["en"])
+
+
+def render_error(
+    language: str,
+    key: str | None,
+    params: Mapping[str, object] | None,
+    raw: str | None = None,
+) -> str | None:
+    """The failure message in ``language``, falling back to ``raw`` whenever it cannot be built.
+
+    Every branch degrades to readable text rather than raising: a pre-1.0 row has no key, a
+    key added in a later version may be missing from a pack, and a template whose parameters
+    changed would otherwise ``KeyError`` inside a notification send. The stored English
+    ``raw`` is always a usable answer, so it is the floor.
+    """
+    if not key:
+        return raw
+    template = _ERRORS.get(language, _ERRORS["en"]).get(key) or _ERRORS["en"].get(key)
+    if template is None:
+        return raw
+    try:
+        return template.format(**(params or {}))
+    except (KeyError, IndexError, ValueError):
+        return raw or template
 
 
 def _title_for(pack: dict[str, dict[str, str]], kind: str, event: str) -> str:
@@ -345,6 +472,12 @@ _KIND_LABEL = {
 }
 
 
+def _kind_label(config: Config, route: Route) -> str:
+    """The route's kind as a word, in the configured language; unknown kinds pass through."""
+    kinds = _KIND_LABEL.get(config.app.language, _KIND_LABEL["en"])
+    return kinds.get(route.kind, route.kind)
+
+
 def build_run_message(ctx: RunContext) -> tuple[str, str]:
     """``(title, body)`` describing a finished run, in the configured language.
 
@@ -364,9 +497,8 @@ def build_run_message(ctx: RunContext) -> tuple[str, str]:
     if ctx.route is not None:
         # The route's *colour* is deliberately absent: it is a UI affordance, and a hex
         # string in a push notification is noise on every channel that could render it.
-        kinds = _KIND_LABEL.get(config.app.language, _KIND_LABEL["en"])
-        kind = kinds.get(ctx.route.kind, ctx.route.kind)
-        lines.append(f"{labels['route']}: {ctx.route.name or ctx.route.id} ({kind})")
+        name = ctx.route.name or ctx.route.id
+        lines.append(f"{labels['route']}: {name} ({_kind_label(config, ctx.route)})")
     lines.append(f"{labels['trigger']}: {labels.get(f'trigger_{run.trigger}', run.trigger)}")
     datastore, guests, next_at = ctx.datastore, ctx.guests, ctx.next_at
     if run.started_at and run.finished_at:
@@ -397,8 +529,8 @@ def build_run_message(ctx: RunContext) -> tuple[str, str]:
             f"{labels['datastore']}: {datastore.used_pct}% {labels['used']}, "
             f"{human_bytes(datastore.avail)} {labels['free']}"
         )
-    if run.error:
-        lines.append(f"{labels['error']}: {run.error}")
+    if error := _run_error(config.app.language, run):
+        lines.append(f"{labels['error']}: {error}")
 
     # From the service, not from the steps: a finished run knows exactly which boxes it
     # left burning power, and only those warrant the warning.
@@ -454,7 +586,7 @@ def build_missed_backup_message(
     lines = [
         pack["missed"]["intro"],
         "",
-        f"{labels['route']}: {route.name or route.id}",
+        f"{labels['route']}: {route.name or route.id} ({_kind_label(config, route)})",
         f"{labels['missed_run']}: {_format_dt(missed_at, tz)}",
         f"{labels['last_run']}: {_format_dt(last_run_at, tz)}",
         f"{labels['next_run']}: {_format_dt(next_at, tz)}",
@@ -472,8 +604,8 @@ def build_interrupted_message(config: Config, run: Run) -> tuple[str, str]:
     pack = _pack(config.app.language)
     labels = pack["_labels"]
     lines = [pack["interrupted"]["intro"]]
-    if run.error:
-        lines.append(f"{labels['error']}: {run.error}")
+    if error := _run_error(config.app.language, run):
+        lines.append(f"{labels['error']}: {error}")
     if _pbs_left_on(config, run):
         lines.append(labels["pbs_left_on"])
         # This alert has no Duration line (the run's own span would span the whole downtime,

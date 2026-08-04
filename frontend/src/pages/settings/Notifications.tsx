@@ -248,7 +248,7 @@ export function Notifications() {
               {storedRedacted ? (
                 <div className="url-row">
                   <span className="help spacer">
-                    {t(`${ns}.customConfigured`, { n: draft.custom_urls.length })}
+                    {t(`${ns}.customConfigured`, { count: draft.custom_urls.length })}
                   </span>
                   <button
                     type="button"

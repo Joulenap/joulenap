@@ -29,7 +29,7 @@ from ..core.config_store import ConfigStore
 from ..db import session_scope
 from ..db.models import LogLevel, RunKind, RunStatus, RunTrigger, StepName, StepStatus
 from ..db.prune import PruneResult, prune_history
-from ..notify.messages import RunContext
+from ..notify.messages import LocalizedError, RunContext
 from .deps import CycleDeps
 from .lease import LeaseDeps, PbsUnreachableError, PowerLease, ReleaseOutcome
 from .recorder import RunRecorder
@@ -312,9 +312,9 @@ class JobService:
                     # A cancel abandons the wake wait the same way a timeout does, so say
                     # which one it was rather than filing every stopped run as a failure.
                     if self._cancel.is_set():
-                        recorder.finish(RunStatus.ABORTED, error="Cancelled by user")
+                        recorder.finish(RunStatus.ABORTED, error=LocalizedError("cancelled"))
                     else:
-                        recorder.finish(RunStatus.FAILURE, error=str(exc))
+                        recorder.finish(RunStatus.FAILURE, error=exc)
                     raise
                 # The cycle sets the run's final status itself and hands back what to say
                 # about it (None = cancelled, say nothing).

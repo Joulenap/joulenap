@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.config_store import ConfigStore
 from ..db import get_session
 from ..db.models import LogEvent, Run, TaskLogLine
-from .deps import require_auth
+from .deps import get_config_store, require_auth
 from .schemas import LogLine, RunDetail, RunSummary, TaskLogLineSchema, TaskLogResponse
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["logs"])
@@ -71,6 +72,7 @@ def get_runs(
     limit: int = Query(default=50, ge=1, le=500),
     route: str | None = Query(default=None, description="Only runs of this route id"),
     session: Session = Depends(get_session),
+    store: ConfigStore = Depends(get_config_store),
 ) -> list[RunSummary]:
     """Run history (summaries), newest first, optionally filtered to one route.
 
@@ -80,12 +82,17 @@ def get_runs(
     stmt = select(Run).order_by(Run.started_at.desc(), Run.id.desc()).limit(limit)
     if route is not None:
         stmt = stmt.where(Run.route_id == route)
-    return [RunSummary.of(r) for r in session.scalars(stmt).all()]
+    lang = store.config.app.language
+    return [RunSummary.of(r, lang) for r in session.scalars(stmt).all()]
 
 
 @router.get("/runs/{run_id}", response_model=RunDetail)
-def get_run(run_id: int, session: Session = Depends(get_session)) -> RunDetail:
+def get_run(
+    run_id: int,
+    session: Session = Depends(get_session),
+    store: ConfigStore = Depends(get_config_store),
+) -> RunDetail:
     run = session.get(Run, run_id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
-    return RunDetail.of(run)
+    return RunDetail.of(run, store.config.app.language)

@@ -99,7 +99,7 @@ export function usePbsSetup(
       setNote(t('wizard.wake.macDetected'))
     } else {
       // Not an error: the box being off is the normal case, and the field is typeable.
-      setNote(t('settings.setup.errors.macNotDetected'))
+      setNote(t('wizard.err.macNotDetected'))
     }
   }, [draft, run, setDraft, t])
 
@@ -191,7 +191,7 @@ export function WakeFields({ setup, errorFor }: { setup: PbsSetup; errorFor: Err
                 disabled={!draft.host || busy !== null}
                 onClick={() => void setup.detectMac()}
               >
-                {t(busy === 'mac' ? 'settings.setup.buttons.detecting' : 'wizard.wake.detect')}
+                {t(busy === 'mac' ? 'wizard.wake.detecting' : 'wizard.wake.detect')}
               </button>
               {/* Not in the mockup. Wake-on-LAN is the setting most often left un-armed in the
                   BIOS, and finding that out at 04:00 from a failed run is the worst way. */}
@@ -212,7 +212,7 @@ export function WakeFields({ setup, errorFor }: { setup: PbsSetup; errorFor: Err
           value={draft.wolIface}
           onChange={(v) => patch({ wolIface: v })}
           placeholder={t('settings.devices.auto')}
-          help={t('settings.setup.hints.wolIface')}
+          help={t('wizard.wake.ifaceHint')}
         />
       </div>
       <div className="warn">
@@ -257,8 +257,8 @@ export function SshKeyFields({ setup }: { setup: PbsSetup }) {
             >
               {t(
                 busy === 'hostkey'
-                  ? 'settings.setup.buttons.scanning'
-                  : 'settings.setup.buttons.scanHostKey',
+                  ? 'wizard.ssh.scanning'
+                  : 'wizard.ssh.scanHostKey',
               )}
             </button>
             {hostKey && !hostTrusted && (
@@ -268,7 +268,7 @@ export function SshKeyFields({ setup }: { setup: PbsSetup }) {
                 disabled={busy !== null}
                 onClick={() => void setup.trustHostKey()}
               >
-                {t('settings.setup.buttons.confirmHostKey')}
+                {t('wizard.ssh.confirmHostKey')}
               </button>
             )}
             {hostTrusted && <span className="okline">✓ {t('wizard.ssh.hostKeyTrusted')}</span>}
@@ -281,7 +281,7 @@ export function SshKeyFields({ setup }: { setup: PbsSetup }) {
         </>
       ) : (
         <>
-          <span className="help">{t('settings.setup.hints.sshManual')}</span>
+          <span className="help">{t('wizard.ssh.manualHint')}</span>
           <div className="keyblock">{key?.authorized_keys_line ?? ''}</div>
         </>
       )}

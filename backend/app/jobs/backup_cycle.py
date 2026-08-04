@@ -28,7 +28,7 @@ from ..db import session_scope
 from ..db.datastore_stats import upsert_datastore_stat
 from ..db.guest_backups import upsert_last_backups
 from ..db.models import LogLevel, RunStatus, StepName
-from ..notify.messages import GuestSummary, RunContext
+from ..notify.messages import GuestSummary, LocalizedError, RunContext
 from .deps import CycleDeps
 from .recorder import RunRecorder
 
@@ -87,8 +87,13 @@ def _tailer(recorder: RunRecorder, step: str, source: str, watch=None):
     return on_log
 
 
-class CycleAbort(Exception):
-    """Raised when the PBS doesn't come up — the cycle aborts without powering off."""
+class CycleAbort(LocalizedError):
+    """Raised when the PBS doesn't come up — the cycle aborts without powering off.
+
+    Takes an ``_ERRORS`` key plus its parameters rather than a finished sentence, so the
+    reason survives into the run row in a form both the notifier and the UI can render in
+    the configured language.
+    """
 
 
 class CycleCancelled(Exception):
@@ -242,13 +247,10 @@ def _route_backup_source(
     """
     pve = _find_device(config.pves, source.pve)
     if pve is None:
-        raise CycleAbort(f"source pve '{source.pve}' no longer exists")
+        raise CycleAbort("source_pve_missing", pve=source.pve)
     storage = pve.storages.get(route.target)
     if not storage:
-        raise CycleAbort(
-            f"pve '{pve.id}' has no storage mapping for pbs '{route.target}' "
-            "(Datacenter > Storage)"
-        )
+        raise CycleAbort("no_storage_mapping", pve=pve.id, pbs=route.target)
 
     prune = build_prune_string(route.retention.model_dump())
     step_name = f"{StepName.BACKUP.value}:{source.pve}"
@@ -274,7 +276,7 @@ def _route_backup_source(
                     "(deleted, a template, or migrated away); skipping them",
                 )
         if not per_node:
-            raise CycleAbort(f"pve '{pve.id}': no guests selected for backup")
+            raise CycleAbort("no_guests", pve=pve.id)
 
         for node, vmids in per_node.items():
             upid = client.vzdump(
@@ -327,8 +329,11 @@ def _route_preflight(
         step.detail = f"{ds.avail_pct:.1f}% free ({ds.avail / 1_000_000_000:.0f} GB)"
         if ds.avail_pct < threshold:
             raise CycleAbort(
-                f"PBS '{target.id}' datastore {target.datastore!r} only {ds.avail_pct:.1f}% "
-                f"free (need >= {threshold}%); skipping backup"
+                "datastore_full",
+                pbs=target.id,
+                datastore=target.datastore,
+                free=f"{ds.avail_pct:.1f}",
+                threshold=threshold,
             )
 
 
@@ -436,7 +441,7 @@ def run_route_backup(
     try:
         target = _find_device(config.pbss, route.target)
         if target is None:
-            raise CycleAbort(f"route '{route.id}': target pbs '{route.target}' no longer exists")
+            raise CycleAbort("target_pbs_missing", route=route.id, pbs=route.target)
 
         _route_preflight(route, target, recorder, deps)
 
@@ -482,19 +487,20 @@ def run_route_backup(
 
         if failed:
             recorder.finish(
-                RunStatus.FAILURE, error=f"backup failed for source(s): {', '.join(failed)}"
+                RunStatus.FAILURE,
+                error=LocalizedError("sources_failed", sources=", ".join(failed)),
             )
         else:
             recorder.finish(RunStatus.SUCCESS)
     except CycleCancelled:
         # No notification: the user pressed Stop and is standing at the UI — a "backup
         # aborted" push would just be noise about their own click.
-        recorder.finish(RunStatus.ABORTED, error="Cancelled by user")
+        recorder.finish(RunStatus.ABORTED, error=LocalizedError("cancelled"))
         return None
     except CycleAbort as exc:
-        recorder.finish(RunStatus.ABORTED, error=str(exc))
+        recorder.finish(RunStatus.ABORTED, error=exc)
     except Exception as exc:  # connector/task failures: the lease leaves the PBS on
-        recorder.finish(RunStatus.FAILURE, error=str(exc))
+        recorder.finish(RunStatus.FAILURE, error=exc)
 
     return RunContext(
         config=config, run=recorder.run, route=route, datastore=datastore, guests=guests

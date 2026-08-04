@@ -25,11 +25,12 @@ from ..connectors import net, tls
 from ..connectors.pbs import PbsClient
 from ..connectors.power import PbsPower
 from ..connectors.wol import send_magic_packet
+from ..notify.messages import LocalizedError
 
 log = logging.getLogger("joulenap.lease")
 
 
-class PbsUnreachableError(RuntimeError):
+class PbsUnreachableError(LocalizedError):
     """The PBS never answered: it could not be woken, or it is an unmanaged box that is off."""
 
 
@@ -262,7 +263,7 @@ class PowerLease:
             # A cancelled wait returns False exactly like a timeout, so check *why* before
             # burning the remaining attempts on a run the user already stopped.
             if self._cancelled():
-                raise PbsUnreachableError(f"Cancelled while waiting for PBS '{pbs.id}'")
+                raise PbsUnreachableError("cancelled_waiting", pbs=pbs.id)
             if attempt < attempts:
                 log.warning(
                     "PBS %s still down after wake attempt %d/%d (%ds); re-sending Wake-on-LAN",
@@ -272,8 +273,12 @@ class PowerLease:
                     pbs.wait_timeout,
                 )
         raise PbsUnreachableError(
-            f"PBS '{pbs.id}' ({pbs.host}:{pbs.port}) not reachable after {attempts} wake "
-            f"attempt(s) of {pbs.wait_timeout}s each"
+            "pbs_unreachable",
+            pbs=pbs.id,
+            host=pbs.host,
+            port=pbs.port,
+            attempts=attempts,
+            timeout=pbs.wait_timeout,
         )
 
     def _power_off(self, pbs: PbsDevice) -> bool:

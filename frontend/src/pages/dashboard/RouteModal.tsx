@@ -31,7 +31,20 @@ const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 const COLOR_LABELS = ['Orange', 'Blue', 'Amber', 'Violet', 'Teal', 'Pink'].map(
   (n) => `dashboard.routeModal.color${n}`,
 )
-const RETENTION_FIELDS = ['keep_last', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly'] as const
+// The visible caption stays vzdump jargon ("keep-last"), which is what the PBS docs and the
+// mockup show; the accessible name is real copy, so it gets a key.
+const RETENTION_FIELDS = [
+  ['keep_last', 'dashboard.routeModal.keepLast'],
+  ['keep_daily', 'dashboard.routeModal.keepDaily'],
+  ['keep_weekly', 'dashboard.routeModal.keepWeekly'],
+  ['keep_monthly', 'dashboard.routeModal.keepMonthly'],
+  ['keep_yearly', 'dashboard.routeModal.keepYearly'],
+] as const
+const MODE_OPTIONS = [
+  ['snapshot', 'dashboard.routeModal.modeSnapshot'],
+  ['suspend', 'dashboard.routeModal.modeSuspend'],
+  ['stop', 'dashboard.routeModal.modeStop'],
+] as const
 
 interface RouteModalProps {
   /** `null` opens the create form. */
@@ -414,7 +427,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                   {tally.total === 0
                     ? ''
                     : draft.guestMode === 'all'
-                      ? t('dashboard.routeModal.guestsCountAll', { n: tally.total })
+                      ? t('dashboard.routeModal.guestsCountAll', { count: tally.total })
                       : t('dashboard.routeModal.guestsCountSel', { chosen: tally.chosen, total: tally.total })}
                 </span>
               </span>
@@ -511,13 +524,13 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
             <div className="field">
               <span className="lab">{t('dashboard.routeModal.retention')}</span>
               <div className="retention-row">
-                {RETENTION_FIELDS.map((key) => (
+                {RETENTION_FIELDS.map(([key, labelKey]) => (
                   <div className="r" key={key}>
                     <span>{key.replace('_', '-')}</span>
                     <input
                       type="number"
                       min={0}
-                      aria-label={key.replace('_', '-')}
+                      aria-label={t(labelKey)}
                       value={draft.retention[key]}
                       onChange={(e) =>
                         patch({ retention: { ...draft.retention, [key]: num(e.target.value) } })
@@ -563,9 +576,11 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                         })
                       }
                     >
-                      <option value="snapshot">snapshot</option>
-                      <option value="suspend">suspend</option>
-                      <option value="stop">stop</option>
+                      {MODE_OPTIONS.map(([value, labelKey]) => (
+                        <option key={value} value={value}>
+                          {t(labelKey)}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div className="field">

@@ -117,7 +117,13 @@ class Run(Base):
 
     # Result summary (populated as the job progresses; nullable while running).
     guests_ok: Mapped[int | None] = mapped_column(default=None)
+    # ``error`` is the English rendering; ``error_key``/``error_params`` are the same failure
+    # in a form ``notify.messages.render_error`` can rebuild in any language, for both the
+    # notification and the history row. Nullable: pre-1.0 rows and raw-string callers have
+    # only the English text, which is why it stays the fallback rather than being replaced.
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    error_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    error_params: Mapped[str | None] = mapped_column(Text, default=None)
 
     logs: Mapped[list[LogEvent]] = relationship(
         back_populates="run",

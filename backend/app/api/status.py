@@ -143,7 +143,7 @@ def get_status(
         ],
         pves=[PveState(id=pve.id, online=pve_online.get(pve.id, False)) for pve in config.pves],
         pbss=[_pbs_state(pbs, pbs_probes, job_service) for pbs in config.pbss],
-        last_run=RunSummary.of(last) if last else None,
+        last_run=RunSummary.of(last, config.app.language) if last else None,
         # Read live, not captured at import: a reload after the user fixes the file clears it.
         config_error=config_mod.MIGRATION_ERROR,
     )

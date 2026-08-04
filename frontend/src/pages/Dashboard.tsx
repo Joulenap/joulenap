@@ -186,7 +186,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
       <section className="panel">
         <div className="panel-hd">
           <h2>{t('dashboard.activityLog')}</h2>
-          <span className="count">{t('dashboard.events', { n: logs.length })}</span>
+          <span className="count">{t('dashboard.events', { count: logs.length })}</span>
         </div>
         <div style={{ padding: '12px 0 6px' }}>
           <ActivityLog logs={logs} />

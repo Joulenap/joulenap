@@ -10,6 +10,8 @@ const DASHBOARDS: Dashboard[] = ['homepage', 'glance', 'homarr', 'dashy']
 
 const ns = 'settings.integrations'
 
+type TFunc = (key: string, opts?: Record<string, unknown>) => string
+
 // The endpoint URL uses the current origin so the snippet is copy-paste-ready.
 function endpointUrl(): string {
   return `${window.location.origin}/api/dashboard`
@@ -23,8 +25,15 @@ function endpointUrl(): string {
  * `{state, routes[], pbss[]}` because with several routes and several backup servers there
  * is no single "next run" or "datastore" to report. Every snippet below therefore indexes
  * into a list — `routes.0` is the first configured route, not "the" route.
+ *
+ * **Only the lines addressed to the reader go through `t()`.** Everything else stays
+ * English on purpose: the YAML/JSON keys are syntax the target tool parses, the `label:`
+ * values render in the user's *own* dashboard rather than in Joulenap, and the Homarr
+ * navigation ("Management -> Custom Widgets", "API Key (Header)", "Display Type") names
+ * controls in Homarr's own English UI — translating those would send the user hunting for
+ * a menu item that does not exist.
  */
-function snippet(dash: Dashboard, url: string, key: string): string {
+function snippet(dash: Dashboard, url: string, key: string, t: TFunc): string {
   const iconUrl = `${window.location.origin}/assets/joulenap-icon.svg`
   const href = window.location.origin
   switch (dash) {
@@ -50,8 +59,7 @@ function snippet(dash: Dashboard, url: string, key: string): string {
         - field: pbss.0.datastore_used_pct
           label: Datastore
           format: percent
-# routes.0 / pbss.0 are the FIRST configured route and backup server; bump the
-# index (routes.1, pbss.1, ...) for the others, or add a second widget.`
+${t(`${ns}.snippetIndexNote`)}`
     case 'glance':
       return `- type: custom-api
   title: Joulenap
@@ -75,18 +83,18 @@ HTTP Method: GET
 Authentication: API Key (Header)
   Header Name: X-API-Key
   Value: ${key}
-  (or API Key (Query), param "key", if your version lacks header auth:
+  ${t(`${ns}.snippetQueryAuth`)}
    ${url}?key=${key})
 Display Type: Key Value
 
-Fields available:
+${t(`${ns}.snippetFields`)}
   state                            idle | running | paused
   routes[]  id, name, kind, enabled, next_run,
             last_run_status, last_run_time
   pbss[]    id, state, datastore_used_pct,
             datastore_used_bytes, datastore_total_bytes
 
-Index into the lists, e.g. routes.0.next_run / pbss.0.datastore_used_pct.`
+${t(`${ns}.snippetIndexHint`)}`
     case 'dashy':
       return `- type: customapi
   options:
@@ -104,7 +112,7 @@ Index into the lists, e.g. routes.0.next_run / pbss.0.datastore_used_pct.`
       - field: pbss.0.datastore_used_pct
         label: Datastore
         format: percent
-# No CORS? set useProxy: true, or fall back to ${url}?key=${key}`
+${t(`${ns}.snippetCors`, { url: `${url}?key=${key}` })}`
   }
 }
 
@@ -199,7 +207,7 @@ export function Integrations() {
     })
 
   const keyForSnippet = freshKey ?? t(`${ns}.keyPlaceholder`)
-  const code = snippet(dash, endpointUrl(), keyForSnippet)
+  const code = snippet(dash, endpointUrl(), keyForSnippet, t)
   const prom = promSnippet(keyForSnippet)
 
   return (

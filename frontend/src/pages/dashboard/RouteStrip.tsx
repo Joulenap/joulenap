@@ -128,9 +128,12 @@ function RouteCard({
           ) : (
             <>
               <span className="mono cron">{sched.time}</span> ·{' '}
-              {sched.daysKey === 'dashboard.everyDay'
-                ? t('dashboard.everyDay')
-                : sched.days.map((d) => t(`dashboard.days.${d}`)).join(', ')}
+              {/* scheduleSummary() picks the key; `dashboard.onDays` carries the preposition
+                  Italian needs around the list, so pass the days through it rather than
+                  emitting them bare. */}
+              {t(sched.daysKey, {
+                days: sched.days.map((d) => t(`dashboard.days.${d}`)).join(', '),
+              })}
             </>
           )}
         </div>
@@ -178,7 +181,7 @@ function routeDetail(route: Route, t: (k: string, o?: Record<string, unknown>) =
     parts.push(
       explicit.length
         ? t('dashboard.guestsSelected', {
-            n: explicit.reduce((sum, s) => sum + s.guests.list.length, 0),
+            count: explicit.reduce((sum, s) => sum + s.guests.list.length, 0),
           })
         : t('dashboard.guestsAll'),
     )

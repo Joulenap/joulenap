@@ -53,7 +53,7 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
   async function connect(): Promise<boolean> {
     const check = await api.wizardPbsCheck(draft.host.trim(), draft.port)
     if (!check.reachable) {
-      setErrors([{ key: 'settings.setup.errors.pbsUnreachable' }])
+      setErrors([{ key: 'wizard.err.pbsUnreachable' }])
       return false
     }
     // A fingerprint the user typed wins: they may be pinning one from the PVE storage config.
@@ -219,7 +219,7 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
                 value={draft.fingerprint}
                 onChange={(v) => setDraft({ ...draft, fingerprint: v })}
                 placeholder={t('wizard.field.fingerprintPlaceholder')}
-                help={t('settings.setup.hints.fingerprintPinned')}
+                help={t('wizard.cred.fingerprintPinned')}
               />
             </div>
             <CredentialFields

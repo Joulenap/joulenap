@@ -144,7 +144,7 @@ function HistoryRow({
       <td>
         <span className="res" style={{ color: style.color, background: style.bg }}>
           {t(style.labelKey)}
-          {run.guests_ok !== null ? ` · ${t('dashboard.guestsOk', { n: run.guests_ok })}` : ''}
+          {run.guests_ok !== null ? ` · ${t('dashboard.guestsOk', { count: run.guests_ok })}` : ''}
         </span>
       </td>
     </tr>
