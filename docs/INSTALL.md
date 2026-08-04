@@ -1,8 +1,9 @@
 # Installing Joulenap
 
-Joulenap runs as a small always-on container (or service) on your LAN. It wakes a normally-off
-Proxmox Backup Server, runs the backup, and powers it back down — so it needs to reach both your
-Proxmox VE host and the PBS, and to send a Wake-on-LAN packet on the PBS's network.
+Joulenap runs as a small always-on container (or service) on your LAN. It wakes your normally-off
+Proxmox Backup Servers, runs the backups, and powers them back down — so it needs to reach every
+Proxmox VE host and backup server you want it to drive, and to send a Wake-on-LAN packet on each
+backup server's network.
 
 **Where does Joulenap run?** *Not* on the Proxmox VE host itself — you don't install it onto the PVE
 node. It runs *beside* Proxmox as its own lightweight thing (an LXC container is the natural choice
@@ -15,23 +16,27 @@ Pick the path that fits you:
 - **[Option A — Proxmox LXC + Docker](#option-a--proxmox-lxc--docker-recommended)** *(recommended; every step, from scratch)*
 - [Option B — Docker Compose](#option-b--docker-compose) *(existing Docker host, or to pre-edit config)*
 - [Option C — Native install, no Docker](#option-c--native-install-no-docker) *(advanced)*
-- [First run: create the account + run the wizard](#first-run) — same for every path
+- [First run: create the account, add your devices, draw a route](#first-run) — same for every path
 - [Updating](#updating)
 - [Timezone](#timezone)
 
 ## Prerequisites
 
-- A **Proxmox VE** host and a **Proxmox Backup Server**, both reachable from where Joulenap runs.
-- **Wake-on-LAN enabled** on the PBS network card — usually a BIOS/UEFI setting (often "Power On
-  By PCIe/PCI" or "Wake on LAN") and, on some NICs, `ethtool -s <iface> wol g` on the PBS. Without
-  it, Joulenap can't wake the box. **Confirm the PBS actually wakes from a magic packet before
-  relying on it.**
-- Joulenap on the **same LAN/broadcast domain** as the PBS (so the WoL packet reaches it), on a
-  host that stays on. Wake-on-LAN is a layer-2 broadcast — it does **not** cross subnets or routers.
+- At least one **Proxmox VE** host and one **Proxmox Backup Server**, reachable from where Joulenap
+  runs. More of either is fine — that's what routes are for.
+- **Wake-on-LAN enabled** on each backup server's network card — usually a BIOS/UEFI setting (often
+  "Power On By PCIe/PCI" or "Wake on LAN") and, on some NICs, `ethtool -s <iface> wol g` on the PBS
+  itself. Without it, Joulenap can't wake the box. **Confirm it actually wakes from a magic packet
+  before relying on it** — the wizard has a Test button that sends one. (A backup server you keep
+  powered on all the time needs none of this: turn its "Joulenap manages this box's power" switch
+  off and it's treated as always available.)
+- Joulenap on the **same LAN/broadcast domain** as the backup servers (so the WoL packet reaches
+  them), on a host that stays on. Wake-on-LAN is a layer-2 broadcast — it does **not** cross subnets
+  or routers.
 - Keep the UI on your **LAN/VPN** and behind its login — it's not meant to face the internet.
 - It's tiny: **1 vCPU, 512 MB RAM, 1–2 GB disk** is plenty.
 
-You don't need to prepare API tokens or SSH keys by hand — the built-in **setup wizard** can create
+You don't need to prepare API tokens or SSH keys by hand — the built-in **wizards** can create
 scoped tokens and install the poweroff SSH key for you (see [First run](#first-run)).
 
 ---
@@ -40,7 +45,7 @@ scoped tokens and install the poweroff SSH key for you (see [First run](#first-r
 
 The simplest reliable path: a small Debian LXC on your Proxmox host, Docker inside it, then **one
 command** to run Joulenap. No files to download, no config to edit by hand — the container creates
-its own config and you fill it in through the web wizard.
+its own config and you fill it in through the web UI.
 
 ### 1. Create the LXC
 
@@ -127,7 +132,7 @@ Browse to `http://<container-ip>:8080` and continue at [First run](#first-run) b
 ## Option B — Docker Compose
 
 Use this if you already run Docker somewhere, or you want to **pre-edit `config.yaml`** instead of
-using the wizard. (On a fresh Proxmox host, do steps 1–4 of [Option A](#option-a--proxmox-lxc--docker-recommended)
+using the wizards. (On a fresh Proxmox host, do steps 1–4 of [Option A](#option-a--proxmox-lxc--docker-recommended)
 first to get an LXC with Docker.)
 
 ```bash
@@ -146,7 +151,7 @@ broadcast reaches your LAN, and mounts a single writable **`./data`** directory 
 `config.yaml`, the SQLite history, logs, and the SSH key. There is **no separate config file to
 create** — it's seeded into `./data` on first run.
 
-**Want to pre-fill config instead of using the wizard?** Start the stack once so it seeds
+**Want to pre-fill config instead of using the wizards?** Start the stack once so it seeds
 `./data/config.yaml`, stop it (`docker compose down`), edit `./data/config.yaml` (every field is
 documented in [`config.example.yaml`](../config.example.yaml)), then bring it back up. You can also
 pre-hash the admin password (see [First run](#first-run)).
@@ -159,7 +164,8 @@ For those who'd rather not use Docker — run Joulenap directly as a Python serv
 manual: you build the frontend once and run the backend under systemd. A small Debian/Ubuntu LXC (or
 any always-on Linux host on the PBS's LAN) works well.
 
-**You need:** Python **3.12+**, `git`, and Node.js **20+** (only to build the web UI once).
+**You need:** Python **3.12+**, `git`, and Node.js **24** (only to build the web UI once — 24 is what
+CI and the container image build with, so it's the combination that's actually tested).
 
 ```bash
 # 1. get the source (into /opt/joulenap so the paths below line up)
@@ -232,7 +238,7 @@ Once the UI is up at `http://<host>:8080` (same for every install path):
 1. **Create the admin account** (username + a password of **at least 8 characters**) and **confirm
    your timezone**. This is a one-time registration. The timezone dropdown is pre-filled from your
    browser, so usually you just leave it — it sets `app.timezone` so your backup schedule runs in
-   your local time (you can change it later under **Settings → Localization**).
+   your local time (you can change it later under **Settings → Account**).
    - *Prefer to pre-seed the account?* Generate a bcrypt hash and put it in `app.auth.password_hash` in
      `config.yaml`:
      ```bash
@@ -241,44 +247,57 @@ Once the UI is up at `http://<host>:8080` (same for every install path):
      # Native: from the repo, with the venv active:
      python -m app.hashpw
      ```
-2. Go to **Settings → Setup** and run the **wizard**. By default it uses **API-token mode (no
-   root)** — you paste scoped tokens and no credentials leave your server. It walks through:
-   connect to PVE → pick the PBS-backed storage → confirm PBS → detect the PBS MAC for Wake-on-LAN →
-   generate and install the poweroff SSH key. There's also an optional **quick mode** that
-   provisions the tokens for you from a root login (used transiently, never stored) — see
+2. **Add your devices.** Go to **Settings → Devices → + Add** (the banner on a fresh install links
+   straight there) and run one of the two wizards:
+   - **Add a Proxmox VE**: connect, and Joulenap reads that host's storage config to find the
+     backup servers it already knows about. Any that you've already registered are linked for you;
+     a new one can be configured inline, which folds the PBS wizard into the same run.
+   - **Add a Proxmox Backup Server**: connect (the certificate fingerprint is filled in for you),
+     then set up wake-up (WoL interface, MAC detection, a Test button that sends a real magic
+     packet) and power-off (the SSH key, and confirming the box's SSH host key).
+
+   Both default to **API-token mode** — you paste scoped tokens and no credentials leave your
+   server. Both also offer a **root mode** that provisions the tokens and installs the SSH key for
+   you, using the password once and never storing it. See
    [`CONFIG-WIZARD.md`](CONFIG-WIZARD.md) for the full field-by-field breakdown.
-3. Set your **schedule, guest selection, and retention** on the Dashboard, and configure
-   **notifications** (Telegram / ntfy / email / Discord) under Settings if you want them. Use **Run
-   backup now** to test the full wake → backup → power-off cycle end-to-end.
+3. **Create a route** from the homepage: pick the source host(s) and the target backup server, a
+   time and the days, which guests to include, and the retention. That's what actually gets
+   scheduled. Configure **notifications** (Telegram / ntfy / email / Discord) under Settings if you
+   want them, then use the route's **Run now** to test the whole wake → backup → power-off cycle
+   end-to-end while you're watching.
 
-## The Settings tabs
+## Around the interface
 
-Day-to-day you'll live on the Dashboard (schedule, guests, retention, manual runs). Everything else
-sits behind **Settings**:
+Day-to-day you'll live on the **homepage**: the topology of your hosts and backup servers, the
+route strip (where you create, edit, pause and manually run routes), what's coming up next, the run
+history with its per-step timeline and live task output, and the per-server power and GC/verify
+buttons. Everything else sits behind **Settings**:
 
-- **Setup** — the connection wizard from step 2 above: PVE, the PBS-backed storage, Wake-on-LAN MAC
-  and the poweroff SSH key. Re-run it whenever the PBS certificate is renewed or its address changes.
-- **Backup safety** — guardrails around the cycle: a minimum-free-space check that aborts rather than
-  backing up onto a nearly-full datastore, how long to wait for a busy PBS to finish its own task
-  before powering it off, and the verify options (a quick verify of new snapshots after each backup,
-  or a full verification on its own schedule). *(The wake timeout and Wake-on-LAN retries live on the
-  Dashboard, next to the schedule.)*
+- **Devices** — every Proxmox host and backup server as a card, with the two **+ Add** wizards, an
+  edit modal for each, and a connection **Test**. Removing a device that a route still uses is
+  refused, naming the routes. Re-run a device's connect step whenever its certificate is renewed or
+  its address changes.
+- **Account** — the admin username and password (changing the password signs out every existing
+  session immediately), plus interface language and the timezone your schedules are interpreted in.
 - **Notifications** — Telegram, ntfy, email (SMTP) and Discord with friendly forms, plus a
   catch-all list for any other [Apprise](https://github.com/caronc/apprise) URL or plain webhook.
   Choose whether to notify on success, on failure, or both; **Send test** reports per channel.
 - **Integrations** — generate the read-only API key for the dashboard endpoint and copy a
-  ready-made snippet for Homepage / Homarr / Dashy / Glance (details in
-  [`INTEGRATIONS.md`](INTEGRATIONS.md)). The opt-in **update check** lives here too: off by default,
-  and while it's off Joulenap makes no outbound internet call at all.
-- **Localization** — interface language and the timezone your schedule is interpreted in.
-- **Account** — change the admin username or password. Changing the password signs out every
-  existing session immediately.
-- **Advanced** — the knobs with no home on the other screens: backup mode (snapshot / suspend /
-  stop), a vzdump bandwidth cap, the `keep_last` and `keep_yearly` retention buckets, how long run
-  history is kept, and the web port / session settings (these last ones need a restart). At the
-  bottom is a **`config.yaml` editor** with syntax highlighting: it saves through exactly the same
-  validation as the forms, so a bad value is rejected instead of persisted, and its **Copy** button
-  gives you the whole config with the secrets redacted — handy for a bug report.
+  ready-made snippet for Homepage / Homarr / Dashy / Glance, plus the Prometheus scrape config
+  (details in [`INTEGRATIONS.md`](INTEGRATIONS.md)).
+- **Advanced** — the global **pause switch** for every route, the application settings (web port,
+  session lifetime, how long run history is kept, and the opt-in update check — off by default, and
+  while it's off Joulenap makes no outbound internet call at all; the port and session ones need a
+  restart), and a **`config.yaml` editor** with syntax highlighting. The editor saves through
+  exactly the same validation as the forms, so a bad value is rejected instead of persisted, and
+  **Export** downloads the whole config with the secrets redacted — handy for a bug report, though
+  not a restorable backup for the same reason.
+
+The per-route knobs — backup mode (snapshot / suspend / stop), a vzdump bandwidth cap, the
+minimum-free-space check that aborts rather than backing up onto a nearly-full datastore, garbage
+collection and verification after the run — live in the **Advanced section of the route editor**,
+because each route sets them for itself. Wake timeout, Wake-on-LAN retries and the external-watch
+timeouts belong to a backup server, and live on its device card.
 
 ## Updating
 
@@ -306,7 +325,7 @@ systemctl restart joulenap
 Your backup schedule is interpreted in a specific timezone — so "02:00" runs at 02:00 *there*. The
 easy path: **the first-run screen detects your timezone from your browser and sets it for you**
 (saved as `app.timezone`), so you don't need to touch anything. You can change it any time under
-**Settings → Localization**.
+**Settings → Account**.
 
 If you'd rather set it outside the UI, the order of precedence is:
 

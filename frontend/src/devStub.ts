@@ -7,9 +7,13 @@
 // The fixtures reproduce the homepage mockup's scenario exactly — three PVEs, two PBSs, three
 // routes (Nightly running, Lab, Offsite sync) — so M09+ can build the homepage against them.
 //
-// TODO(M14): the scripted demo replay lived here and was deleted with the 0.9 endpoints it
-// drove (`/backup/run`, `/jobs/cancel`, `/power/*`). M14 rebuilds it around these route
-// fixtures; until then `npm run build:demo` serves them statically, with no "Run now" replay.
+// Under `VITE_DEMO=1` (the public demo at joulenap.com/demo, `npm run build:demo`) the same
+// fixtures gain a scripted replay on top: the clock ticks, the seeded Nightly run plays out of
+// `demoTimeline.ts`, the queued Lab route starts by itself when it lands, and Run now / Stop /
+// Run GC drive the same machinery. Dev mode (`--mode stub`) gets none of that — every mutation
+// below sits behind `DEMO` so a stub screenshot stays byte-identical run to run.
+import type { DemoRun, DemoState } from './demoTimeline'
+import { maintenanceRun, runFor, stateAt } from './demoTimeline'
 import type {
   AuthStatus,
   Config,
@@ -24,23 +28,55 @@ import type {
   RunDetail,
   RunSummary,
   StatusResponse,
+  StepInfo,
+  TaskLogLine,
   TaskLogResponse,
   UserInfo,
 } from './api/types'
 
+const DEMO = import.meta.env.VITE_DEMO === '1'
+
 const FIXED_MS = Date.UTC(2026, 6, 9, 21, 30, 0)
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 const RealDate = Date
+const BOOT = RealDate.now()
+// The demo slides the whole fixture calendar forward by a whole number of WEEKS, so a page
+// hosted for a year never reads "last backed up in July 2026". Whole weeks (rather than the
+// 0.9 stub's whole days) is what makes it free: every weekday and time-of-day survives the
+// shift untouched, so `days[]`, the next-run list and the history stay consistent with each
+// other and nothing has to re-derive a schedule.
+// ponytail: a DST boundary between the fixture date and today moves the wall-clock hour by
+// one. Only cosmetic here; a real fix means shifting in the display timezone.
+const DELTA = DEMO ? Math.floor((BOOT - FIXED_MS) / WEEK_MS) * WEEK_MS : 0
+
+// Dev pins the clock for byte-identical screenshots; the demo needs it to move so the scripted
+// run can advance. Same helper, one term apart.
+const nowMs = () => (DEMO ? FIXED_MS + DELTA + (RealDate.now() - BOOT) : FIXED_MS)
+
 class FrozenDate extends RealDate {
   constructor(...args: ConstructorParameters<typeof Date>) {
-    if ((args as unknown[]).length === 0) super(FIXED_MS)
+    if ((args as unknown[]).length === 0) super(nowMs())
     else super(...args)
   }
   static now() {
-    return FIXED_MS
+    return nowMs()
   }
 }
 globalThis.Date = FrozenDate as unknown as DateConstructor
+
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/
+
+/** Rewrite every ISO timestamp in a fixture tree, in place, so new fixtures are covered too. */
+function shiftDates(node: unknown, seen = new WeakSet<object>()): void {
+  if (typeof node !== 'object' || node === null || seen.has(node)) return
+  seen.add(node)
+  for (const [k, v] of Object.entries(node)) {
+    if (typeof v === 'string' && ISO_RE.test(v)) {
+      ;(node as Record<string, unknown>)[k] = new RealDate(RealDate.parse(v) + DELTA).toISOString()
+    } else shiftDates(v, seen)
+  }
+}
 
 // Fixture values are chosen to exercise the layout hard: a long guest name, a long log
 // message, an ERROR level, a cluster next to two standalone nodes, one sleeping PBS.
@@ -632,6 +668,316 @@ const RUN_DETAIL: Record<number, RunDetail> = {
   },
 }
 
+// --- the demo replay ---------------------------------------------------------
+// Only reachable under VITE_DEMO=1. Everything below mutates the fixtures above, so dev mode
+// must never enter it — see the `DEMO ?` guard on the seam at the bottom of the file.
+
+type Job = {
+  id: number
+  run: DemoRun
+  routeId: string | null
+  routeName: string | null
+  trigger: string
+  /** null while the job waits its turn behind the one in flight. */
+  startedMs: number | null
+}
+
+let queue: Job[] = []
+let nextRunId = 48
+let nextLogId = 100
+/** Boxes lit by the ⏻ button, or left on by a stop — awake independently of any run's lease. */
+const awake = new Set<string>()
+
+const iso = (ms: number) => new RealDate(ms).toISOString()
+const live = () => (queue[0]?.startedMs != null ? queue[0] : null)
+const elapsedOf = (j: Job) => (nowMs() - j.startedMs!) / 1000
+const boxesOf = (j: Job) => Object.keys(j.run.online)
+
+/** The boxes a still-queued job will need. The real lease checks exactly this before it powers
+ *  a box off, and answers `left on: still needed by another run`. */
+function pendingBoxes(): Set<string> {
+  return new Set(queue.slice(1).flatMap(boxesOf))
+}
+
+/** Which of this run's power-offs the lease would skip, by step name. */
+function skippedPoweroffs(j: Job): Set<string> {
+  const held = pendingBoxes()
+  return new Set(
+    j.run.steps.map((s) => s.name).filter((n) => n.startsWith('poweroff:') && held.has(n.slice(9))),
+  )
+}
+
+/** Every box answering right now: the live run's own window, plus the ones it is holding on
+ *  for a queued run, plus anything the visitor woke by hand. */
+function onlineNow(j: Job | null, st: DemoState | null): Set<string> {
+  const on = new Set(awake)
+  if (!j || !st) return on
+  st.online.forEach((id) => on.add(id))
+  const held = pendingBoxes()
+  const elapsed = elapsedOf(j)
+  for (const [id, [up]] of Object.entries(j.run.online)) {
+    if (held.has(id) && elapsed >= up) on.add(id)
+  }
+  return on
+}
+
+function summaryOf(j: Job, running: boolean, status = 'success', error: string | null = null) {
+  return {
+    id: j.id,
+    kind: j.run.kind,
+    trigger: j.trigger,
+    status: running ? 'running' : status,
+    started_at: iso(j.startedMs!),
+    finished_at: running ? null : iso(nowMs()),
+    route_id: j.routeId,
+    route_name: j.routeName,
+    guests_ok: running || status !== 'success' ? null : j.run.guestsOk,
+    error,
+  } satisfies RunSummary
+}
+
+function stepsOf(j: Job, st: DemoState): StepInfo[] {
+  const skipped = skippedPoweroffs(j)
+  return st.steps.map((s) => ({
+    name: s.name,
+    status: skipped.has(s.name) ? 'skipped' : s.status,
+    started_at: iso(j.startedMs! + s.from * 1000),
+    finished_at: s.to === null ? null : iso(j.startedMs! + s.to * 1000),
+    detail: skipped.has(s.name) ? 'left on: still needed by another run' : s.detail,
+  }))
+}
+
+function linesOf(j: Job, st: DemoState): TaskLogLine[] {
+  const skipped = skippedPoweroffs(j)
+  return st.events
+    .filter((e) => !skipped.has(e.step))
+    .map((e, i) => ({
+      id: j.id * 1000 + i,
+      step: e.step,
+      source: e.source,
+      text: e.text,
+      ts: iso(j.startedMs! + e.at * 1000),
+    }))
+}
+
+function archive(j: Job, summary: RunSummary, steps: StepInfo[], lines: TaskLogLine[]): void {
+  const log: LogLine = {
+    id: nextLogId++,
+    run_id: j.id,
+    ts: summary.finished_at!,
+    level: summary.status === 'success' ? 'OK' : summary.status === 'aborted' ? 'WARN' : 'ERROR',
+    message: summary.status === 'success' ? j.run.summary : (summary.error ?? 'run stopped'),
+  }
+  RUNS.unshift(summary)
+  RUN_DETAIL[j.id] = { ...summary, steps, logs: [log] }
+  // An expanded history row refetches the task log by id once the run stops being the live one.
+  TASKLOG_BY_RUN[j.id] = { run_id: j.id, lines }
+  STATUS.last_run = summary
+  LOGS.unshift(log)
+}
+
+/** Archive whatever finished, start whatever is next. Called before every read. */
+function tick(): void {
+  for (;;) {
+    const head = queue[0]
+    if (!head) return
+    if (head.startedMs == null) {
+      head.startedMs = nowMs()
+      LOGS.unshift({
+        id: nextLogId++,
+        run_id: head.id,
+        ts: iso(head.startedMs),
+        level: 'INFO',
+        message: head.routeName
+          ? `starting ${head.run.kind} run for route '${head.routeName}'`
+          : `starting ${head.run.kind} on ${boxesOf(head)[0]}`,
+      })
+      return
+    }
+    const st = stateAt(head.run, elapsedOf(head))
+    if (st.running) return
+    // A box held open for a queued run is not released here either — the next job's own
+    // window opens on top of it, so the topology never blinks between the two.
+    archive(head, summaryOf(head, false), stepsOf(head, st), linesOf(head, st))
+    queue.shift()
+  }
+}
+
+function enqueue(job: Omit<Job, 'startedMs'>): number {
+  queue.push({ ...job, startedMs: null })
+  tick()
+  return Math.max(0, queue.length - 1)
+}
+
+/** The dynamic half of the API. Returns undefined to fall through to the static fixtures. */
+function demoRoute(key: string, search: URLSearchParams, init?: RequestInit): unknown {
+  tick()
+  const j = live()
+  const st = j ? stateAt(j.run, elapsedOf(j)) : null
+  const body = () => JSON.parse((init?.body as string) ?? '{}')
+
+  switch (key) {
+    // The stub's "-stub" marker and its pending-update badge are dev affordances; a public
+    // demo should look like a current, healthy install.
+    case 'GET /health':
+      return { status: 'ok', version: '1.0.0' }
+    case 'GET /update':
+      return {
+        current: '1.0.0',
+        latest: '1.0.0',
+        update_available: false,
+        url: 'https://github.com/Joulenap/joulenap/releases',
+      }
+    case 'GET /status': {
+      const on = onlineNow(j, st)
+      return {
+        ...STATUS,
+        state: !CONFIG.app.scheduler_enabled ? 'paused' : j ? 'running' : 'idle',
+        running: j
+          ? {
+              run_id: j.id,
+              kind: j.run.kind,
+              started_at: iso(j.startedMs!),
+              route_id: j.routeId,
+              route_name: j.routeName,
+            }
+          : null,
+        queued: queue.slice(1).map((q) => ({
+          key: q.routeId ?? `pbs:${boxesOf(q)[0]}:${q.run.kind}`,
+          route_id: q.routeId,
+          pbs_id: boxesOf(q)[0] ?? null,
+        })),
+        pbss: STATUS.pbss.map((p) => ({
+          ...p,
+          online: on.has(p.id),
+          holders: j && p.id in j.run.online ? 1 : 0,
+          load: on.has(p.id) ? (p.load ?? { cpu: 12, mem: 41, uptime: 356_400 }) : null,
+        })),
+      } satisfies StatusResponse
+    }
+    case 'GET /runs':
+      return j ? [summaryOf(j, true), ...RUNS] : RUNS
+    case 'GET /tasklog':
+      // `?run=` asks for a finished run, which TASKLOG_BY_RUN already holds.
+      if (search.has('run')) return undefined
+      return j ? { run_id: j.id, lines: linesOf(j, st!) } : { run_id: null, lines: [] }
+  }
+
+  if (j && key === `GET /runs/${j.id}`) {
+    return { ...summaryOf(j, true), steps: stepsOf(j, st!), logs: [] }
+  }
+
+  if (j && key === `POST /runs/${j.id}/stop`) {
+    // power_off is the direct sense here (runRoute's keep_on is the inverted one).
+    if (body().power_off === false) boxesOf(j).forEach((p) => awake.add(p))
+    // The step the stop interrupted is closed as aborted: a finished run must never archive a
+    // step still reading "running".
+    const steps = stepsOf(j, st!).map((s) =>
+      s.status === 'running'
+        ? { ...s, status: 'aborted', finished_at: iso(nowMs()), detail: 'stopped from the UI' }
+        : s,
+    )
+    archive(j, summaryOf(j, false, 'aborted', 'stopped from the UI'), steps, linesOf(j, st!))
+    queue.shift()
+    return { run_id: j.id }
+  }
+
+  const runRoute = /^POST \/routes\/([^/]+)\/run$/.exec(key)
+  if (runRoute) {
+    const id = runRoute[1]
+    const route = CONFIG.routes.find((r) => r.id === id)
+    // ponytail: keep_on is accepted and ignored — every scripted arc ends in a power-off, and
+    // the dialog defaults to powering down anyway. Script a second arc if that toggle ever
+    // becomes the point of the demo.
+    const queued = enqueue({
+      id: nextRunId++,
+      run: runFor(id),
+      routeId: id,
+      routeName: route?.name || id,
+      trigger: 'manual',
+    })
+    return { route_id: id, queued }
+  }
+
+  const maint = /^POST \/devices\/pbss\/([^/]+)\/(gc|verify)$/.exec(key)
+  if (maint) {
+    const [, pbs, action] = maint
+    const queued = enqueue({
+      id: nextRunId++,
+      run: maintenanceRun(pbs, action as 'gc' | 'verify'),
+      routeId: null,
+      routeName: null,
+      trigger: 'manual',
+    })
+    return { pbs_id: pbs, action, queued }
+  }
+
+  const power = /^POST \/devices\/pbss\/([^/]+)\/power$/.exec(key)
+  if (power) {
+    if (body().action === 'wake') awake.add(power[1])
+    else awake.delete(power[1])
+    return { ok: true }
+  }
+  return undefined
+}
+
+function startDemo(): void {
+  shiftDates([STATUS, DASHBOARD, RUNS, RUN_DETAIL, LOGS, TASKLOG, TASKLOG_BY_RUN, GUESTS])
+  // The fixture's permanently-"running" row 46 is the job the replay now owns; leaving it in
+  // RUNS would duplicate the live summary and collide on the React key.
+  const running = RUNS.findIndex((r) => r.status === 'running')
+  if (running >= 0) RUNS.splice(running, 1)
+  queue = [
+    {
+      id: 46,
+      run: runFor('nightly'),
+      routeId: 'nightly',
+      routeName: 'Nightly',
+      trigger: 'scheduled',
+      // Seeded mid-backup: the visitor lands on a run already streaming its task log rather
+      // than on a still image waiting for a click.
+      startedMs: nowMs() - 12_000,
+    },
+    {
+      id: 47,
+      run: runFor('lab'),
+      routeId: 'lab',
+      routeName: 'Lab',
+      trigger: 'scheduled',
+      startedMs: null,
+    },
+  ]
+}
+
+function mountDemoBanner(): void {
+  const css = document.createElement('style')
+  // In the flow rather than fixed: it then wraps to any width without a padding hack, and
+  // cannot end up covering the header on a phone.
+  css.textContent = `
+    #jn-demo-banner {
+      display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
+      background: #e8830f; color: #12151a; font: 600 13px/1.4 system-ui, sans-serif;
+      padding: 9px 12px; text-align: center;
+    }
+    #jn-demo-banner a { color: inherit; }
+    @media (max-width: 600px) { #jn-demo-banner { font-size: 11px; } }
+  `
+  const bar = document.createElement('div')
+  bar.id = 'jn-demo-banner'
+  // English only, like the fixtures themselves: this element lives outside React and has no
+  // access to t(), and adding a key for it would put demo copy in both locale packs.
+  bar.innerHTML =
+    'DEMO — fake data, no Proxmox attached. Runs are scripted; reload to reset. ' +
+    '<a href="https://www.joulenap.com/">joulenap.com</a>'
+  document.head.append(css)
+  document.body.prepend(bar)
+}
+
+if (DEMO) {
+  startDemo()
+  mountDemoBanner()
+}
+
 // --- setup wizard fixtures ---------------------------------------------------
 // Lets the wizard advance card-by-card with no backend: connecting PVE returns a node
 // and a PBS-backed storage, confirming that storage seeds the PBS card, checking the
@@ -786,7 +1132,17 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   })()
   const key = `${method} ${bare}`
 
-  let body: unknown = ROUTES[key]
+  // There is nothing to log back into: the demo's login screen accepts any password, so
+  // signing out would be a dead end. Reload instead, which doubles as "start over".
+  if (DEMO && key === 'POST /logout') {
+    location.reload()
+    return new Promise<Response>(() => {})
+  }
+
+  // The scripted replay answers first and returns undefined to fall through, so every static
+  // fixture and every mutating branch below is reached unchanged in both modes.
+  let body: unknown = DEMO ? demoRoute(key, search, init) : undefined
+  if (body === undefined) body = ROUTES[key]
   // The real backend persists and echoes the config it just saved; the static CONFIG would
   // silently undo edits (e.g. the theme toggle reverting on the PUT response / next GET).
   if (key === 'PUT /config' && typeof init?.body === 'string') {

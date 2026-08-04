@@ -1,5 +1,25 @@
 # Integrations
 
+> **Breaking in 1.0.** Both payloads changed shape, because a Joulenap install
+> now has several routes and several backup servers — there is no single "next
+> run" or "the datastore" left to report. Update any widget or query built on
+> 0.9:
+>
+> | 0.9 | 1.0 |
+> |---|---|
+> | `pbs_state` | `pbss[].state` (`pbss.0.state` for the first box) |
+> | `next_run` | `routes[].next_run` |
+> | `last_run_status` / `last_run_time` | `routes[].last_run_status` / `.last_run_time` |
+> | `datastore_used_pct` / `_used_bytes` / `_total_bytes` | `pbss[].datastore_used_pct` / … |
+> | — | `state` (the app's own idle/running/paused) is new and still top-level |
+> | `joulenap_next_run_timestamp_seconds` | `joulenap_route_next_run_timestamp_seconds{route=}` |
+> | `joulenap_last_run_*` | `joulenap_route_last_run_*{route=}` |
+> | `joulenap_pbs_*`, `joulenap_datastore_*` | same names, now labelled `{pbs=}` |
+> | `joulenap_guest_last_backup_timestamp_seconds{vmid}` | `{vmid, pve, pbs}` |
+>
+> Settings → Integrations always shows a snippet generated for the version you
+> are running; if in doubt, copy from there rather than from this page.
+
 Joulenap exposes two read-only, API-key-protected endpoints for other tools:
 
 - **`GET /api/dashboard`** — a flat JSON summary for homelab dashboards
@@ -42,9 +62,9 @@ key → `401 Unauthorized`.
 ## Dashboard integration
 
 `GET /api/dashboard` lets a homelab dashboard poll Joulenap and show your
-backup status alongside your other services: whether the PBS is
-asleep/awake/backing up, when the next run is scheduled, how the last run
-went, and how full the datastore is.
+backup status alongside your other services: whether each backup server is
+asleep/awake/backing up, when each route next runs, how its last run went,
+and how full each datastore is.
 
 This endpoint is intentionally separate from the internal `/api/status` used
 by Joulenap's own UI: it's a stable, additive-only public contract with
@@ -53,17 +73,53 @@ by its own API key instead of a login session.
 
 ### Response reference
 
-`GET /api/dashboard` returns a flat JSON object:
+`GET /api/dashboard` returns one top-level field and two lists — one entry
+per route, one per backup server:
+
+```json
+{
+  "state": "running",
+  "routes": [
+    {
+      "id": "nightly",
+      "name": "Nightly",
+      "kind": "backup",
+      "enabled": true,
+      "next_run": "2026-07-10T02:00:00Z",
+      "last_run_status": "success",
+      "last_run_time": "2026-07-09T02:00:00Z"
+    }
+  ],
+  "pbss": [
+    {
+      "id": "pbs-01",
+      "state": "backing_up",
+      "datastore_used_pct": 62,
+      "datastore_used_bytes": 1900000000000,
+      "datastore_total_bytes": 3100000000000
+    }
+  ]
+}
+```
 
 | Field | Type | Values / meaning |
 |-------|------|------------------|
-| `pbs_state` | string | `sleeping` \| `online` \| `backing_up` |
-| `next_run` | string \| null | ISO 8601 next scheduled backup; null if scheduler disabled |
-| `last_run_status` | string | `success` \| `failed` \| `never` |
-| `last_run_time` | string \| null | ISO 8601 of the last backup cycle; null if none |
-| `datastore_used_pct` | number \| null | Percent used; null if PBS off / probe failed |
-| `datastore_used_bytes` | number \| null | Bytes used |
-| `datastore_total_bytes` | number \| null | Total bytes (free = total − used) |
+| `state` | string | `idle` \| `running` \| `paused` — what *Joulenap* is doing, not a backup server |
+| `routes[].id` / `.name` | string | the route's id, and the name you gave it (falls back to the id) |
+| `routes[].kind` | string | `backup` \| `sync` \| `external` \| `verify` |
+| `routes[].enabled` | boolean | false for a route you paused |
+| `routes[].next_run` | string \| null | ISO 8601; null when the route is not armed (disabled, or the kill-switch is off) |
+| `routes[].last_run_status` | string | `success` \| `failed` \| `never` |
+| `routes[].last_run_time` | string \| null | ISO 8601 of that run's start; null if it never ran |
+| `pbss[].id` | string | the backup server's id |
+| `pbss[].state` | string | `sleeping` \| `online` \| `backing_up` (a run is holding its power lease) |
+| `pbss[].datastore_used_pct` | number \| null | percent used; null if never probed |
+| `pbss[].datastore_used_bytes` | number \| null | bytes used — served from cache while the box sleeps |
+| `pbss[].datastore_total_bytes` | number \| null | total bytes (free = total − used) |
+
+Both lists follow your configuration order, so `routes.0` is your first
+configured route — not "the" route. A widget that only has room for one line
+should pick a specific entry; one that can iterate should range over the list.
 
 ### Per-dashboard setup
 
@@ -86,16 +142,19 @@ onto labelled rows:
       headers:
         X-API-Key: <your-api-key>
       mappings:
-        - field: pbs_state
-          label: PBS
-        - field: next_run
-          label: Next backup
+        - field: state
+          label: Joulenap
+        - field: routes.0.name
+          label: Route
+        - field: routes.0.next_run
+          label: Next run
           format: relativeDate
-        - field: last_run_status
+        - field: routes.0.last_run_status
           label: Last run
-        - field: datastore_used_pct
+        - field: pbss.0.datastore_used_pct
           label: Datastore
           format: percent
+# .0 is the first configured route / backup server — add more mappings for the rest.
 ```
 
 #### Glance
@@ -110,11 +169,20 @@ template:
   headers:
     X-API-Key: <your-api-key>
   template: |
-    <div>PBS: {{ .JSON.String "pbs_state" }}</div>
-    <div>Next: {{ .JSON.String "next_run" }}</div>
-    <div>Last run: {{ .JSON.String "last_run_status" }}</div>
-    <div>Datastore: {{ .JSON.Int "datastore_used_pct" }}%</div>
+    <div>State: {{ .JSON.String "state" }}</div>
+    {{ range .JSON.Array "routes" }}
+      <div>{{ .String "name" }}: {{ .String "last_run_status" }}
+           (next {{ .String "next_run" }})</div>
+    {{ end }}
+    {{ range .JSON.Array "pbss" }}
+      <div>{{ .String "id" }}: {{ .String "state" }}
+           — {{ .Int "datastore_used_pct" }}%</div>
+    {{ end }}
 ```
+
+Glance ranges over both lists, so it grows with your config on its own — no
+index to pick and nothing to edit when you add a route or a second backup
+server.
 
 #### Homarr
 
@@ -136,9 +204,16 @@ template:
 >   only offers query-parameter auth, with parameter name `key`)
 > - **Display Type**: `Key Value` (or `Custom JSX` for full control over
 >   layout)
-> - Map the fields you want to show: `pbs_state`, `next_run`,
->   `last_run_status`, `last_run_time`, `datastore_used_pct`,
->   `datastore_used_bytes`, `datastore_total_bytes`
+> - Map the fields you want to show:
+>   ```
+>   state                            idle | running | paused
+>   routes[]  id, name, kind, enabled, next_run,
+>             last_run_status, last_run_time
+>   pbss[]    id, state, datastore_used_pct,
+>             datastore_used_bytes, datastore_total_bytes
+>   ```
+>   Index into the lists — `routes.0.next_run` is the first configured
+>   route's next run.
 >
 > If your version can't set a custom header at all, use the query-string
 > fallback for the URL field instead:
@@ -158,14 +233,14 @@ template:
     headers:
       X-API-Key: <your-api-key>
     mappings:
-      - field: pbs_state
-        label: PBS
-      - field: next_run
-        label: Next backup
+      - field: routes.0.name
+        label: Route
+      - field: routes.0.next_run
+        label: Next run
         format: relativeDate
-      - field: last_run_status
+      - field: routes.0.last_run_status
         label: Last run
-      - field: datastore_used_pct
+      - field: pbss.0.datastore_used_pct
         label: Datastore
         format: percent
 ```
@@ -210,33 +285,40 @@ backup cycle.
 
 ### Metric reference
 
-All metrics are gauges prefixed `joulenap_`.
+All metrics are gauges prefixed `joulenap_`. **Almost everything is labelled**:
+per-route series carry `route=`, per-box series carry `pbs=`.
 
 | Metric | Labels | Meaning |
 |--------|--------|---------|
 | `joulenap_build_info` | `version` | Always 1; the label carries the running version |
-| `joulenap_pbs_online` | — | 1 if the PBS answers on its API port, 0 while asleep |
-| `joulenap_scheduler_enabled` | — | 1 if the scheduled backup job is armed |
-| `joulenap_job_running` | — | 1 while a backup, GC or verify run is in flight |
-| `joulenap_next_run_timestamp_seconds` | — | Unix time of the next scheduled backup |
-| `joulenap_last_run_timestamp_seconds` | — | When the last finished backup cycle started |
-| `joulenap_last_run_success` | — | 1 if the last finished cycle succeeded, else 0 |
-| `joulenap_last_run_duration_seconds` | — | How long that cycle took |
-| `joulenap_last_run_guests` | — | Guests backed up by that cycle |
-| `joulenap_datastore_used_bytes` | — | Datastore bytes used (last known value) |
-| `joulenap_datastore_total_bytes` | — | Datastore size in bytes (last known value) |
-| `joulenap_guest_last_backup_timestamp_seconds` | `vmid` | Each guest's most recent snapshot |
-| `joulenap_pbs_cpu_percent` | — | PBS CPU %, **only present while the PBS is awake** |
-| `joulenap_pbs_memory_percent` | — | PBS memory %, only while awake |
-| `joulenap_pbs_uptime_seconds` | — | PBS uptime, only while awake |
+| `joulenap_scheduler_enabled` | — | 1 if the kill-switch is on (routes may be armed) |
+| `joulenap_job_running` | — | 1 while a backup, sync, GC or verify run is in flight |
+| `joulenap_queued_runs` | — | Runs waiting behind the one in flight |
+| `joulenap_pbs_online` | `pbs` | 1 if this backup server answers on its API port, 0 while asleep |
+| `joulenap_pbs_cpu_percent` | `pbs` | CPU %, **only present while that box is awake** |
+| `joulenap_pbs_memory_percent` | `pbs` | Memory %, only while awake |
+| `joulenap_pbs_uptime_seconds` | `pbs` | Uptime, only while awake |
+| `joulenap_datastore_used_bytes` | `pbs`, `datastore` | Datastore bytes used (last known value) |
+| `joulenap_datastore_total_bytes` | `pbs`, `datastore` | Datastore size in bytes (last known value) |
+| `joulenap_route_next_run_timestamp_seconds` | `route` | Unix time this route next fires; **absent when it isn't armed** |
+| `joulenap_route_last_run_timestamp_seconds` | `route` | When this route's last finished run started |
+| `joulenap_route_last_run_success` | `route` | 1 if it succeeded, 0 if it failed or was aborted |
+| `joulenap_route_last_run_duration_seconds` | `route` | How long that run took |
+| `joulenap_route_last_run_guests` | `route` | Guests backed up by that run |
+| `joulenap_guest_last_backup_timestamp_seconds` | `vmid`, `pve`, `pbs` | Each guest's most recent snapshot |
 | `joulenap_runs_recent` | `kind`, `status` | Finished runs in the history window |
+
+`joulenap_guest_last_backup_timestamp_seconds` is labelled by the PVE the
+guest lives on and the backup server holding the snapshot as well as the
+vmid, because a vmid alone stopped being unique the moment a second PVE could
+exist — and the same guest synced to two boxes is legitimately two series.
 
 Two things worth knowing before you write queries:
 
-- **A value Joulenap doesn't have is an absent series, not a zero.** Before
-  the first backup there is no `joulenap_last_run_timestamp_seconds` at all,
-  because publishing `0` would graph your last backup as January 1970. Use
-  `absent()` to alert on "never ran".
+- **A value Joulenap doesn't have is an absent series, not a zero.** A route
+  that has never run has no `joulenap_route_last_run_timestamp_seconds`, and a
+  disabled one has no `..._next_run_...` — publishing `0` would graph your last
+  backup as January 1970. Use `absent()` to alert on "never ran".
 - **`joulenap_runs_recent` is a gauge, not a counter.** The daily prune job
   deletes runs older than `maintenance.history.retention_days`, so the number
   legitimately goes *down* — `rate()` and `increase()` would be nonsense on
@@ -249,17 +331,26 @@ Two things worth knowing before you write queries:
 # Hours since each guest was last backed up
 (time() - joulenap_guest_last_backup_timestamp_seconds) / 3600
 
-# Datastore usage percent
+# Datastore usage percent, per backup server
 100 * joulenap_datastore_used_bytes / joulenap_datastore_total_bytes
 
-# Days until the datastore is full, from the last week's growth
+# Days until each datastore is full, from the last week's growth
 (joulenap_datastore_total_bytes - joulenap_datastore_used_bytes)
   / (deriv(joulenap_datastore_used_bytes[7d]) * 86400)
 
 # Share of recent backup cycles that succeeded
 joulenap_runs_recent{kind="cycle",status="success"}
   / sum by () (joulenap_runs_recent{kind="cycle"})
+
+# Routes whose last run failed
+joulenap_route_last_run_success == 0
+
+# Hours since each route last ran
+(time() - joulenap_route_last_run_timestamp_seconds) / 3600
 ```
+
+The run kinds you'll see on `joulenap_runs_recent` are `cycle` (a backup
+route), `sync`, `monitor` (an external route's watch), `verify` and `gc`.
 
 ### Alerting rules
 
@@ -274,26 +365,32 @@ groups:
         expr: time() - joulenap_guest_last_backup_timestamp_seconds > 172800
         for: 1h
         annotations:
-          summary: "Guest {{ $labels.vmid }} has no backup in over 48h"
+          summary: >-
+            Guest {{ $labels.vmid }} on {{ $labels.pve }} has no backup on
+            {{ $labels.pbs }} in over 48h
 
-      - alert: JoulenapLastBackupFailed
-        expr: joulenap_last_run_success == 0
+      - alert: JoulenapRouteFailed
+        expr: joulenap_route_last_run_success == 0
         for: 15m
         annotations:
-          summary: "The last Joulenap backup cycle did not succeed"
+          summary: "Route {{ $labels.route }} did not succeed on its last run"
 
-      - alert: JoulenapNeverRan
-        expr: absent(joulenap_last_run_timestamp_seconds)
+      - alert: JoulenapRouteNeverRan
+        expr: absent(joulenap_route_last_run_timestamp_seconds{route="nightly"})
         for: 24h
         annotations:
-          summary: "Joulenap has never completed a backup cycle"
+          summary: "Route nightly has never completed a run"
 
       - alert: JoulenapDatastoreFilling
         expr: 100 * joulenap_datastore_used_bytes / joulenap_datastore_total_bytes > 85
         for: 1h
         annotations:
-          summary: "PBS datastore is over 85% full"
+          summary: "Datastore {{ $labels.datastore }} on {{ $labels.pbs }} is over 85% full"
 ```
+
+`absent()` needs the series named in full, so the "never ran" alert has to
+name the route — repeat the rule per route you care about, or template it out
+of your own config.
 
 Set the staleness threshold to comfortably more than your backup interval —
 `172800` (48h) suits a nightly schedule; a run that starts late or takes a

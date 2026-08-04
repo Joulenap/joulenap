@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import type { Route, RunDetail, RunSummary, TaskLogLine } from '../../api/types'
@@ -26,6 +26,18 @@ export function RunHistory({
   const { t } = useTranslation()
   const [filter, setFilter] = useState<string>('all')
   const [open, setOpen] = useState<number | null>(null)
+
+  // Open the run in flight on its own: someone landing on this page wants to see what is
+  // happening now, and the live task log is otherwise a click away. The ref means each run is
+  // auto-opened once, so collapsing it is not fought until the next run starts.
+  const autoOpened = useRef<number | null>(null)
+  useEffect(() => {
+    const running = runs.find((r) => r.status === 'running')
+    if (running && autoOpened.current !== running.id) {
+      autoOpened.current = running.id
+      setOpen(running.id)
+    }
+  }, [runs])
 
   // Filtered client-side over the 50 rows already polled: switching chips is instant and
   // costs no request, and the backend's ?route= filter would only matter past that window.
@@ -189,7 +201,11 @@ function RunDetailBody({
     return () => {
       cancelled = true
     }
-  }, [run.id, live])
+    // A run in flight grows a step at a time, so the timeline has to be re-read or it freezes
+    // at whatever it looked like when the row was expanded. `liveLines` is already narrowed to
+    // this run by the caller, so its length only moves while this row is the live one — which
+    // makes it a free tick at the task-log poll's own cadence, with no second timer.
+  }, [run.id, live, live ? liveLines.length : 0])
 
   const shown = live ? liveLines : (lines ?? [])
 

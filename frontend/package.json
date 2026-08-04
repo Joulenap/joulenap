@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:demo": "vite build --mode demo --base ./ --outDir dist-demo",
+    "build:demo": "tsc --noEmit && vite build --mode demo --base ./ --outDir dist-demo",
     "preview": "vite preview",
     "test": "node --test"
   },

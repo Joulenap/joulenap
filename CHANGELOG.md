@@ -5,6 +5,135 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0]
+
+Joulenap is no longer built around one Proxmox host backing up to one backup server. It now models
+**devices** — any number of PVEs and any number of PBSs — and **routes** between them. Existing
+configurations are converted automatically on the first start; see Changed below for the one
+conversion that is lossy, and for the two breaking changes outside the interface.
+
+### Added
+
+- **Routes.** A route is one scheduled flow of backup data between devices: sources, a target, its
+  own time and weekdays, its own retention, its own options. Four kinds, inferred from the devices
+  you pick: **backup** (one or more Proxmox hosts into a backup server, including a fan-in from
+  several at once), **sync** (one backup server into another, pull or push, for a real off-site
+  second copy), **external** (Joulenap starts nothing and only watches the jobs PVE and PBS run on
+  their own schedules), and **verify**. Guests are selected per source, because vmids collide
+  between hosts.
+- **Multiple Proxmox hosts and multiple backup servers.** Each is a device with its own address,
+  scoped token, TLS fingerprint and — for a backup server — its own wake-up and power-off settings.
+  A backup server you keep powered on all the time is supported: turn `managed_power` off and
+  Joulenap treats it as always available instead of trying to wake it.
+- **A run queue and a per-server power lease.** One run is ever in flight; the rest wait their turn
+  instead of being dropped. Each backup server a run needs is leased: the first holder wakes it, the
+  last release powers it off — and only if nothing still queued needs it, the run succeeded, and you
+  did not ask to keep it on. So two routes an hour apart on the same box wake it once, and a sync
+  route wakes both boxes and releases them independently. The power-off step in the run timeline
+  says which of those happened.
+- **A rebuilt interface.** The homepage is now an operations view: a live topology of your hosts and
+  backup servers with the routes drawn between them, the route strip where routes are created,
+  edited, paused and run by hand, what is coming up next, and a run history whose rows expand into a
+  per-step timeline with the PVE/PBS task output streaming underneath. Settings became five tabs
+  (Devices, Account, Notifications, Integrations, Advanced) with a device card and edit modal for
+  every box, and a removal guard that names the routes still using one.
+- **Two guided wizards, replacing the single linear setup.** *Add a Proxmox VE* connects and then
+  reads that host's storage configuration to discover the backup servers behind it, linking the ones
+  you already registered and offering to configure a new one inline. *Add a Proxmox Backup Server*
+  walks connection, wake-up (with a Test button that sends a real magic packet before you find out
+  at 04:00 that Wake-on-LAN was never armed) and power-off. Both work from pasted API tokens, or
+  provision everything themselves from a root login used once and never stored.
+- **Ad-hoc maintenance per backup server.** Run a garbage collection or a verification on one box
+  from the homepage, without a route. It queues and reports like any other run; only the route
+  column is empty.
+- **A route can be stopped and a `config.yaml` can be exported.** Stopping a run also stops the
+  PVE/PBS task behind it and asks whether to power the server down.
+
+### Changed
+
+- **`GET /api/dashboard` and `/metrics` changed shape, and this breaks existing widgets and
+  alerts.** With several routes and several backup servers there is no single "next run" or "the
+  datastore" left to report. The dashboard payload is now `{state, routes[], pbss[]}`, so a widget
+  picks a list entry (`routes.0.next_run`) instead of a flat field. Prometheus series are labelled:
+  `joulenap_next_run_timestamp_seconds` became
+  `joulenap_route_next_run_timestamp_seconds{route="..."}`, the `joulenap_last_run_*` family became
+  `joulenap_route_last_run_*{route="..."}`, every PBS and datastore series carries `pbs=`, and
+  per-guest freshness is now labelled `{vmid, pve, pbs}` because a vmid alone stopped being unique.
+  The field-by-field mapping is at the top of `docs/INTEGRATIONS.md`, and Settings → Integrations
+  always shows a snippet generated for the version you are running.
+- **Your `config.yaml` is migrated automatically, with a parachute.** The `pve:`, `pbs:` and
+  `backup:` sections become `pves[]`, `pbss[]` and `routes[]` on the first start after the upgrade:
+  the backup job becomes a route named Backup, a scheduled verification becomes one named Verify,
+  and schedules, guest selections and retention come across with them. The original file is copied
+  to `config.yaml.pre-overhaul.bak` first, and if the converted config fails validation the original
+  is kept, the app starts on it, and the reason appears as a banner rather than the app looking like
+  a fresh install.
+- **The `exclude` guest mode is gone, and a migrated route widens to "all guests".** Inverting an
+  exclusion list needs a live guest list that is not available while the config is being read, so
+  such a route is converted to "all" and a warning is logged. It will back up *more* than before,
+  never less — but it is worth checking after the upgrade.
+- **Garbage collection and verification are per-route options**, set in the route editor's Advanced
+  section, rather than global maintenance settings. `maintenance:` now holds only how long run
+  history is kept.
+- **Guest selection and retention moved out of Settings** and into the route that uses them. So did
+  backup mode, the bandwidth cap and the minimum-free-space check. Wake timeout, Wake-on-LAN retries
+  and the external-watch timeouts belong to a backup server and live on its device card.
+- **`GET /api/guests` now requires a `?pve=` parameter** and reports, per guest, which backup servers
+  hold a snapshot of it. Collapsing newest-per-vmid across every host would have shown the wrong
+  host's backup date once a second one existed.
+- **Notifications name the route** and no longer describe every missed run as a missed backup. A run
+  that fails reports its error translated, in the interface as well as in the notification.
+
+### Removed
+
+- **The single `pve:` / `pbs:` / `backup:` config sections**, along with `pve.node` (cluster nodes
+  are discovered at runtime, which is also how a cluster is detected) and `pve.storage_id` (a host
+  now maps each backup server to the storage it uses for it).
+- **External schedules as a global mode.** It is a route kind now, so one backup server can be
+  watched while another is driven by Joulenap — which the global switch made impossible.
+- **The endpoints the single-job model needed**: `POST /api/backup/run`, `POST /api/gc/run`,
+  `POST /api/jobs/cancel`, `POST /api/power/on`, `POST /api/power/off`, `POST /api/wol/test` and
+  `POST /api/wizard/reset`. Their replacements are `POST /api/routes/{id}/run`,
+  `POST /api/devices/pbss/{id}/gc` and `/verify`, `POST /api/runs/{id}/stop`,
+  `POST /api/devices/pbss/{id}/power` and `POST /api/wizard/wol/test`.
+
+### Fixed
+
+- **A sync route worked once and then never again.** Proxmox Backup Server refuses to delete a
+  remote that a sync job still references, so the second run of any sync route failed. The job is
+  now removed before the remote is touched. Two related failures went with it: the run and delete
+  calls reject the `sync-direction` parameter the create call requires, and listing sync jobs with
+  the server's default hid push jobs, so an existing one was never cleaned up and the create that
+  followed failed with "job already exists".
+- **A wizard run could break the backup server you added first.** Generating the SSH key overwrote
+  the one shared file every server's configuration points at, leaving the first box with an
+  `authorized_keys` line no private key matched — and nothing in the interface said so. The key is
+  now created only when there is none, and the wizard says it is reusing the existing one.
+- **A token provisioned by the wizard could not create a remote or a sync job at all**, because
+  nothing was granted at `/remote`. Provisioning now grants both `RemoteAdmin` and
+  `RemoteSyncPushOperator` while it still holds the root ticket. A server set up before this — or
+  one whose token you pasted by hand — needs the grant applied by hand on the box; the command is in
+  `docs/CONFIG-WIZARD.md`.
+- **A sync task ending in warnings surfaced as a bare task id.** It now names the direction, both
+  servers, the exit status and the first warning or error line from the task log.
+- **Two forms on the same Settings tab discarded each other's unsaved changes.** The unsaved-changes
+  guard tracked only one form at a time, so the second to appear silently replaced the first — which
+  was already happening in 0.9's Advanced tab.
+- **An interface translated into Italian had English gaps in it**, including a backup-mode dropdown
+  under a translated label, a schedule that lost its preposition, and six counts that spelled their
+  plural in English ("1 events").
+
+### Security
+
+- **Every backup server is pinned and verified independently** — its own TLS certificate fingerprint
+  for API calls, its own SSH host key confirmed during setup and stored in `data/known_hosts`.
+- **The pre-migration `config.yaml.pre-overhaul.bak` is written with 0600 permissions.** It holds
+  every token, password hash and secret in the old config, and a plain file copy does not carry
+  permission bits across.
+- **Redacted secrets are matched to devices by id** when a configuration is saved, not by their
+  position in a list. Reordering or shortening the device lists can no longer map a redaction
+  placeholder onto a different device's stored secret.
+
 ## [0.9.0]
 
 ### Added
@@ -370,7 +499,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Joulenap/joulenap/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Joulenap/joulenap/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Joulenap/joulenap/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Joulenap/joulenap/compare/v0.6.0...v0.7.0

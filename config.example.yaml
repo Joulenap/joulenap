@@ -20,7 +20,7 @@ app:
   api_key: ""
   # Ask GitHub once a day whether a newer Joulenap release exists, and show a footer
   # badge if so. Off by default: the app makes no outbound internet call unless you
-  # turn this on (Settings -> Integrations).
+  # turn this on (Settings -> Advanced).
   update_check: false
   session:
     https_only: false
@@ -47,8 +47,9 @@ app:
 #                                                             wakes, watches, powers off)
 #   verify    no source               -> a PBS target        (verify its snapshots)
 #
-# All three lists start empty: the setup wizard adds the devices, then you add routes
-# from the UI. The commented blocks below show the full shape of each entry.
+# All three lists start empty: the wizards under Settings -> Devices -> + Add fill in the
+# devices, then you draw routes between them from the homepage. The commented blocks below
+# show the full shape of each entry.
 # =====================================================================
 
 # --- Proxmox VE endpoints (where the guests live) ---
@@ -77,8 +78,11 @@ pbss: []
 #     port: 8007
 #     datastore: backup
 #     fingerprint: ""         # PBS dashboard > Show Fingerprint, e.g. "aa:bb:cc:..."
-#     # Token privileges: DatastoreAdmin on the datastore (status + start GC) plus Audit on
-#     # /system (read-only node CPU/RAM/network for the dashboard).
+#     # Token privileges: DatastoreAdmin on the datastore (status, GC, verify) plus Audit on
+#     # /system (read-only node CPU/RAM/network for the dashboard). A PBS taking part in a
+#     # sync route also needs RemoteAdmin AND RemoteSyncPushOperator on /remote — PBS refuses
+#     # ACL writes from a token, so those must be granted on the box itself or by the wizard's
+#     # root mode (see docs/CONFIG-WIZARD.md).
 #     api_token_id: "root@pam!joulenap"
 #     api_token_secret: ""
 #     # Set to false for an always-on PBS (a VM, or a cloud-hosted one): Joulenap then only
@@ -88,7 +92,8 @@ pbss: []
 #     mac: "00:11:22:33:44:55"          # PBS NIC MAC
 #     wol_broadcast_iface: ""           # interface on the Joulenap host used to send the magic packet, e.g. eth0 (blank = auto-detect)
 #     wait_timeout: 180                 # seconds to wait for PBS to become reachable (per wake attempt)
-#     wol_retries: 2                    # extra Wake-on-LAN re-sends if PBS doesn't come up in time
+#     wol_retries: 2                    # EXTRA re-sends after the first: total attempts = wol_retries + 1,
+#                                       # each waiting up to wait_timeout
 #     # Power-off (no PBS API for this -> SSH)
 #     poweroff_task_wait: 600           # wait up to N s for a running PBS task to finish before power-off (0 = no wait)
 #     ssh_user: root
@@ -119,7 +124,8 @@ routes: []
 #     target: pbs-01
 #     schedule:
 #       time: "04:00"
-#       days: [true, true, true, true, true, true, true]   # Mon..Sun
+#       days: [true, true, true, true, true, true, true]   # Mon..Sun; at least one must be
+#                                                          # true (pause with enabled: false)
 #       # Escape hatch for a schedule time+days cannot express (a day-of-month or month
 #       # pattern, a step value, a weekday range). A 5-field crontab string; when set it
 #       # wins over time/days, and the UI shows it read-only.
@@ -134,7 +140,8 @@ routes: []
 #       mode: snapshot        # snapshot | suspend | stop
 #       bwlimit: 0            # KiB/s, 0 = unlimited
 #       min_free_percent: 0   # abort if the target datastore has less than this % free (0 = disabled)
-#       gc: true              # garbage-collect the target once this route is done
+#       gc: true              # garbage-collect the target once this route is done. Two routes
+#                             # onto the same PBS with gc on both will each run one.
 #       verify_after: false   # quick verify of this run's new snapshots, before power-off
 #       reverify_days: 30     # verify routes only: skip snapshots verified in the last N
 #                             # days, so the route stays incremental (0 = verify everything)
