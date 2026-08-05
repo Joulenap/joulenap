@@ -41,6 +41,14 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
   const pve = draft as PveDevice
   const ns = 'settings.devices'
 
+  // Sync grants: root credentials that are used once and never stored, so they live outside
+  // the draft entirely (see the section's own comment below).
+  const [grantOpen, setGrantOpen] = useState(false)
+  const [grantUser, setGrantUser] = useState('root@pam')
+  const [grantPass, setGrantPass] = useState('')
+  const [grantBusy, setGrantBusy] = useState(false)
+  const [grantNote, setGrantNote] = useState<{ ok: boolean; text: string } | null>(null)
+
   const live = useMemo(() => validateDevice(draft), [draft])
   const shown = errors ?? []
   const errorFor = (field: string) => shown.find((e) => e.field === field)
@@ -66,6 +74,27 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
       setErrors(e instanceof ApiError ? deviceSaveErrors(e) : [{ message: String(e) }])
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function onGrantSync() {
+    setGrantBusy(true)
+    setGrantNote(null)
+    try {
+      const out = await api.wizardPbsGrantSync({
+        host: draft.host,
+        port: draft.port,
+        username: grantUser,
+        password: grantPass,
+        api_token_id: draft.api_token_id,
+        fingerprint: pbs.fingerprint,
+      })
+      setGrantPass('') // used once, then gone — same contract as the wizard's root step
+      setGrantNote({ ok: true, text: t(`${ns}.syncGrantOk`, { roles: out.roles.join(', ') }) })
+    } catch (e) {
+      setGrantNote({ ok: false, text: e instanceof ApiError ? e.message : String(e) })
+    } finally {
+      setGrantBusy(false)
     }
   }
 
@@ -209,6 +238,61 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
               <span>{t(`${ns}.managedPower`)}</span>
             </label>
             <span className="help">{t(`${ns}.managedPowerHint`)}</span>
+
+            {/* Sync grants. A token cannot ACL itself — PBS answers "Unprivileged API tokens
+                can't set ACL items" to any token — so the only way to add the /remote roles a
+                Sync route needs is a root login. The password is sent once and never stored,
+                which is why it lives outside the draft and is wiped on success. */}
+            <span className="msec">{t(`${ns}.secSync`)}</span>
+            {!grantOpen ? (
+              <>
+                <button type="button" className="btn btn-sm" onClick={() => setGrantOpen(true)}>
+                  {t(`${ns}.syncGrant`)}
+                </button>
+                <span className="help">{t(`${ns}.syncGrantHint`)}</span>
+              </>
+            ) : (
+              <>
+                <div className="frow">
+                  <div className="field">
+                    <label htmlFor="dev-grant-user">{t('wizard.field.user')}</label>
+                    <input
+                      id="dev-grant-user"
+                      className="in-mono"
+                      value={grantUser}
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(e) => setGrantUser(e.target.value)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="dev-grant-pass">{t('wizard.field.password')}</label>
+                    <input
+                      id="dev-grant-pass"
+                      type="password"
+                      className="in-mono"
+                      value={grantPass}
+                      autoComplete="off"
+                      onChange={(e) => setGrantPass(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="inline-row">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={grantBusy || !grantPass || !draft.api_token_id}
+                    onClick={() => void onGrantSync()}
+                  >
+                    {t(`${ns}.syncGrantRun`)}
+                  </button>
+                  {grantNote && (
+                    <span className={grantNote.ok ? 'ok-note' : 'err-note'}>{grantNote.text}</span>
+                  )}
+                </div>
+                <span className="help">{t(`${ns}.syncGrantCreds`)}</span>
+              </>
+            )}
 
             {/* The three power sections describe how to wake and sleep the box; with managed
                 power off Joulenap does neither, so they are omitted rather than shown inert. */}

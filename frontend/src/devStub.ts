@@ -1034,6 +1034,11 @@ const WIZARD_PBS_PROVISION: { id: string; secret: string } = {
   secret: 'stub-pbs-token-secret',
 }
 
+const WIZARD_PBS_GRANT_SYNC: { token_id: string; roles: string[] } = {
+  token_id: 'root@pam!joulenap',
+  roles: ['RemoteAdmin', 'RemoteSyncPushOperator'],
+}
+
 const WIZARD_INTERFACES: NetInterface[] = [
   { name: 'eth0', address: '192.168.1.20', netmask: '255.255.255.0', broadcast: '192.168.1.255' },
   { name: 'eth1', address: '10.0.0.5', netmask: '255.255.255.0', broadcast: '10.0.0.255' },
@@ -1100,6 +1105,7 @@ const ROUTES: Record<string, unknown> = {
   'POST /wizard/storage/derive': WIZARD_STORAGE_DERIVE,
   'POST /wizard/pbs/check': WIZARD_PBS_CHECK,
   'POST /wizard/pbs/provision': WIZARD_PBS_PROVISION,
+  'POST /wizard/pbs/grant-sync': WIZARD_PBS_GRANT_SYNC,
   'GET /wizard/interfaces': WIZARD_INTERFACES,
   'POST /wizard/wol/detect-mac': WIZARD_DETECT_MAC,
   'POST /wizard/ssh/keygen': WIZARD_KEYGEN,

@@ -62,6 +62,7 @@
     "powerOn": "Power on PBS",
     "powerOff": "Power off PBS",
     "neverRun": "never run",
+    "noRecentRuns": "No recent runs",
     "lastBackupTitle": "Last backup per guest",
     "never": "never",
     "scheduleTitle": "Schedule",
@@ -251,8 +252,10 @@
       "keepDaily": "Keep daily",
       "keepWeekly": "Keep weekly",
       "keepMonthly": "Keep monthly",
-      "keepYearly": "Keep yearly"
-    }
+      "keepYearly": "Keep yearly",
+      "guestIncludeLabel": "Include {{name}} (VMID {{vmid}})"
+    },
+    "routeEnabledLabel": "Route {{name}} enabled"
   },
   "wizard": {
     "pve": {
@@ -532,6 +535,12 @@
       "guardBody_other": "{{id}} is used by {{count}} routes. Change or delete them first — removing the device would break them.",
       "editTitle": "Edit {{kind}} · {{id}}",
       "secConnection": "Connection",
+      "secSync": "Sync routes",
+      "syncGrant": "Grant sync permissions",
+      "syncGrantHint": "A Sync route needs the /remote roles on this box’s token. Tokens created by Joulenap 1.0 already have them; one added by hand, or by an older version, does not — and PBS only accepts the grant from a root login.",
+      "syncGrantRun": "Grant",
+      "syncGrantCreds": "Root credentials are used only for this grant and are never stored.",
+      "syncGrantOk": "Granted: {{roles}}",
       "secStorages": "Storage mapping",
       "secWake": "Wake-up (Wake-on-LAN)",
       "secPower": "Power-off (SSH)",

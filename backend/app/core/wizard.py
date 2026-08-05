@@ -21,7 +21,7 @@ from ..connectors import net, ssh, tls
 from ..connectors.discovery import derive_pbs_from_storage, detect_mac
 from ..connectors.errors import ApiError
 from ..connectors.pbs import get_fingerprint
-from ..connectors.provision import PbsProvisioner, PveProvisioner
+from ..connectors.provision import PBS_REMOTE_ROLES, PbsProvisioner, PveProvisioner
 from ..connectors.pve import PveClient
 from ..connectors.sshkey import (
     authorized_keys_line,
@@ -112,6 +112,32 @@ def storage_derive(
     return derive_pbs_from_storage(config)
 
 
+def _pbs_root_verify(
+    host: str, port: int, verify_tls: bool, fingerprint: str, transport: object | None
+) -> bool | ssl.SSLContext:
+    """The TLS setting for a PBS call that carries a **root password**.
+
+    A fingerprint pins the connection. Without one — and without ``verify_tls`` — the
+    password would go out over a connection nothing has authenticated, so this refuses
+    instead. That is the one case where failing is friendlier than proceeding: the wizard
+    captures a fingerprint one step earlier, so an empty one here means something is wrong
+    with the setup rather than that the user opted out.
+
+    ``transport`` is the test seam: an injected transport never opens a socket.
+    """
+    if transport is not None:
+        return verify_tls
+    if fingerprint:
+        return tls.pinned_ssl_context(host, port, fingerprint)
+    if not verify_tls:
+        raise ApiError(
+            f"Refusing to send root credentials to {host}:{port} over an unverified "
+            "connection: store the PBS certificate fingerprint first (the wizard's connect "
+            "step reads it), or enable TLS verification for this device."
+        )
+    return True
+
+
 def pbs_provision(
     *,
     host: str,
@@ -130,12 +156,37 @@ def pbs_provision(
     A realm-less username (e.g. ``root``, the SSH default) is assumed to be ``@pam``.
     """
     userid = username if "@" in username else f"{username}@pam"
-    verify: bool | ssl.SSLContext = verify_tls
-    if fingerprint and transport is None:  # pin when known (skip in tests using a transport)
-        verify = tls.pinned_ssl_context(host, port, fingerprint)
+    verify = _pbs_root_verify(host, port, verify_tls, fingerprint, transport)
     with PbsProvisioner(host, port, verify, transport=transport) as prov:
         token = prov.provision_token(userid, password, datastore, token_name)
     return {"id": token.token_id, "secret": token.secret}
+
+
+def pbs_grant_sync(
+    *,
+    host: str,
+    port: int = 8007,
+    verify_tls: bool = False,
+    username: str,
+    password: str,
+    token_id: str,
+    fingerprint: str = "",
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    """Add the ``/remote`` roles a Sync route needs to a token that already exists.
+
+    For a PBS whose token predates those grants — provisioned by 0.9's wizard, or pasted by
+    hand. PBS answers *400 Unprivileged API tokens can't set ACL items* to any token, so
+    this needs a real root login; the password is used once here and discarded, exactly as
+    in :func:`pbs_provision`. The token itself is left alone: only its ACL changes.
+    """
+    userid = username if "@" in username else f"{username}@pam"
+    verify = _pbs_root_verify(host, port, verify_tls, fingerprint, transport)
+    with PbsProvisioner(host, port, verify, transport=transport) as prov:
+        prov.login(userid, password)
+        for role in PBS_REMOTE_ROLES:
+            prov.grant_acl(token_id, "/remote", role)
+    return {"token_id": token_id, "roles": list(PBS_REMOTE_ROLES)}
 
 
 def pbs_check(*, host: str, port: int = 8007) -> dict[str, Any]:

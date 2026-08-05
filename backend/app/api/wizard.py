@@ -131,6 +131,34 @@ def pbs_provision(body: PbsProvisionRequest) -> dict[str, Any]:
     )
 
 
+# --- PBS sync grants on an existing token ------------------------------------
+
+
+class PbsGrantSyncRequest(BaseModel):
+    host: str = Field(min_length=1)
+    port: int = Field(default=8007, ge=1, le=65535)
+    verify_tls: bool = False
+    username: str = "root@pam"
+    password: str = Field(min_length=1)
+    api_token_id: str = Field(min_length=1)
+    fingerprint: str = ""
+
+
+@router.post("/pbs/grant-sync")
+def pbs_grant_sync(body: PbsGrantSyncRequest) -> dict[str, Any]:
+    """Grant the /remote roles a Sync route needs to a PBS token that already exists."""
+    return _connector_call(
+        wizard.pbs_grant_sync,
+        host=body.host,
+        port=body.port,
+        verify_tls=body.verify_tls,
+        username=body.username,
+        password=body.password,
+        token_id=body.api_token_id,
+        fingerprint=body.fingerprint,
+    )
+
+
 # --- local network interfaces (for the WoL interface picker) -----------------
 
 

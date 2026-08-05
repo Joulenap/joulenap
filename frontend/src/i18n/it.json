@@ -62,6 +62,7 @@
     "powerOn": "Accendi PBS",
     "powerOff": "Spegni PBS",
     "neverRun": "mai eseguito",
+    "noRecentRuns": "Nessuna esecuzione recente",
     "lastBackupTitle": "Ultimo backup per guest",
     "never": "mai",
     "scheduleTitle": "Pianificazione",
@@ -251,8 +252,10 @@
       "keepDaily": "Conserva i giornalieri",
       "keepWeekly": "Conserva i settimanali",
       "keepMonthly": "Conserva i mensili",
-      "keepYearly": "Conserva gli annuali"
-    }
+      "keepYearly": "Conserva gli annuali",
+      "guestIncludeLabel": "Includi {{name}} (VMID {{vmid}})"
+    },
+    "routeEnabledLabel": "Route {{name}} attiva"
   },
   "wizard": {
     "pve": {
@@ -532,6 +535,12 @@
       "guardBody_other": "{{id}} è usato da {{count}} route. Modificale o eliminale prima: rimuovere il dispositivo le renderebbe non valide.",
       "editTitle": "Modifica {{kind}} · {{id}}",
       "secConnection": "Connessione",
+      "secSync": "Route Sync",
+      "syncGrant": "Concedi i permessi di sync",
+      "syncGrantHint": "Una route Sync richiede i ruoli /remote sul token di questa macchina. I token creati da Joulenap 1.0 li hanno già; uno aggiunto a mano, o da una versione precedente, no — e PBS accetta la concessione solo da un login root.",
+      "syncGrantRun": "Concedi",
+      "syncGrantCreds": "Le credenziali root servono solo per questa concessione e non vengono mai salvate.",
+      "syncGrantOk": "Concessi: {{roles}}",
       "secStorages": "Mappatura storage",
       "secWake": "Accensione (Wake-on-LAN)",
       "secPower": "Spegnimento (SSH)",

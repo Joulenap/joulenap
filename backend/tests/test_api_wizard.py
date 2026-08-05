@@ -61,6 +61,36 @@ def test_pbs_check_passes_through(client, monkeypatch):
     assert r.json() == {"reachable": True, "fingerprint": "AA:BB"}
 
 
+def test_pbs_grant_sync_passes_through(client, monkeypatch):
+    captured = {}
+
+    def fake_grant(**kwargs):
+        captured.update(kwargs)
+        return {"token_id": kwargs["token_id"], "roles": ["RemoteAdmin"]}
+
+    monkeypatch.setattr(wizard, "pbs_grant_sync", fake_grant)
+    r = client.post(
+        "/api/wizard/pbs/grant-sync",
+        json={
+            "host": "pbs.local",
+            "password": "pw",
+            "api_token_id": "root@pam!joulenap",
+            "fingerprint": "AA:BB",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["roles"] == ["RemoteAdmin"]
+    # the endpoint renames api_token_id -> token_id and defaults the root realm
+    assert captured["token_id"] == "root@pam!joulenap"
+    assert captured["username"] == "root@pam" and captured["password"] == "pw"
+    assert "pw" not in r.text
+
+
+def test_pbs_grant_sync_needs_a_password_and_a_token(client):
+    r = client.post("/api/wizard/pbs/grant-sync", json={"host": "pbs.local", "password": "pw"})
+    assert r.status_code == 422
+
+
 def test_detect_mac_passes_through(client, monkeypatch):
     monkeypatch.setattr(wizard, "wol_detect_mac", lambda **_k: {"mac": "00:11:22:33:44:55"})
     r = client.post("/api/wizard/wol/detect-mac", json={"host": "pbs.local"})

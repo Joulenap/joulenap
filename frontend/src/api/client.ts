@@ -226,6 +226,10 @@ export const api = {
     }),
   wizardPbsProvision: (body: Record<string, unknown>) =>
     req<{ id: string; secret: string }>('POST', '/wizard/pbs/provision', body),
+  // Adds the /remote roles a Sync route needs to a token that already exists. Separate from
+  // provision because PBS refuses ACL writes from a token: it always needs a root login.
+  wizardPbsGrantSync: (body: Record<string, unknown>) =>
+    req<{ token_id: string; roles: string[] }>('POST', '/wizard/pbs/grant-sync', body),
   wizardInterfaces: () => req<NetInterface[]>('GET', '/wizard/interfaces'),
   wizardDetectMac: (host: string) =>
     req<{ mac: string | null }>('POST', '/wizard/wol/detect-mac', { host }),
