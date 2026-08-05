@@ -113,14 +113,24 @@ export function validateDeviceId(id: string, existing: string[]): DeviceError | 
  * however it likes (which is exactly why `storages` lives on the PVE), so the id says nothing
  * about identity. Host comparison is case-insensitive and trimmed — PVE stores whatever was
  * typed into the storage form.
+ *
+ * The **fingerprint** is a second identity signal, because the host strings are two people's
+ * spelling of one machine: `192.168.1.10` here and `pbs.lan` there is the same box, and
+ * missing that match offers an already-registered server as "new" — which then provisions a
+ * token over the one the existing device holds. Resolving the names would be the obvious fix
+ * and is the wrong one here: the container's resolver cannot see internal-only hostnames, so
+ * identity would depend on a lookup that is known to fail in this deployment.
+ *
+ * An **empty fingerprint never matches**, including another empty one — the field defaults to
+ * `""`, so equality alone would fold every unpinned server into one device.
  */
 export function matchStorage(storage: WizardStorage, pbss: PbsDevice[]): PbsDevice | null {
   const host = storage.host.trim().toLowerCase()
-  return (
-    pbss.find(
-      (p) => p.host.trim().toLowerCase() === host && p.datastore === storage.datastore,
-    ) ?? null
-  )
+  const print = storage.fingerprint.trim().toLowerCase()
+  const sameBox = (p: PbsDevice) =>
+    p.host.trim().toLowerCase() === host ||
+    (print !== '' && p.fingerprint.trim().toLowerCase() === print)
+  return pbss.find((p) => p.datastore === storage.datastore && sameBox(p)) ?? null
 }
 
 /**

@@ -154,6 +154,22 @@ test('host matching ignores case and surrounding whitespace', () => {
   assert.equal(matchStorage(storage({ host: 'PBS.LAN' }), [pbs('x', { host: 'pbs.lan' })])?.id, 'x')
 })
 
+test('the same box spelled two ways is matched on its fingerprint', () => {
+  // The PVE storage entry says pbs.lan, the device was added as an IP. Missing this offers an
+  // already-registered server as "new", and provisioning it replaces the token in use.
+  const registered = [pbs('pbs-01', { host: '192.168.1.50', fingerprint: 'aa:bb' })]
+  assert.equal(matchStorage(storage({ host: 'pbs.lan' }), registered)?.id, 'pbs-01')
+  // Still the wrong datastore, so still a different device on the same machine.
+  assert.equal(matchStorage(storage({ host: 'pbs.lan', datastore: 'offsite' }), registered), null)
+})
+
+test('an empty fingerprint never matches, not even another empty one', () => {
+  // `fingerprint` defaults to "", so matching on equality alone would fold every unpinned
+  // server into whichever device happened to be registered first.
+  const registered = [pbs('pbs-01', { host: '192.168.1.50', fingerprint: '' })]
+  assert.equal(matchStorage(storage({ host: '10.0.0.9', fingerprint: '' }), registered), null)
+})
+
 test('already-registered storages become the PVE storages map, new ones do not', () => {
   const storages = [storage(), storage({ storage: 'offsite', datastore: 'offsite' })]
   const registered = [pbs('pbs-01')]
