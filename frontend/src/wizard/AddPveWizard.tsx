@@ -55,9 +55,13 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
   const [report, setReport] = useState<string[]>([])
   const [saved, setSaved] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
-  // The user's answer to "that token name is taken", for both boxes this flow provisions.
+  // The user's answer to "that token name is taken", kept per box. This flow provisions two
+  // different machines, and the two answers are not the same answer: approving a replacement on
+  // the Proxmox host must not also authorize one on the backup server, whose token is typically
+  // held by *other* storage entries. One shared flag meant consent given for the first box was
+  // spent silently on the second.
   // A ref, not state: the provisioning calls read it in the same tick the confirm sets it.
-  const replaceToken = useRef(false)
+  const replaceToken = useRef({ pve: false, pbs: false })
   // What already exists on the far side, so a retry after a partial failure resumes instead
   // of repeating. A ref, not state: `save` reads it in the same tick it writes it.
   const landed = useRef<{ pbsToken: { id: string; secret: string } | null; pbsId: string | null }>({
@@ -94,7 +98,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       api_token_secret: pve.tokenSecret,
       username: pve.user,
       password: pve.password,
-      replace_token: replaceToken.current,
+      replace_token: replaceToken.current.pve,
     })
     setConnected(result)
     setToken(
@@ -154,7 +158,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
         password: pbs.password,
         datastore: pbs.datastore.trim(),
         fingerprint: pbs.fingerprint.trim(),
-        replace_token: replaceToken.current,
+        replace_token: replaceToken.current.pbs,
       })
     }
     if (pbs.managedPower && pbs.autoInstall) {
@@ -270,6 +274,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       // can say whether replacing it — and breaking whatever else holds that secret, very
       // likely this PVE's own PBS storage entry — is what they want.
       if (e instanceof ApiError && e.status === 409) {
+        const box = step === 0 ? 'pve' : 'pbs'
         const host = (step === 0 ? pve.host : pbs.host).trim()
         const message = await tokenConflictMessage(host, t, config?.pves ?? [], registered)
         setConfirm({
@@ -280,7 +285,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
           icon: '⚠',
           onConfirm: () => {
             setConfirm(null)
-            replaceToken.current = true
+            replaceToken.current[box] = true
             void advance(1)
           },
         })

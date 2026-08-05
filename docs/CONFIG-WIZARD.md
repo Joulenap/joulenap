@@ -112,8 +112,9 @@ matching each storage to a registered server by host *and* datastore. The map is
 merged, so a storage you removed on the Proxmox side disappears here too — and if that would
 leave an existing route without a mapping the save is refused and nothing changes.
 
-Re-running the Add-PVE wizard is **not** the way to do this: it only ever creates, so it
-refuses a host that is already registered — after having already provisioned a token.
+Re-running the Add-PVE wizard is **not** the way to do this: it only ever creates, so it refuses a
+host that is already registered. The refusal happens at the connection step, before any credentials
+leave the browser and before anything is provisioned.
 
 
 ## Sync routes need one extra grant

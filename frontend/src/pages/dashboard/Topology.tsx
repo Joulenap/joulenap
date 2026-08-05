@@ -294,8 +294,8 @@ function PveCard({
   const nodes = guests && !guests.error ? new Set(guests.guests.map((g) => g.node)).size : 0
   const sub = nodes
     ? nodes > 1
-      ? t('dashboard.pveCluster', { nodes, guests: guests?.guests.length ?? 0 })
-      : t('dashboard.pveStandalone', { guests: guests?.guests.length ?? 0 })
+      ? t('dashboard.pveCluster', { nodes, count: guests?.guests.length ?? 0 })
+      : t('dashboard.pveStandalone', { count: guests?.guests.length ?? 0 })
     : pve.host
 
   return (
