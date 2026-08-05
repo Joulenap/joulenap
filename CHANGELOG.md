@@ -45,8 +45,8 @@ consecutive routes across them can sleep and wake that machine once more than st
   did not ask to keep it on. So two routes an hour apart on the same box wake it once, and a sync
   route wakes both boxes and releases them independently. The power-off step in the run timeline
   says which of those happened.
-- **A rebuilt interface.** The homepage is now an operations view: a live topology of your hosts and
-  backup servers with the routes drawn between them, the route strip where routes are created,
+- **A rebuilt interface.** The homepage is now an operations view: a live backup map of your hosts
+  and backup servers with the routes drawn between them, the route strip where routes are created,
   edited, paused and run by hand, what is coming up next, and a run history whose rows expand into a
   per-step timeline with the PVE/PBS task output streaming underneath. Settings became five tabs
   (Devices, Account, Notifications, Integrations, Advanced) with a device card and edit modal for

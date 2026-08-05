@@ -268,7 +268,7 @@ Once the UI is up at `http://<host>:8080` (same for every install path):
 
 ## Around the interface
 
-Day-to-day you'll live on the **homepage**: the topology of your hosts and backup servers, the
+Day-to-day you'll live on the **homepage**: the backup map of your hosts and backup servers, the
 route strip (where you create, edit, pause and manually run routes), what's coming up next, the run
 history with its per-step timeline and live task output, and the per-server power and GC/verify
 buttons. Everything else sits behind **Settings**:

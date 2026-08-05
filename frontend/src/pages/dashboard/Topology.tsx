@@ -153,7 +153,7 @@ export function Topology({
   return (
     <section className="panel">
       <div className="panel-hd">
-        <h2>{t('dashboard.topology')}</h2>
+        <h2>{t('dashboard.backupMap')}</h2>
         <div className="rlegend">
           {routes.map((route) => (
             <LegendPill

@@ -117,7 +117,7 @@ routes: []
 # routes:
 #   - id: nightly
 #     name: Nightly backup
-#     color: "#f5a524"        # the route's colour in the topology diagram
+#     color: "#f5a524"        # the route's colour in the backup map
 #     enabled: true
 #     notify: true            # send notifications for this route (channels are global, below)
 #     kind: backup            # backup | sync | external | verify
