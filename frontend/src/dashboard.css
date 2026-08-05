@@ -577,8 +577,17 @@
   color: var(--jn-text);
   background: color-mix(in srgb, var(--jn-accent) 9%, transparent);
 }
+/* 10 rows before it scrolls: 28px header + 10 × 39px (8+8 padding + the 22px status pill
+   + 1px divider) — keep in step if the cell padding or the pill changes. */
 .table-scroll {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 418px;
+}
+/* An expanded row carries the steps + task log: too tall to read through a 12-row window,
+   so RunHistory lifts the cap for as long as one is open. */
+.table-scroll.uncapped {
+  max-height: none;
 }
 .htable {
   width: 100%;
@@ -594,6 +603,12 @@
   color: var(--jn-text-faint);
   padding: 4px 16px 8px;
   border-bottom: 1px solid var(--jn-border-soft);
+  /* Pinned while the rows scroll. A collapsed border does not travel with a sticky cell
+     (it is painted by the table), so the rule is redrawn as an inset shadow. */
+  position: sticky;
+  top: 0;
+  background: var(--jn-panel);
+  box-shadow: inset 0 -1px 0 var(--jn-border-soft);
 }
 .htable td {
   padding: 8px 16px;

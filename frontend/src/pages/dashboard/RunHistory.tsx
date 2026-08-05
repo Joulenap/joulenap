@@ -73,7 +73,7 @@ export function RunHistory({
       {shown.length === 0 ? (
         <div className="panel-empty">{t('dashboard.noRuns')}</div>
       ) : (
-        <div className="table-scroll">
+        <div className={`table-scroll${open !== null ? ' uncapped' : ''}`}>
           <table className="htable">
             <thead>
               <tr>

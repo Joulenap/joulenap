@@ -34,7 +34,7 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
         <span style={colHead}>{t('dashboard.colLevel')}</span>
         <span style={colHead}>{t('dashboard.colMessage')}</span>
       </div>
-      <div>
+      <div className="jn-log-list">
         {logs.length === 0 && (
           <div style={{ padding: '14px 18px', fontSize: 13, color: c.textFaint }}>{t('dashboard.noLogs')}</div>
         )}

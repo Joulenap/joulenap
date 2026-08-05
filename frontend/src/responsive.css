@@ -63,6 +63,12 @@
   display: grid;
   grid-template-columns: 84px 96px 1fr;
 }
+/* 60 events is a tall page; scroll them. 12 rows of 34.5px (7+7 padding + 13px text at
+   the shell's 1.5 line-height + 1px divider) — keep in step if the row padding changes. */
+.jn-log-list {
+  max-height: 414px;
+  overflow-y: auto;
+}
 
 /* Settings. M11 replaced the left sidebar with top tabs, so .jn-settings-nav / -navbtn /
    -rail / -hint went with it (grepped: no other consumer). What is left is the pane
