@@ -306,7 +306,9 @@
     "tokenExists": {
       "title": "Quel nome di token è già in uso",
       "message": "Su questo server esiste già un token API chiamato “joulenap”. Il suo segreto viene mostrato solo alla creazione, quindi Joulenap non può riutilizzarlo: può solo sostituirlo. Tutto ciò che usa ancora quel token smette di funzionare all’istante — su un host Proxmox di solito è la voce di storage del backup server, e quindi tutti i backup che ci passano. Sostituiscilo solo se sei sicuro che nessun altro lo usi.",
-      "confirm": "Sostituisci il token"
+      "confirm": "Sostituisci il token",
+      "usedByDevice": "«{{id}}» in Joulenap si autentica già su questo server: sostituire il token lo rompe.",
+      "usedByStorage": "Lo storage «{{storage}}» su «{{pve}}» si autentica su questo server con quel token, quindi i backup che ci passano inizierebbero a fallire."
     },
     "cred": {
       "root": "Root temporaneo (consigliato)",
@@ -373,7 +375,8 @@
       "installNeedsRoot": "L'installazione automatica della chiave richiede le credenziali root. Passa a root temporaneo, oppure disattiva l'opzione e incolla la riga a mano.",
       "hostKeyNotTrusted": "Conferma prima la host key del PBS — la password di root viene inviata solo su una connessione la cui host key è stata verificata.",
       "pbsUnreachable": "Il PBS non è raggiungibile a quell'host e porta. Verifica che sia acceso e che l'indirizzo sia corretto, poi riprova.",
-      "macNotDetected": "Impossibile rilevare automaticamente l'indirizzo MAC — inseriscilo manualmente."
+      "macNotDetected": "Impossibile rilevare automaticamente l'indirizzo MAC — inseriscilo manualmente.",
+      "alreadyRegistered": "Questo indirizzo è già registrato come «{{id}}». Modifica quel dispositivo invece di aggiungerlo di nuovo: ne sostituiresti il token API lasciando l’originale senza accesso."
     }
   },
   "settings": {

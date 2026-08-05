@@ -13,6 +13,7 @@ import {
   validateFinalDevice,
 } from '../utils/wizardFlow'
 import { WizardShell } from './WizardShell'
+import { tokenConflictMessage } from './tokenConflict'
 import { CredentialFields, ErrorText, NumField, TextField } from './fields'
 import { ManagedPowerToggle, SshKeyFields, WakeFields, usePbsSetup } from './pbsSetup'
 
@@ -137,7 +138,7 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
     setFailed(null)
     if (dir === 1) {
       if (step === 0) {
-        const problems = validateConnectStep(draft, existing)
+        const problems = validateConnectStep(draft, existing, config?.pbss ?? [])
         if (problems.length) {
           setErrors(problems)
           return
@@ -169,9 +170,11 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
       // they can say whether replacing it (and breaking whatever else holds that secret)
       // is what they want.
       if (e instanceof ApiError && e.status === 409) {
+        const host = draft.host.trim()
+        const message = await tokenConflictMessage(host, t, config?.pves ?? [], config?.pbss ?? [])
         setConfirm({
           title: t('wizard.tokenExists.title'),
-          message: t('wizard.tokenExists.message'),
+          message,
           confirmLabel: t('wizard.tokenExists.confirm'),
           danger: true,
           icon: '⚠',

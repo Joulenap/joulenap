@@ -1264,6 +1264,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         : { ok: true, detail: 'datastore backup: 62% used' }
   }
   const devStorages = /^\/devices\/pves\/([^/]+)\/storages$/.exec(bare)
+  if (devStorages && method === 'GET') {
+    body = [{ storage: 'pbs', host: '192.168.1.30', port: 8007, datastore: 'backup', fingerprint: '' }]
+  }
   if (devStorages && method === 'POST') {
     body = { storages: CONFIG.pves.find((p) => p.id === devStorages[1])?.storages ?? {} }
   }

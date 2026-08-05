@@ -77,7 +77,17 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
           </div>
           <span id={titleId} style={{ fontSize: 17, fontWeight: 700 }}>{state.title}</span>
         </div>
-        <p id={msgId} style={{ margin: '0 0 20px', fontSize: 14, lineHeight: 1.55, color: c.textMid }}>
+        {/* pre-line so a message can list what it is warning about, one item per line. */}
+        <p
+          id={msgId}
+          style={{
+            margin: '0 0 20px',
+            fontSize: 14,
+            lineHeight: 1.55,
+            color: c.textMid,
+            whiteSpace: 'pre-line',
+          }}
+        >
           {state.message}
         </p>
         {state.toggle && (

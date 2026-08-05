@@ -206,6 +206,13 @@ export const api = {
   // A failure is a 502 with the reason, not a 200 with ok:false.
   testDevice: (kind: DeviceKind, id: string) =>
     req<DeviceTestResult>('POST', `/devices/${kind}/${encodeURIComponent(id)}/test`),
+  // What this PVE reports having, without writing anything — used to warn about a token
+  // replacement that would break one of its storage entries.
+  pveStorages: (id: string) =>
+    req<{ storage: string; host: string; port: number; datastore: string; fingerprint: string }[]>(
+      'GET',
+      `/devices/pves/${encodeURIComponent(id)}/storages`,
+    ),
   // Re-read a PVE's PBS-backed storages and relink them. The map is discovered, never
   // typed, and this is the only way to refresh it once the device exists.
   refreshPveStorages: (id: string) =>

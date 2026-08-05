@@ -65,6 +65,34 @@ Everything above is still discovered with a read-only token; only these become m
 > ```
 
 
+## Adding a box you already have
+
+An API token belongs to one server: `root@pam!joulenap` on one machine has nothing to do with a
+token of the same name on another. **Adding a second Proxmox host or a second backup server
+therefore cannot disturb the ones you already have** — different box, different token.
+
+The one thing that can go wrong is pointing a wizard at a box that *already* has a token by that
+name, because a token's secret exists only at creation: the only way to get a usable one under a
+name in use is to replace it, and every other holder of the old secret breaks silently.
+
+Joulenap now heads that off from both sides:
+
+- **The same box, already registered** is refused at the connection step, before any password or
+  token is sent, naming the device you already have. Adding it again would have replaced its
+  token and left the original entry unable to connect. Edit that device instead. (A backup
+  server serving a *second datastore* is a legitimate second device and is still allowed — it
+  shares a token with the first, so the warning below applies to it.)
+- **The same box, used by something else**: replacing the token asks first, and the confirmation
+  names what Joulenap can see would break — another of its own devices on that host, and any
+  Proxmox host whose PBS storage entry authenticates with it. That last one is the dangerous
+  case: the storage keeps its old secret and every backup through it starts failing with 401,
+  with nothing pointing at the token as the cause.
+
+Joulenap cannot see *every* holder of a token — a script of your own, another tool, a second
+Proxmox host it does not manage. If you have any of those, use **Existing API token** and paste
+the secret you already have, or give Joulenap a token of its own under a different name.
+
+
 ## A backup server added after its Proxmox host
 
 `pves[].storages` — which PVE storage points at which backup server — is discovered, never

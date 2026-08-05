@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ValidationError
 
 from ..config import PbsDevice, PveDevice, RedactionError, redact, restore_secrets_from
-from ..connectors.discovery import match_storages_to_pbss
+from ..connectors.discovery import derive_pbs_from_storage, match_storages_to_pbss
 from ..connectors.errors import ConnectorError, WolError
 from ..core.config_store import ConfigStore
 from ..db.models import RunTrigger
@@ -206,6 +206,41 @@ def test_device(
 class StoragesResult(BaseModel):
     #: The rebuilt ``{pbs_device_id: pve_storage_id}`` map, as saved.
     storages: dict[str, str]
+
+
+class PveStorage(BaseModel):
+    """One PBS-backed storage as the Proxmox host itself describes it."""
+
+    storage: str
+    host: str
+    port: int
+    datastore: str
+    fingerprint: str
+
+
+@router.get("/pves/{pve_id}/storages", response_model=list[PveStorage])
+def list_storages(
+    pve_id: str,
+    store: ConfigStore = Depends(get_config_store),
+    job_service: JobService = Depends(get_job_service),
+) -> list[PveStorage]:
+    """This host's PBS-backed storages, as discovered — nothing is written.
+
+    The stored ``storages`` map only names backup servers that are *already* devices, so it
+    cannot answer "does this Proxmox host already back up to the box I am about to add?".
+    That question has to be asked of the host, and the answer decides whether replacing an
+    API token on that box would break a storage entry nobody would think to look at.
+    """
+    index = _find(store, "pves", pve_id)
+    device = store.config.pves[index]
+    try:
+        with job_service.deps.connect_pve(device) as client:
+            storages = client.list_pbs_storages()
+    except ConnectorError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return [
+        PveStorage(storage=s.get("storage", ""), **derive_pbs_from_storage(s)) for s in storages
+    ]
 
 
 @router.post("/pves/{pve_id}/storages", response_model=StoragesResult)

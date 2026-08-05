@@ -19,6 +19,7 @@ import {
   validateFinalDevice,
 } from '../utils/wizardFlow'
 import { WizardShell } from './WizardShell'
+import { tokenConflictMessage } from './tokenConflict'
 import { CredentialFields, ErrorText, NumField, TextField } from './fields'
 import { ManagedPowerToggle, SshKeyFields, WakeFields, usePbsSetup } from './pbsSetup'
 
@@ -135,7 +136,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
    * device would be created with an empty token — a 200 OK that quietly stores nothing usable.
    */
   async function provisionPbs(): Promise<{ id: string; secret: string } | null> {
-    const problems = validateConnectStep(pbs, pbsIds)
+    const problems = validateConnectStep(pbs, pbsIds, registered)
     if (problems.length) {
       setErrors(problems)
       return null
@@ -228,7 +229,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
     setFailed(null)
     if (dir === 1) {
       if (step === 0) {
-        const problems = validateConnectStep(pve, pveIds)
+        const problems = validateConnectStep(pve, pveIds, config?.pves ?? [])
         if (problems.length) {
           setErrors(problems)
           return
@@ -269,9 +270,11 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       // can say whether replacing it — and breaking whatever else holds that secret, very
       // likely this PVE's own PBS storage entry — is what they want.
       if (e instanceof ApiError && e.status === 409) {
+        const host = (step === 0 ? pve.host : pbs.host).trim()
+        const message = await tokenConflictMessage(host, t, config?.pves ?? [], registered)
         setConfirm({
           title: t('wizard.tokenExists.title'),
-          message: t('wizard.tokenExists.message'),
+          message,
           confirmLabel: t('wizard.tokenExists.confirm'),
           danger: true,
           icon: '⚠',

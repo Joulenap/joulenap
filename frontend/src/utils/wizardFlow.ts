@@ -273,6 +273,76 @@ export function pbsDeviceFrom(draft: PbsDraft, token: { id: string; secret: stri
   }
 }
 
+// --- who already lives on this address ----------------------------------------------
+
+/** The parts of a registered device these checks compare against. */
+export interface DeviceRef {
+  id: string
+  host: string
+  port: number
+  /** Backup servers only — one host can legitimately serve several datastores. */
+  datastore?: string
+}
+
+const sameHost = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/**
+ * The id of the device this draft would duplicate, if any.
+ *
+ * Adding a box that is already registered is always a mistake — the user wanted Edit — and an
+ * expensive one: the id is auto-picked so it never collides, the save succeeds, and root-mode
+ * provisioning replaces the API token on that host, leaving the *original* device holding a
+ * secret that no longer works. Caught before any credential is sent.
+ *
+ * A backup server is only a duplicate when the datastore matches too: one PBS serving two
+ * datastores is two devices by design. That case still shares a token, which is what
+ * `devicesOnHost` warns about separately.
+ */
+export function sameDevice(draft: PveDraft | PbsDraft, registered: DeviceRef[]): string | null {
+  const host = draft.host.trim()
+  if (!host) return null
+  const datastore = 'datastore' in draft ? draft.datastore.trim() : undefined
+  const hit = registered.find(
+    (d) =>
+      sameHost(d.host, host) &&
+      d.port === draft.port &&
+      (datastore === undefined || d.datastore === datastore),
+  )
+  return hit?.id ?? null
+}
+
+/** Registered devices sharing this host — they authenticate with a token on the same box. */
+export function devicesOnHost(host: string, registered: DeviceRef[]): string[] {
+  return registered.filter((d) => sameHost(d.host, host)).map((d) => d.id)
+}
+
+/**
+ * Everything Joulenap can see that would stop working if the token on ``host`` is replaced.
+ *
+ * A token's secret exists only at creation, so replacing one is the only way to get a usable
+ * secret under a name already in use — and every other holder of the old one breaks silently.
+ * Joulenap cannot enumerate them all (a script, another tool, a second Proxmox host), but the
+ * two it *can* see are exactly the two that bit us: another device of its own on the same box,
+ * and a Proxmox host whose PBS storage entry authenticates to it.
+ *
+ * `storages` is what each registered Proxmox host reports, keyed by device id — the stored
+ * `storages` map cannot answer this, because it only names servers that are already devices.
+ */
+export function tokenConflictVictims(
+  host: string,
+  registered: DeviceRef[],
+  storages: Record<string, { storage: string; host: string }[]>,
+): { devices: string[]; storages: { pve: string; storage: string }[] } {
+  const devices = devicesOnHost(host, registered)
+  const hits: { pve: string; storage: string }[] = []
+  for (const [pve, list] of Object.entries(storages)) {
+    for (const s of list) {
+      if (sameHost(s.host, host)) hits.push({ pve, storage: s.storage })
+    }
+  }
+  return { devices, storages: hits }
+}
+
 // --- per-step validation -----------------------------------------------------------
 
 /**
@@ -285,11 +355,16 @@ export function pbsDeviceFrom(draft: PbsDraft, token: { id: string; secret: stri
 export function validateConnectStep(
   draft: PveDraft | PbsDraft,
   existing: string[],
+  registered: DeviceRef[] = [],
 ): DeviceError[] {
   const errors: DeviceError[] = []
   const idError = validateDeviceId(draft.id, existing)
   if (idError) errors.push(idError)
   if (!draft.host.trim()) errors.push({ field: 'host', key: 'settings.devices.errHost' })
+  const already = sameDevice(draft, registered)
+  if (already) {
+    errors.push({ field: 'host', key: 'wizard.err.alreadyRegistered', params: { id: already } })
+  }
   if (draft.port < 1 || draft.port > 65535) {
     errors.push({ field: 'port', key: 'settings.devices.errPort' })
   }

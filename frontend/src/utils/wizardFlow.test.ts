@@ -15,6 +15,7 @@ import {
   pbsDeviceFrom,
   pveDeviceFrom,
   slugifyId,
+  tokenConflictVictims,
   validateConnectStep,
   validateDeviceId,
   validateFinalDevice,
@@ -264,4 +265,65 @@ test('the connect step refuses a duplicate or malformed id', () => {
   const draft = { ...freshPveDraft([]), id: 'pve-alpha', host: 'h', password: 'pw' }
   assert.equal(validateConnectStep(draft, ['pve-alpha'])[0].key, 'wizard.err.idTaken')
   assert.equal(validateConnectStep({ ...draft, id: 'Bad' }, [])[0].key, 'wizard.err.idPattern')
+})
+
+// --- adding a box that is already registered ---------------------------------
+
+test('a backup server already registered is refused before any credential is sent', () => {
+  // The id is auto-picked so it never collides, which is what made this dangerous: the save
+  // would succeed, and root-mode provisioning would replace the token on that host — leaving
+  // the *original* device holding a secret that no longer works.
+  const draft = { ...freshPbsDraft(['pbs-01']), host: 'PBS.lan ', datastore: 'backup' }
+  const errors = validateConnectStep(draft, ['pbs-01'], [
+    { id: 'pbs-01', host: 'pbs.lan', port: 8007, datastore: 'backup' },
+  ])
+  const err = errors.find((e) => e.key === 'wizard.err.alreadyRegistered')
+  assert.ok(err, 'expected the duplicate-host refusal')
+  assert.deepEqual(err.params, { id: 'pbs-01' })
+})
+
+test('the same backup server with a different datastore is a legitimate second device', () => {
+  // One box can serve several datastores, and each is its own device as far as routes go.
+  const draft = { ...freshPbsDraft(['pbs-01']), host: 'pbs.lan', datastore: 'archive' }
+  const errors = validateConnectStep(draft, ['pbs-01'], [
+    { id: 'pbs-01', host: 'pbs.lan', port: 8007, datastore: 'backup' },
+  ])
+  assert.equal(errors.find((e) => e.key === 'wizard.err.alreadyRegistered'), undefined)
+})
+
+test('a Proxmox host is a duplicate on address alone — it has no datastore to differ by', () => {
+  const draft = { ...freshPveDraft(['pve']), host: 'pve.lan' }
+  const errors = validateConnectStep(draft, ['pve'], [{ id: 'pve', host: 'pve.lan', port: 8006 }])
+  assert.equal(errors.find((e) => e.key === 'wizard.err.alreadyRegistered')?.field, 'host')
+})
+
+test('a different port is a different server', () => {
+  const draft = { ...freshPveDraft(['pve']), host: 'pve.lan', port: 8007 }
+  const errors = validateConnectStep(draft, ['pve'], [{ id: 'pve', host: 'pve.lan', port: 8006 }])
+  assert.equal(errors.find((e) => e.key === 'wizard.err.alreadyRegistered'), undefined)
+})
+
+// --- who breaks if a token is replaced ---------------------------------------
+
+test('a token replacement names the devices and storages it would break', () => {
+  // The storage entry is the one that actually caused an outage: a Proxmox host authenticates
+  // to the backup server with the very token about to be replaced, and nobody thinks to look
+  // there when backups start failing with 401.
+  const victims = tokenConflictVictims(
+    '192.0.2.20',
+    [{ id: 'pbs-01', host: '192.0.2.20', port: 8007, datastore: 'backup' }],
+    {
+      pve: [
+        { storage: 'pbs', host: '192.0.2.20' },
+        { storage: 'unrelated', host: '192.0.2.99' },
+      ],
+    },
+  )
+  assert.deepEqual(victims.devices, ['pbs-01'])
+  assert.deepEqual(victims.storages, [{ pve: 'pve', storage: 'pbs' }])
+})
+
+test('nothing to warn about when no one else uses that host', () => {
+  const victims = tokenConflictVictims('192.0.2.50', [], { pve: [] })
+  assert.deepEqual(victims, { devices: [], storages: [] })
 })

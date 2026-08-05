@@ -154,7 +154,8 @@ Everything is served under `/api`. Auth is a signed **session cookie** started b
 | PUT | `/api/devices/{kind}/{device_id}` | update one |
 | DELETE | `/api/devices/{kind}/{device_id}` | delete one — **409 naming the routes** still using it |
 | POST | `/api/devices/{kind}/{device_id}/test` | live connection test (502 with the reason on failure) |
-| POST | `/api/devices/pves/{pve_id}/storages` | re-read this PVE's PBS-backed storages and relink them to registered devices, replacing the map (502 on a connector failure; 422 if the result would orphan a route) |
+| GET | `/api/devices/pves/{pve_id}/storages` | this PVE's PBS-backed storages as it reports them, nothing written (502 on a connector failure) |
+| POST | `/api/devices/pves/{pve_id}/storages` | re-read them and relink to registered devices, replacing the map (502 on a connector failure; 422 if the result would orphan a route) |
 | POST | `/api/devices/pbss/{pbs_id}/power` | `{action: "wake" \| "poweroff"}` |
 | POST | `/api/devices/pbss/{pbs_id}/gc` | queue an ad-hoc GC on this box (optional `{keep_on}`) |
 | POST | `/api/devices/pbss/{pbs_id}/verify` | queue an ad-hoc verification on this box |
