@@ -121,7 +121,10 @@ happen, and the first run of each route restores its badge.
   silently invalidating it for everything else using it, typically the backup server's storage
   entry on a Proxmox host, and therefore every backup through it. Replacing a token is now
   something you confirm, and the confirmation says what breaks. A create rejected for any other
-  reason no longer takes a live token down with it.
+  reason no longer takes a live token down with it. Reaching that replacement by accident is closed
+  off too: a wizard pointed at a host that is already registered is refused at the connection step,
+  before any credentials leave the browser, naming the device that already has it. A backup server
+  serving a second datastore is still a legitimate second device and is still allowed.
 - **A backup server registered after its Proxmox host could never receive backups.** Which PVE
   storage points at which server is discovered, not typed, and only the Add-PVE wizard ever
   discovered it — so a server added afterwards stayed unlinked, with no way to fix it in the
