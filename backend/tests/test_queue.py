@@ -320,6 +320,65 @@ def test_a_sync_route_releases_the_box_that_did_wake_when_the_other_does_not(
     assert seen and seen[0].left_on == ["pbs2"]
 
 
+def test_stopping_a_run_mid_wake_still_powers_the_woken_box_off(temp_config, temp_db):
+    """The user stopped the run while the box was booting — someone still has to close it.
+
+    The magic packet was already on the wire, so the PBS comes up regardless. ``acquire``
+    registered no holder (it only did so on success), so ``_release_all`` got an empty list:
+    no POWEROFF step, no release, and a machine left running until somebody noticed it. The
+    stop dialog's power-off toggle had nothing to act on.
+    """
+    # probe: down -> the wake wait: still down, and cancelled by then -> the grace wait: up.
+    service, box = make_service(FakeBox(reachable=[False, False, True]))
+    ran: list[int] = []
+    seen: list[RunContext] = []
+    service.deps.notify = seen.append
+
+    packet = service.lease._deps.send_wol
+
+    def wol_then_stop(pbs) -> None:
+        # Exactly where a real Stop lands: after the packet, during the wait for the box.
+        packet(pbs)
+        assert service.cancel(service._current_run_id, power_off=True) is True
+
+    service.lease._deps.send_wol = wol_then_stop
+
+    enqueue(service, "r1", lambda *_a: ran.append(1), trigger=RunTrigger.MANUAL)
+    drain(service)
+
+    assert ran == []  # a stopped run never starts its cycle
+    assert box.wol == ["pbs1"]  # one packet: no retry ladder after the stop
+    assert box.poweroffs == ["pbs1"]
+    assert seen == []  # a stopped run stays silent on purpose
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        assert run.status == RunStatus.ABORTED
+        step = next(s for s in run.steps if s.name == StepName.POWEROFF)
+        assert step.detail_key == ReleaseOutcome.POWERED_OFF.key
+
+
+def test_stopping_a_run_mid_wake_honours_keeping_the_box_on(temp_config, temp_db):
+    """The same path with the stop dialog's toggle off: the box is leased and released, but
+    deliberately left running — the usual reason to stop a run is to go and work on it."""
+    service, box = make_service(FakeBox(reachable=[False, False, True]))
+    packet = service.lease._deps.send_wol
+
+    def wol_then_stop(pbs) -> None:
+        packet(pbs)
+        service.cancel(service._current_run_id, power_off=False)
+
+    service.lease._deps.send_wol = wol_then_stop
+
+    enqueue(service, "r1", lambda *_a: None, trigger=RunTrigger.MANUAL)
+    drain(service)
+
+    assert box.poweroffs == []
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        step = next(s for s in run.steps if s.name == StepName.POWEROFF)
+        assert step.detail_key == ReleaseOutcome.LEFT_ON.key
+
+
 # --- what the run reports as left powered on ---------------------------------
 #
 # "PBS left powered on" is the notification's energy warning, so it must fire exactly when

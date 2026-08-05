@@ -336,9 +336,18 @@ class JobService:
                         ctx.left_on = left_on
                         self._notify(ctx, recorder)
                     return
-                # The cycle sets the run's final status itself and hands back what to say
-                # about it (None = cancelled, say nothing).
-                ctx = item.job(config, subject, recorder, self.deps)
+                if self._cancel.is_set():
+                    # Stopped while the boxes were coming up. They are leased now — the
+                    # release below is what puts them back to sleep — but there is nothing
+                    # left to run, and the cycle's first act is I/O against a server that
+                    # booted seconds ago. Letting it start meant an error there filed the run
+                    # FAILURE and notified about it, for a run the user stopped by hand.
+                    recorder.finish(RunStatus.ABORTED, error=LocalizedError("cancelled"))
+                    ctx = None
+                else:
+                    # The cycle sets the run's final status itself and hands back what to say
+                    # about it (None = cancelled, say nothing).
+                    ctx = item.job(config, subject, recorder, self.deps)
                 left_on = self._release_all(item, held, recorder, multi=multi)
                 held = []
                 if ctx is not None:

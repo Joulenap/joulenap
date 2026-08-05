@@ -53,14 +53,33 @@ def test_wake_is_retried_wol_retries_times_then_fails():
     assert lease.state("pbs1").holders == 0  # a failed acquire registers no holder
 
 
-def test_a_cancelled_wake_stops_early_and_says_so():
+def test_a_run_stopped_before_the_wake_sends_no_packet():
+    """Nobody has to clean up a box we never woke. This used to fire the packet anyway and
+    then abandon it — so a stopped run left a machine booting with no lease on it, and
+    nothing that would ever put it back to sleep."""
     box = FakeBox(reachable=False)
     lease = PowerLease(box.deps(), cancelled=lambda: True)
 
     with pytest.raises(PbsUnreachableError, match="Cancelled"):
         lease.acquire(make_pbs())
 
-    assert box.wol == ["pbs1"]  # not the full retry ladder
+    assert box.wol == []
+    assert lease.state("pbs1").holders == 0
+
+
+def test_a_cancel_after_the_packet_sees_the_wake_through():
+    """Once the magic packet is out the box is coming up whatever we decide, so finish the
+    wait and hand the caller a holder: releasing that lease is the only thing that powers the
+    box down again. Bounded by what is left of the interrupted attempt, never a fresh one."""
+    box = FakeBox(reachable=[False, False, True])
+    # Cancelled from the moment the first packet goes out.
+    lease = PowerLease(box.deps(), cancelled=lambda: bool(box.wol))
+
+    assert lease.acquire(make_pbs()) is False  # we woke it
+
+    assert box.wol == ["pbs1"]  # no second attempt after the stop
+    assert len(box.waits) == 3  # instant probe, the cancelled wait, the grace wait
+    assert lease.state("pbs1").holders == 1
 
 
 def test_second_holder_does_not_probe_or_wake():

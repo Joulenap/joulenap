@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import ssl
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -253,8 +254,16 @@ class PowerLease:
     # --- internals -----------------------------------------------------------
 
     def _bring_up(self, pbs: PbsDevice) -> bool:
-        """Get the box answering, waking it if we are allowed to. Returns ``was_awake``."""
-        if self._deps.wait_reachable(pbs, 0, self._cancelled):
+        """Get the box answering, waking it if we are allowed to. Returns ``was_awake``.
+
+        Whoever sends the magic packet owns the box until someone releases it, so this method
+        holds one rule either side of that packet: don't send one for a run that is already
+        stopping, and once one is sent, see the wake through so ``acquire`` can hand the
+        caller a lease. Everything that puts a box back to sleep hangs off that lease.
+        """
+        # No cancel probe on the instant check: there is no wait to abandon, and poisoning it
+        # made an already-awake box read as asleep — which then earned it a magic packet.
+        if self._deps.wait_reachable(pbs, 0):
             return True
         if not pbs.managed_power:
             raise PbsUnreachableError(
@@ -262,17 +271,32 @@ class PowerLease:
                 "not manage its power (managed_power: false) so it cannot wake it — turn the "
                 "box on, or enable managed power for this device."
             )
+        if self._cancelled():
+            # Stopped before we woke anything: send nothing, so there is nothing to clean up.
+            raise PbsUnreachableError("cancelled_waiting", pbs=pbs.id)
 
         # Total wake attempts = wol_retries + 1: a dropped packet or a slow boot shouldn't
         # fail the whole run.
         attempts = pbs.wol_retries + 1
         for attempt in range(1, attempts + 1):
+            started = time.monotonic()
             self._deps.send_wol(pbs)
             if self._deps.wait_reachable(pbs, pbs.wait_timeout, self._cancelled):
                 return False
             # A cancelled wait returns False exactly like a timeout, so check *why* before
             # burning the remaining attempts on a run the user already stopped.
             if self._cancelled():
+                # Our packet is already on the wire: the box is coming up whatever we do now.
+                # Wait it out — without the cancel probe, which would return instantly — so
+                # the caller gets a lease to release, because that release is the only thing
+                # that will ever put the box back to sleep. Bounded by what is left of *this*
+                # attempt, so stopping a run never costs more than the wake it interrupted.
+                grace = pbs.wait_timeout - (time.monotonic() - started)
+                if grace > 0 and self._deps.wait_reachable(pbs, grace):
+                    return False
+                # ponytail: a box that answers after the grace stays on until someone
+                # notices. Catching that needs the wake remembered across runs — a lease in
+                # SQLite — which is a bigger change than the case deserves.
                 raise PbsUnreachableError("cancelled_waiting", pbs=pbs.id)
             if attempt < attempts:
                 log.warning(
