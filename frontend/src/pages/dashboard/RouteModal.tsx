@@ -7,7 +7,7 @@ import { Modal } from '../../components/Modal'
 import { Toggle } from '../../components/Toggle'
 import { useRegisterDirty, useUnsavedGuard } from '../../shell/UnsavedGuard'
 import { guestTypeLabel, type PveGuests } from '../../utils/guestPanel'
-import { pbsNodeId, pveNodeId, routeKindBadge } from '../../utils/routes'
+import { deviceId, pbsNodeId, pveNodeId, routeKindBadge } from '../../utils/routes'
 import {
   ROUTE_COLORS,
   type FieldError,
@@ -349,7 +349,9 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                   {draft.sourceIds.map((id, i) => (
                     <Fragment key={id}>
                       {i > 0 && <span className="arrow">+</span>}
-                      <span className="chip-s">{id}</span>
+                      {/* The draft holds kind-prefixed keys so a PVE and a PBS can share
+                          an id; the preview shows the device, not the key. */}
+                      <span className="chip-s">{deviceId(id)}</span>
                     </Fragment>
                   ))}
                   <svg width="46" height="10" aria-hidden="true">

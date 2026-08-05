@@ -14,6 +14,12 @@ Joulenap is no longer built around one Proxmox host backing up to one backup ser
 configurations are converted automatically on the first start; see Changed below for the one
 conversion that is lossy, and for the two breaking changes outside the interface.
 
+**After upgrading, expect one alarming-looking display that is not a problem.** Backup history is
+tracked per route, and the conversion gives your old schedule new route ids, so *Last backup per
+guest* reads "never" for every guest and the converted routes read "never run" — with all the old
+runs still listed underneath. Nothing has been lost: the caches fill in again per guest as runs
+happen, and the first run of each route restores its badge.
+
 ### Added
 
 - **Routes.** A route is one scheduled flow of backup data between devices: sources, a target, its
@@ -101,6 +107,27 @@ conversion that is lossy, and for the two breaking changes outside the interface
 
 ### Fixed
 
+- **Stopping a run while a backup server was still coming up left it running.** The magic packet
+  had already gone out, but the lease that decides when a box goes back to sleep was only taken
+  once the box answered — so a run stopped during the wake had nothing to release, recorded no
+  power-off step, and left the machine on until somebody noticed, whatever the stop dialog's
+  power-off toggle said. On a route with more than one server it was worse: once stopped, the
+  reachability check for the next box returned "unreachable" without touching the network, and
+  Joulenap woke a machine nobody had asked for. A run stopped during the wake also no longer
+  starts its cycle, which used to file it as failed — and notify about it — if the first call to
+  a just-booted server errored.
+- **Provisioning a device replaced an API token of the same name without asking.** A token's
+  secret only exists at creation, so one that already had the name was deleted and recreated —
+  silently invalidating it for everything else using it, typically the backup server's storage
+  entry on a Proxmox host, and therefore every backup through it. Replacing a token is now
+  something you confirm, and the confirmation says what breaks. A create rejected for any other
+  reason no longer takes a live token down with it.
+- **A backup server registered after its Proxmox host could never receive backups.** Which PVE
+  storage points at which server is discovered, not typed, and only the Add-PVE wizard ever
+  discovered it — so a server added afterwards stayed unlinked, with no way to fix it in the
+  interface. Worse, both the wizard's closing warning and the device editor told you to re-run
+  the Add-PVE wizard, which provisions a token before failing on the duplicate host. Settings →
+  Devices → edit the PVE → **Re-read from Proxmox** now rebuilds the map.
 - **A sync route worked once and then never again.** Proxmox Backup Server refuses to delete a
   remote that a sync job still references, so the second run of any sync route failed. The job is
   now removed before the remote is touched. Two related failures went with it: the run and delete

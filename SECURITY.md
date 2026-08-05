@@ -71,6 +71,13 @@ sync run and **deletes it again when the run ends**, so it is not left sitting t
   device with **no fingerprint is not pinned and its certificate is not validated at all**. Joulenap
   refuses to send root credentials over such a connection, but ordinary API traffic (carrying the
   device's API token) still goes over it. Keep the fingerprint set.
+- **Where that fingerprint comes from decides what pinning is worth.** Adding a backup server
+  through a Proxmox host takes it from that host's storage configuration — a channel you have
+  already authenticated. Adding one directly reads it off the box over a connection nothing has
+  authenticated yet, which is trust on first use: an attacker already in the middle at that moment
+  would have their certificate pinned instead, and every later connection would faithfully verify
+  against it. Pinning protects everything after setup, not setup itself. On an untrusted network,
+  compare the fingerprint the wizard shows against `proxmox-backup-manager cert info` on the box.
 - **A backup server's SSH host key is verified against `data/known_hosts`.** The wizard's automatic
   key-install path shows it to you for confirmation first, and refuses to send a root password
   before you have confirmed it. Two paths do not populate `known_hosts`: installing the public key

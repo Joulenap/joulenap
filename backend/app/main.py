@@ -35,11 +35,33 @@ from .notify.messages import build_interrupted_message
 
 log = logging.getLogger("joulenap.main")
 
+#: Container log verbosity. `JOULENAP_LOG_LEVEL=DEBUG` for a noisy run.
+_LOG_LEVEL_ENV = "JOULENAP_LOG_LEVEL"
+
+
+def setup_logging() -> None:
+    """Give the app's own loggers somewhere to go.
+
+    Without this nothing configures the root logger, so every ``log.info`` in the package is
+    dropped and ``docker logs`` shows uvicorn's handful of lines and nothing else — including
+    across a 0.9 -> 1.0 config migration, which is the single riskiest thing this app ever
+    does and left no trace of having happened.
+
+    ``basicConfig`` is a no-op once handlers exist, so calling this from both entry points is
+    safe, and uvicorn's own loggers (which configure themselves) are untouched.
+    """
+    logging.basicConfig(
+        level=os.environ.get(_LOG_LEVEL_ENV, "INFO").upper(),
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    )
+
+
 #: How long shutdown waits for a startup thread. Both only make one notification round-trip, so
 #: this is generous; it exists so a black-holing channel can't hang the process on exit. Kept
 #: comfortably under Docker's 10s SIGTERM→SIGKILL grace, so a hung channel costs a slow stop
 #: rather than a killed one.
 _STARTUP_THREAD_JOIN_TIMEOUT = 5.0
+
 
 def _frontend_dir() -> Path:
     """Directory of the built SPA (Vite output) served as static files.
@@ -150,6 +172,7 @@ def _send_startup_alerts(
 
 
 def create_app() -> FastAPI:
+    setup_logging()
     # Load (or first-run create) config before building the app: the session
     # middleware needs the signing key, and routers read config via app.state.
     store = ConfigStore.load_or_create()
@@ -213,6 +236,8 @@ def run() -> None:
     """
     import uvicorn
 
+    # Before the config load below, which is where a 0.9 -> 1.0 migration runs and logs.
+    setup_logging()
     port = ConfigStore.load_or_create().config.app.port
     uvicorn.run("app.main:create_app", factory=True, host="0.0.0.0", port=port, reload=False)
 
