@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../api/client'
+import { ConfirmModal, type ConfirmState } from '../components/ConfirmModal'
 import { useConfig } from '../config/ConfigContext'
 import type { DeviceError } from '../utils/deviceForm'
 import {
@@ -38,6 +39,10 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
   const [token, setToken] = useState<{ id: string; secret: string } | null>(null)
   const [report, setReport] = useState<string[]>([])
   const [saved, setSaved] = useState(false)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  // The user's answer to "that token name is taken". A ref, not state: `connect` reads it
+  // in the same tick the confirm's handler sets it.
+  const replaceToken = useRef(false)
 
   const setup = usePbsSetup(draft, setDraft)
   const { loadKey } = setup
@@ -73,6 +78,7 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
         password: draft.password,
         datastore: draft.datastore.trim(),
         fingerprint,
+        replace_token: replaceToken.current,
       })
       setToken(minted)
     } else {
@@ -159,6 +165,24 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
       if (dir === 1 && target === 3 && !saved) await save()
       setStep(target)
     } catch (e) {
+      // 409 is the one refusal the user can overrule: the token name is taken, and only
+      // they can say whether replacing it (and breaking whatever else holds that secret)
+      // is what they want.
+      if (e instanceof ApiError && e.status === 409) {
+        setConfirm({
+          title: t('wizard.tokenExists.title'),
+          message: t('wizard.tokenExists.message'),
+          confirmLabel: t('wizard.tokenExists.confirm'),
+          danger: true,
+          icon: '⚠',
+          onConfirm: () => {
+            setConfirm(null)
+            replaceToken.current = true
+            void advance(1)
+          },
+        })
+        return
+      }
       setFailed(e instanceof ApiError ? e.message : String(e))
     } finally {
       setBusy(false)
@@ -274,6 +298,7 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
           </>
         )}
       </div>
+      <ConfirmModal state={confirm} onCancel={() => setConfirm(null)} />
     </WizardShell>
   )
 }

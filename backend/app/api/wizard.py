@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from .. import paths
 from ..connectors import net
-from ..connectors.errors import ConnectorError
+from ..connectors.errors import ConnectorError, TokenExistsError
 from ..core import wizard
 from .deps import require_auth
 
@@ -24,9 +24,16 @@ _KEY_FILENAME = "id_ed25519"
 
 
 def _connector_call(func, **kwargs) -> Any:
-    """Run a wizard helper, mapping connector failures to 502 Bad Gateway."""
+    """Run a wizard helper, mapping connector failures to 502 Bad Gateway.
+
+    ``TokenExistsError`` is the exception: nothing failed upstream, we declined to replace a
+    token the user has not agreed to lose. 409 so the wizard can tell it apart from a real
+    connection problem and offer to go ahead.
+    """
     try:
         return func(**kwargs)
+    except TokenExistsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -46,6 +53,8 @@ class PveConnectRequest(BaseModel):
     username: str | None = None
     password: str | None = None
     token_name: str = "joulenap"
+    #: The user's answer to the 409 this endpoint raises when ``token_name`` is taken.
+    replace_token: bool = False
 
 
 @router.post("/pve/connect")
@@ -61,6 +70,7 @@ def pve_connect(body: PveConnectRequest) -> dict[str, Any]:
         username=body.username,
         password=body.password,
         token_name=body.token_name,
+        replace_token=body.replace_token,
     )
 
 
@@ -114,6 +124,8 @@ class PbsProvisionRequest(BaseModel):
     datastore: str = Field(min_length=1)
     token_name: str = "joulenap"
     fingerprint: str = ""
+    #: The user's answer to the 409 this endpoint raises when ``token_name`` is taken.
+    replace_token: bool = False
 
 
 @router.post("/pbs/provision")
@@ -128,6 +140,7 @@ def pbs_provision(body: PbsProvisionRequest) -> dict[str, Any]:
         datastore=body.datastore,
         token_name=body.token_name,
         fingerprint=body.fingerprint,
+        replace_token=body.replace_token,
     )
 
 

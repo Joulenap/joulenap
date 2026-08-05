@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.connectors.errors import ApiError
+from app.connectors.errors import ApiError, TokenExistsError
 from app.core import wizard
 from app.main import create_app
 
@@ -51,6 +51,43 @@ def test_connector_error_maps_to_502(client, monkeypatch):
     monkeypatch.setattr(wizard, "pve_connect", boom)
     r = client.post("/api/wizard/pve/connect", json={"host": "pve.local"})
     assert r.status_code == 502
+
+
+def test_a_taken_token_name_is_409_not_502(client, monkeypatch):
+    """Nothing failed upstream — we declined to replace a token the user has not agreed to
+    lose. The wizard keys on the status to offer "replace it" instead of a connection error."""
+
+    def taken(**_kwargs):
+        raise TokenExistsError("An API token named 'joulenap' already exists for root@pam.")
+
+    monkeypatch.setattr(wizard, "pbs_provision", taken)
+    r = client.post(
+        "/api/wizard/pbs/provision",
+        json={"host": "pbs.local", "password": "pw", "datastore": "backup"},
+    )
+    assert r.status_code == 409
+    assert "already exists" in r.json()["detail"]
+
+
+def test_replace_token_is_forwarded(client, monkeypatch):
+    captured = {}
+
+    def fake_provision(**kwargs):
+        captured.update(kwargs)
+        return {"id": "root@pam!joulenap", "secret": "s"}
+
+    monkeypatch.setattr(wizard, "pbs_provision", fake_provision)
+    r = client.post(
+        "/api/wizard/pbs/provision",
+        json={
+            "host": "pbs.local",
+            "password": "pw",
+            "datastore": "backup",
+            "replace_token": True,
+        },
+    )
+    assert r.status_code == 200
+    assert captured["replace_token"] is True
 
 
 def test_pbs_check_passes_through(client, monkeypatch):

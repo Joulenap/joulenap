@@ -27,6 +27,17 @@ class ApiError(ConnectorError):
         self.status = status
 
 
+class TokenExistsError(ConnectorError):
+    """An API token of that name already exists, and replacing it was not authorised.
+
+    Deliberately *not* an :class:`ApiError`: the server did nothing wrong: we refused to act.
+    A token's secret is only revealed when it is created, so the only way to end up with a
+    usable one under a name already in use is to delete and recreate it — which silently
+    invalidates the secret every *other* consumer of that token holds, most obviously the PBS
+    storage entry on a Proxmox host. The caller has to say it means to do that.
+    """
+
+
 class TaskError(ConnectorError):
     """A PVE/PBS background task (vzdump, GC) finished with a non-OK status."""
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../api/client'
+import { ConfirmModal, type ConfirmState } from '../components/ConfirmModal'
 import type { PveConnectResult, WizardStorage } from '../api/types'
 import { useConfig } from '../config/ConfigContext'
 import type { DeviceError } from '../utils/deviceForm'
@@ -52,6 +53,10 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
   const [failed, setFailed] = useState<string | null>(null)
   const [report, setReport] = useState<string[]>([])
   const [saved, setSaved] = useState(false)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  // The user's answer to "that token name is taken", for both boxes this flow provisions.
+  // A ref, not state: the provisioning calls read it in the same tick the confirm sets it.
+  const replaceToken = useRef(false)
   // What already exists on the far side, so a retry after a partial failure resumes instead
   // of repeating. A ref, not state: `save` reads it in the same tick it writes it.
   const landed = useRef<{ pbsToken: { id: string; secret: string } | null; pbsId: string | null }>({
@@ -88,6 +93,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       api_token_secret: pve.tokenSecret,
       username: pve.user,
       password: pve.password,
+      replace_token: replaceToken.current,
     })
     setConnected(result)
     setToken(
@@ -147,6 +153,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
         password: pbs.password,
         datastore: pbs.datastore.trim(),
         fingerprint: pbs.fingerprint.trim(),
+        replace_token: replaceToken.current,
       })
     }
     if (pbs.managedPower && pbs.autoInstall) {
@@ -258,6 +265,24 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       if (dir === 1 && target === 3 && !saved) await save(pbsToken)
       setStep(target)
     } catch (e) {
+      // 409 = the token name is taken on whichever box we were provisioning. Only the user
+      // can say whether replacing it — and breaking whatever else holds that secret, very
+      // likely this PVE's own PBS storage entry — is what they want.
+      if (e instanceof ApiError && e.status === 409) {
+        setConfirm({
+          title: t('wizard.tokenExists.title'),
+          message: t('wizard.tokenExists.message'),
+          confirmLabel: t('wizard.tokenExists.confirm'),
+          danger: true,
+          icon: '⚠',
+          onConfirm: () => {
+            setConfirm(null)
+            replaceToken.current = true
+            void advance(1)
+          },
+        })
+        return
+      }
       setFailed(e instanceof ApiError ? e.message : String(e))
     } finally {
       setBusy(false)
@@ -446,6 +471,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
           </>
         )}
       </div>
+      <ConfirmModal state={confirm} onCancel={() => setConfirm(null)} />
     </WizardShell>
   )
 }

@@ -45,19 +45,23 @@ def pve_connect(
     username: str | None = None,
     password: str | None = None,
     token_name: str = "joulenap",
+    replace_token: bool = False,
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
     """Validate the PVE connection and discover nodes + PBS storages.
 
     In ``root`` mode the password is used once to create a scoped token (returned under
-    ``token`` so the caller can persist it) and then discarded.
+    ``token`` so the caller can persist it) and then discarded. ``replace_token`` is the
+    user's answer to "that name is taken, replace it?" — see ``create_token``.
     """
     created: dict[str, str] | None = None
     if mode == "root":
         if not username or not password:
             raise ApiError("Root mode requires a username and password")
         with PveProvisioner(host, port, verify_tls, transport=transport) as prov:
-            token = prov.provision_token(username, password, token_name)
+            token = prov.provision_token(
+                username, password, token_name, replace_existing=replace_token
+            )
         token_id, token_secret = token.token_id, token.secret
         created = {"id": token.token_id, "secret": token.secret}
     elif not token_id or not token_secret:
@@ -148,17 +152,22 @@ def pbs_provision(
     datastore: str,
     token_name: str = "joulenap",
     fingerprint: str = "",
+    replace_token: bool = False,
     transport: httpx.BaseTransport | None = None,
 ) -> dict[str, Any]:
     """Quick-setup: create a scoped PBS API token from root creds and return it.
 
     The password is used once here and discarded; the caller persists the returned token.
     A realm-less username (e.g. ``root``, the SSH default) is assumed to be ``@pam``.
+    ``replace_token`` is the user's answer to "that name is taken, replace it?" — see
+    ``create_token``.
     """
     userid = username if "@" in username else f"{username}@pam"
     verify = _pbs_root_verify(host, port, verify_tls, fingerprint, transport)
     with PbsProvisioner(host, port, verify, transport=transport) as prov:
-        token = prov.provision_token(userid, password, datastore, token_name)
+        token = prov.provision_token(
+            userid, password, datastore, token_name, replace_existing=replace_token
+        )
     return {"id": token.token_id, "secret": token.secret}
 
 
