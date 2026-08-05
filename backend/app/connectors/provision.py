@@ -11,6 +11,7 @@ privileges differ, so the shared logic sits in a base class.
 
 from __future__ import annotations
 
+import re
 import ssl
 from dataclasses import dataclass
 from typing import Any
@@ -41,6 +42,31 @@ PBS_SYSTEM_ROLE = "Audit"
 # it can never be added later from the stored token — a PBS provisioned without these grants
 # has to be re-provisioned with root, or granted by hand on its console.
 PBS_REMOTE_ROLES = ("RemoteAdmin", "RemoteSyncPushOperator")
+
+#: Default token name. A PVE device is one host, so it can never collide with itself.
+TOKEN_NAME = "joulenap"
+
+#: PBS token ids accept letters, digits, ``-``, ``_`` and ``.``; anything else is replaced.
+_TOKEN_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def pbs_token_name(datastore: str, prefix: str = TOKEN_NAME) -> str:
+    """The token name for a backup-server device, qualified by its datastore.
+
+    A PBS device is a *(host, datastore)* pair, so one machine can legitimately hold two
+    devices — which the duplicate guard deliberately allows. Naming both tokens ``joulenap``
+    made the second one's setup delete and recreate the first one's token: the first device
+    was left with a dead secret *and*, because deleting a token drops its ACL entries while
+    provisioning only re-grants ``/datastore/<its own datastore>``, no way back in short of a
+    root session. Qualifying the name means the two never meet.
+
+    Sanitised rather than interpolated raw: PBS restricts the character set for token ids, and
+    a datastore whose name survives none of it falls back to the bare prefix rather than
+    producing something the server will reject.
+    """
+    slug = _TOKEN_UNSAFE.sub("-", datastore.strip()).strip("-._")
+    return f"{prefix}-{slug}" if slug else prefix
+
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "DELETE"})
 

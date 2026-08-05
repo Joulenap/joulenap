@@ -307,7 +307,7 @@
     },
     "tokenExists": {
       "title": "That token name is already taken",
-      "message": "An API token named “joulenap” already exists on this server. Its secret is only shown when it is created, so Joulenap cannot reuse it — it can only replace it. Anything else still using that token stops working immediately, which on a Proxmox host usually means the backup-server storage entry, and every backup through it. Replace it only if you know nothing else uses it.",
+      "message": "An API token with the name Joulenap uses already exists on this server. Its secret is only shown when it is created, so Joulenap cannot reuse it — it can only replace it. Anything else still using that token stops working immediately, which on a Proxmox host usually means the backup-server storage entry, and every backup through it. Replace it only if you know nothing else uses it.",
       "confirm": "Replace the token",
       "usedByDevice": "“{{id}}” in Joulenap already authenticates to this server — replacing the token breaks it.",
       "usedByStorage": "Storage “{{storage}}” on “{{pve}}” authenticates to this server with it, so backups through that storage would start failing."
@@ -534,7 +534,7 @@
         "alwaysOn": "Always on"
       },
       "state": {
-        "connected": "Connected · API OK",
+        "connected": "Reachable",
         "sleeping": "Sleeping ⏾",
         "offline": "Offline"
       },

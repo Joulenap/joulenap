@@ -20,6 +20,12 @@ guest* reads "never" for every guest and the converted routes read "never run" �
 runs still listed underneath. Nothing has been lost: the caches fill in again per guest as runs
 happen, and the first run of each route restores its badge.
 
+**Two limitations worth knowing before you configure.** Joulenap reads the **root namespace** of a
+backup datastore, so if your Proxmox storage entry writes into a PBS namespace the backups, the
+retention and the garbage collection all work, but *Last backup per guest* reads "never" for those
+guests. And two datastores on one backup server are two devices with independent power leases, so
+consecutive routes across them can sleep and wake that machine once more than strictly necessary.
+
 ### Added
 
 - **Routes.** A route is one scheduled flow of backup data between devices: sources, a target, its
@@ -51,6 +57,13 @@ happen, and the first run of each route restores its badge.
   walks connection, wake-up (with a Test button that sends a real magic packet before you find out
   at 04:00 that Wake-on-LAN was never armed) and power-off. Both work from pasted API tokens, or
   provision everything themselves from a root login used once and never stored.
+- **A backup server's API token is named after its datastore** — `joulenap-backup`,
+  `joulenap-offsite` — so one machine serving several datastores gets one token per device instead
+  of the setups fighting over a single name. Deleting an API token also drops the permissions
+  granted to it, so a shared name would have meant configuring the second datastore left the first
+  one both locked out and unrepairable by re-entering its secret. A Proxmox host is one device and
+  keeps the plain `joulenap`. Tokens already in use are untouched; the name only applies to ones
+  Joulenap creates from now on.
 - **Ad-hoc maintenance per backup server.** Run a garbage collection or a verification on one box
   from the homepage, without a route. It queues and reports like any other run; only the route
   column is empty.

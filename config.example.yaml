@@ -77,6 +77,10 @@ pbss: []
 #     host: 192.168.1.20      # or pbs.lan
 #     port: 8007
 #     datastore: backup
+#     # Joulenap reads the datastore's ROOT NAMESPACE. If the Proxmox storage entry writes
+#     # into a PBS namespace, backups, retention and GC all work normally, but "Last backup
+#     # per guest" reads "never" for those guests — Joulenap looks in the root and finds
+#     # nothing. One backup server can hold several datastores: add each as its own device.
 #     fingerprint: ""         # PBS dashboard > Show Fingerprint, e.g. "aa:bb:cc:..."
 #     # Leave this empty and the connection to this PBS is NOT pinned and NOT validated —
 #     # its API token then travels over TLS nothing has checked. The wizard fills it in.
@@ -85,7 +89,9 @@ pbss: []
 #     # sync route also needs RemoteAdmin AND RemoteSyncPushOperator on /remote — PBS refuses
 #     # ACL writes from a token, so those must be granted on the box itself or by the wizard's
 #     # root mode (see docs/CONFIG-WIZARD.md).
-#     api_token_id: "root@pam!joulenap"
+#     # The wizard names a backup server's token after its datastore, so a second datastore on
+#     # the same machine gets its own instead of replacing this one.
+#     api_token_id: "root@pam!joulenap-backup"
 #     api_token_secret: ""
 #     # Set to false for an always-on PBS (a VM, or a cloud-hosted one): Joulenap then only
 #     # schedules routes onto it and never touches its power, so everything below is unused.

@@ -53,16 +53,27 @@ For each field: **auto** = discovered/derived, **manual** = entered.
 Everything above is still discovered with a read-only token; only these become manual:
 
 - **On the PVE**: create an API token whose role has `VM.Audit, VM.Backup, Datastore.Audit, Datastore.AllocateSpace, Datastore.Allocate` (the last is required for vzdump's retention/prune, which deletes old backups); copy the secret.
-- **On the PBS**: create an API token with `DatastoreAdmin` on the datastore (status, GC, verify) **and `Audit` on `/system`** (node CPU/RAM for the dashboard); copy the secret. Add the `/remote` roles below if this box will take part in a sync route.
+- **On the PBS**: create an API token with `DatastoreAdmin` on the datastore (status, GC, verify) **and `Audit` on `/system`** (node CPU/RAM for the dashboard); copy the secret. Name it per datastore — Joulenap's own wizard uses `joulenap-<datastore>` — so a second datastore on the same box can have its own. Add the `/remote` roles below if this box will take part in a sync route.
 - **On the PBS**: install Joulenap's generated SSH public key into `/root/.ssh/authorized_keys`.
 - **In Joulenap**: paste both tokens, confirm the key is installed, click "Detect MAC".
 
 > **Tighter PBS privileges (optional):** root mode grants the built-in `DatastoreAdmin`, because PBS cannot create custom roles over the API. For a truly minimal token, create a role on the PBS host once and bind a token to it, then paste that token:
 > ```sh
 > proxmox-backup-manager role create Joulenap --privs "Datastore.Audit,Datastore.Modify"
-> proxmox-backup-manager user generate-token root@pam joulenap
-> proxmox-backup-manager acl update /datastore/<datastore> Joulenap --auth-id 'root@pam!joulenap'
+> proxmox-backup-manager user generate-token root@pam joulenap-<datastore>
+> proxmox-backup-manager acl update /datastore/<datastore> Joulenap --auth-id 'root@pam!joulenap-<datastore>'
 > ```
+
+> **Token names on a backup server carry the datastore** — `joulenap-backup`, `joulenap-offsite`.
+> A backup server can hold several datastores, and each is its own device in Joulenap; naming both
+> tokens the same would mean setting up the second one deleted and recreated the first one's token,
+> leaving that device unable to connect. A Proxmox host is a single device, so its token stays
+> plain `joulenap`.
+>
+> **Replacing a token also clears the permissions granted to it.** If you ever confirm a
+> replacement, re-entering the new secret is not always enough: provisioning re-grants only
+> `/datastore/<that device's datastore>`, so a hand-made setup where one token served several
+> datastores needs the `acl update` above re-running as root for the others.
 
 
 ## Adding a box you already have
@@ -128,8 +139,8 @@ A **sync** route makes Joulenap create a *remote* and a *sync job* on one of the
 The equivalent on the PBS itself, if you would rather not hand the password over:
 
 ```sh
-proxmox-backup-manager acl update /remote RemoteAdmin --auth-id 'root@pam!joulenap'
-proxmox-backup-manager acl update /remote RemoteSyncPushOperator --auth-id 'root@pam!joulenap'
+proxmox-backup-manager acl update /remote RemoteAdmin --auth-id 'root@pam!joulenap-<datastore>'
+proxmox-backup-manager acl update /remote RemoteSyncPushOperator --auth-id 'root@pam!joulenap-<datastore>'
 ```
 
 Both roles are needed: `RemoteAdmin` alone does not cover a *push* sync.

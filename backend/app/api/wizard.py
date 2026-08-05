@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .. import paths
 from ..connectors import net
 from ..connectors.errors import ConnectorError, TokenExistsError
+from ..connectors.provision import pbs_token_name
 from ..core import wizard
 from .deps import require_auth
 
@@ -122,7 +123,9 @@ class PbsProvisionRequest(BaseModel):
     username: str = "root@pam"
     password: str = Field(min_length=1)
     datastore: str = Field(min_length=1)
-    token_name: str = "joulenap"
+    #: Left unset by the UI: the name is derived from the datastore, so two devices on one
+    #: backup server never contend for it. Still overridable for anyone driving the API.
+    token_name: str | None = None
     fingerprint: str = ""
     #: The user's answer to the 409 this endpoint raises when ``token_name`` is taken.
     replace_token: bool = False
@@ -138,7 +141,7 @@ def pbs_provision(body: PbsProvisionRequest) -> dict[str, Any]:
         username=body.username,
         password=body.password,
         datastore=body.datastore,
-        token_name=body.token_name,
+        token_name=body.token_name or pbs_token_name(body.datastore),
         fingerprint=body.fingerprint,
         replace_token=body.replace_token,
     )

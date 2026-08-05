@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.connectors.errors import ApiError, TokenExistsError
+from app.connectors.provision import pbs_token_name
 from app.core import wizard
 from app.main import create_app
 
@@ -88,6 +89,63 @@ def test_replace_token_is_forwarded(client, monkeypatch):
     )
     assert r.status_code == 200
     assert captured["replace_token"] is True
+
+
+def test_the_pbs_token_name_is_derived_from_the_datastore(client, monkeypatch):
+    """Two devices on one backup server must not contend for a token name: naming both
+    ``joulenap`` meant provisioning the second deleted the first one's token."""
+    captured = {}
+
+    def fake_provision(**kwargs):
+        captured.update(kwargs)
+        return {"id": "root@pam!joulenap-lab", "secret": "s"}
+
+    monkeypatch.setattr(wizard, "pbs_provision", fake_provision)
+    r = client.post(
+        "/api/wizard/pbs/provision",
+        json={"host": "pbs.local", "password": "pw", "datastore": "lab"},
+    )
+    assert r.status_code == 200
+    assert captured["token_name"] == "joulenap-lab"
+
+
+def test_an_explicit_token_name_still_wins(client, monkeypatch):
+    """The field stays honoured for anyone driving the API directly."""
+    captured = {}
+
+    def fake_provision(**kwargs):
+        captured.update(kwargs)
+        return {"id": "root@pam!mine", "secret": "s"}
+
+    monkeypatch.setattr(wizard, "pbs_provision", fake_provision)
+    r = client.post(
+        "/api/wizard/pbs/provision",
+        json={
+            "host": "pbs.local",
+            "password": "pw",
+            "datastore": "lab",
+            "token_name": "mine",
+        },
+    )
+    assert r.status_code == 200
+    assert captured["token_name"] == "mine"
+
+
+@pytest.mark.parametrize(
+    ("datastore", "expected"),
+    [
+        ("lab", "joulenap-lab"),
+        ("backup_2", "joulenap-backup_2"),
+        ("dot.name", "joulenap-dot.name"),
+        ("  spaced  ", "joulenap-spaced"),
+        ("a b/c", "joulenap-a-b-c"),
+        # Nothing survives sanitising, so fall back rather than send PBS a name it rejects.
+        ("///", "joulenap"),
+        ("", "joulenap"),
+    ],
+)
+def test_token_name_sanitising(datastore, expected):
+    assert pbs_token_name(datastore) == expected
 
 
 def test_pbs_check_passes_through(client, monkeypatch):

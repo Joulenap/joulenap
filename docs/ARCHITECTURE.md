@@ -40,6 +40,8 @@ The **kind** follows from which devices the route names:
 
 Guests are selected **per source** (`sources[].guests`), because vmids collide between PVEs. Mode is `all` or `include`; in `include` mode a newly created guest is *not* picked up automatically.
 
+The per-guest last-backup cache is filled by listing the target datastore's snapshots, and that listing covers the datastore's **root namespace only** — no `ns` parameter is sent, and a PBS namespace is configured on the Proxmox storage entry, where Joulenap never sees it. A namespaced setup therefore backs up, prunes and collects garbage correctly while every one of its guests reads *never backed up*. PBS groups are `ct/<vmid>` / `vm/<vmid>` with no record of which host wrote them, so two PVEs sharing a datastore and a vmid also share a group and prune each other's snapshots — use non-overlapping vmid ranges across hosts.
+
 A route's `schedule` is a time plus seven weekday flags. `schedule.cron` is an escape hatch for anything richer (day-of-month, steps, ranges) and **wins over `time`/`days`** when set; the UI then shows it read-only.
 
 `options` carries the per-route knobs: `mode` / `bwlimit` / `min_free_percent` (backup only, they are vzdump's), `gc` and `verify_after` (run on the target after the data lands), and `reverify_days` for a verify route. `retention` is vzdump's `prune-backups`, per route.
@@ -69,6 +71,8 @@ The release records a `poweroff` step whose detail says what actually happened:
 Only the last of those is worth a warning; the other three are the correct outcome and are recorded as *skipped*, not failed.
 
 `managed_power: false` describes an always-on PBS. The lease is the single place that knows: acquiring degrades to a reachability check and releasing does nothing.
+
+**The lease is keyed per device, not per machine.** A backup server serving two datastores is two devices, so each holds its own lease and neither knows about the other: a run that finishes with the first can power the machine off while a queued run on the second still wants it, and that run then wakes it again. Runs are serialised by the single-run lock, so this costs one extra sleep/wake cycle rather than correctness — but on one physical box, prefer a single datastore, or expect the extra cycle.
 
 
 ## What each kind does
@@ -221,6 +225,6 @@ A deliberately separate, additive-only contract for third-party widgets, with ma
 Per device — each PVE and each PBS gets its own token.
 
 - **PVE token**: `VM.Audit` (list guests) + `VM.Backup` + `Datastore.Audit` + `Datastore.AllocateSpace` **and `Datastore.Allocate`** on the PBS-backed storage (the last is required for vzdump's retention/prune, which deletes old backups). Root-mode setup creates a `Joulenap` role with exactly these privileges (`connectors/provision.py`).
-- **PBS token**: `DatastoreAdmin` on the datastore (status, GC, verify) plus `Audit` on `/system` (read-only node CPU/RAM/network for the dashboard). PBS has no API to create custom roles, so root-mode setup grants these built-ins scoped by path.
+- **PBS token**: `DatastoreAdmin` on the datastore (status, GC, verify) plus `Audit` on `/system` (read-only node CPU/RAM/network for the dashboard). PBS has no API to create custom roles, so root-mode setup grants these built-ins scoped by path. The token is named **`joulenap-<datastore>`**: a device is a *(host, datastore)* pair, so one machine can hold two, and a shared name would mean provisioning the second deleted and recreated the first one's token. Deleting a token also drops its ACL entries, so that would have left the first device unable to connect *and* unable to be repaired by re-entering a secret.
 - **PBS token, additionally, for sync routes**: `RemoteAdmin` **and** `RemoteSyncPushOperator` on `/remote`, so Joulenap can create the remote and the sync job. PBS refuses ACL writes from a token, so these can only be granted from a root login — the wizard does it while it still holds the root ticket, and a box set up before 1.0 gets them from the device editor's **Grant sync permissions** action (`POST /api/wizard/pbs/grant-sync`), which asks for root once and stores nothing. See [`CONFIG-WIZARD.md`](CONFIG-WIZARD.md#sync-routes-need-one-extra-grant).
 - **SSH to a PBS**: one dedicated key, shared by every managed box, ideally installed with a forced command that only allows `poweroff`.
