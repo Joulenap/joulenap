@@ -345,9 +345,13 @@
   flex-direction: column;
   gap: 10px;
 }
+/* Four columns, and only the last one is `auto`. The outcome pill gets its own `fr` column
+   because its width varies per route; leaving it in the `auto` column made every card size
+   its grid differently, so the schedule column never lined up. What is left in `auto` is the
+   toggle plus the Edit button — the same width on every card. */
 .route-card {
   display: grid;
-  grid-template-columns: minmax(210px, 1.3fr) minmax(170px, 1fr) auto;
+  grid-template-columns: minmax(210px, 1.3fr) minmax(170px, 1fr) minmax(150px, 0.8fr) auto;
   gap: 8px 18px;
   align-items: center;
   background: var(--jn-panel-alt);
@@ -429,6 +433,9 @@
 }
 .route-mid div + div {
   margin-top: 3px;
+}
+.route-status {
+  min-width: 0;
 }
 .route-right {
   display: flex;

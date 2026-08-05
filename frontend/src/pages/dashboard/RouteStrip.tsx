@@ -146,7 +146,11 @@ function RouteCard({
         <div>{routeDetail(route, t)}</div>
       </div>
 
-      <div className="route-right">
+      {/* The outcome pill is its own grid column, not part of .route-right: its text length
+          varies per route ("Running" vs "OK · Sun 05/07 07:41"), and while it shared a column
+          with the fixed-width controls that variation resized the whole card's grid, so the
+          middle column started at a different x on every row. */}
+      <div className="route-status">
         {running ? (
           <span className="res" style={badgeStyle('running')}>
             ● {t('dashboard.runRunning')}
@@ -165,6 +169,9 @@ function RouteCard({
             {t(agedOut ? 'dashboard.noRecentRuns' : 'dashboard.neverRun')}
           </span>
         )}
+      </div>
+
+      <div className="route-right">
         <Toggle
           on={route.enabled}
           onClick={saving ? () => {} : toggle}
