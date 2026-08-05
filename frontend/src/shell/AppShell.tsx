@@ -71,10 +71,10 @@ function ShellInner() {
 
   return (
     <div className="jn-shell">
-      {/* The homepage is a two-column operations view and gets the wider 1400px canvas the
-          design calls for; Settings stays at the ~1220px form width, where longer measures
-          just make labelled fields harder to scan. */}
-      <div style={{ maxWidth: view === 'main' ? 1400 : 1220, margin: '0 auto' }}>
+      {/* One canvas width for every view. Settings used to narrow to 1220px for its form
+          measures, but the header lives in here too, so switching views visibly resized the
+          chrome — worse than a slightly long field row. */}
+      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
         {stale && <Banner tone="red">⚠ {t('common.backendUnreachable')}</Banner>}
         {/* The first-run CTA: flow A also covers the PBS, so one button is the whole setup.
             It opens from the shell rather than from Settings so a fresh install never has to

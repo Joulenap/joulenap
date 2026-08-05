@@ -289,10 +289,15 @@
 
 /* Form controls, scoped to the Settings pane exactly as dashboard.css scopes its own set
    to `.modal` — unscoped these would reach into Login and the wizard, which are still
-   inline-styled. */
+   inline-styled.
+
+   `[type='text']` matches the attribute, not the resolved default, so an input written
+   without a type escapes this block entirely and renders as a raw browser control — it had
+   bitten four of them. `:not([type])` is the backstop; write the type anyway. */
 .jn-settings input[type='text'],
 .jn-settings input[type='password'],
 .jn-settings input[type='number'],
+.jn-settings input:not([type]),
 .jn-settings select,
 .jn-settings textarea {
   background: var(--jn-input-bg);
@@ -303,6 +308,11 @@
   font-size: 13.5px;
   font-family: inherit;
   width: 100%;
+}
+/* Must follow the block: its `font-family: inherit` matches at the same specificity, so an
+   opt-in `.in-mono` only wins on source order. */
+.jn-settings input.in-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
 }
 .jn-settings textarea {
   resize: vertical;
@@ -328,6 +338,20 @@
 }
 .jn-settings input[readonly] {
   color: var(--jn-text-mid);
+}
+
+/* The shell is one 1400px canvas for every view, so a settings field would otherwise stretch
+   to ~680px — a hostname in a half-metre box. Cap the *columns*, not the panel: the grid
+   left-aligns and the fields keep a readable measure. Scoped to `.jn-settings` so the
+   modals, whose 700px width already sizes them below these caps, are untouched.
+   Above the 640px collapse only, or these would outspecify the single-column rules below. */
+@media (min-width: 641px) {
+  .jn-settings .frow {
+    grid-template-columns: repeat(2, minmax(0, 420px));
+  }
+  .jn-settings .frow3 {
+    grid-template-columns: repeat(3, minmax(0, 300px));
+  }
 }
 
 @media (max-width: 640px) {

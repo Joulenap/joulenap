@@ -220,6 +220,7 @@ export function Integrations() {
         <div className="panel-bd stack tight">
           <div className="url-row">
             <input
+              type="text"
               className="in-mono"
               readOnly
               value={freshKey ?? (enabled ? t(`${ns}.keyHidden`) : t(`${ns}.keyNone`))}

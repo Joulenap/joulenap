@@ -266,6 +266,7 @@ export function Notifications() {
                   {draft.custom_urls.map((url, i) => (
                     <div className="url-row" key={i}>
                       <input
+                        type="text"
                         className="in-mono"
                         value={url}
                         spellCheck={false}
@@ -285,6 +286,7 @@ export function Notifications() {
                   ))}
                   <div className="url-row">
                     <input
+                      type="text"
                       className="in-mono"
                       value={newUrl}
                       spellCheck={false}

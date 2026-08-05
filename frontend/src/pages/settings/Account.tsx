@@ -82,6 +82,7 @@ function Credentials() {
             <label htmlFor="acc-user">{t(`${ns}.username`)}</label>
             <input
               id="acc-user"
+              type="text"
               value={user}
               autoComplete="username"
               onChange={(e) => edit(() => setUser(e.target.value))}
