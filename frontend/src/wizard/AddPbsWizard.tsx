@@ -40,14 +40,21 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
   const [saved, setSaved] = useState(false)
 
   const setup = usePbsSetup(draft, setDraft)
+  const { loadKey } = setup
   const errorFor = (field: string) => (errors ?? []).find((e) => e.field === field)
   const skipped = draft.managedPower ? [] : [1, 2]
 
   // The key is what step 3 is about, so fetch it as the step opens rather than behind a button
   // the user has no reason not to press.
   useEffect(() => {
-    if (step === 2) void setup.loadKey()
-  }, [step, setup])
+    if (step === 2) void loadKey()
+    // `loadKey`, not the whole `setup`: usePbsSetup returns a fresh object literal on every
+    // render, so depending on it re-ran this effect on every render. Harmless while the
+    // request is cached — but a *failed* keygen clears that cache so the user can retry, and
+    // the retry then fired from the next render instead of from a click. The result was an
+    // unbounded POST loop behind the error banner, on exactly the failures that happen in
+    // the field: a read-only data dir, a full volume, no ssh-keygen.
+  }, [step, loadKey])
 
   /** Step 1: reach the box, pin its fingerprint, and mint a token if we were given root. */
   async function connect(): Promise<boolean> {

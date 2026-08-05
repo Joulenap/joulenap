@@ -231,7 +231,14 @@ export function SshKeyFields({ setup }: { setup: PbsSetup }) {
   return (
     <div className="field">
       <span className="lab">{t('wizard.ssh.title')}</span>
-      <div className="keyblock">{key ? key.public_key : t('common.loading')}</div>
+      {/* Only in auto-install mode. In manual mode the block below shows the *restricted*
+          authorized_keys line, and rendering the bare public key above it invited copying
+          the wrong one — which installs this key as an unrestricted root key. One keypair
+          serves every managed box, so that single mistake plus a leaked private key is root
+          on that PBS, exactly what the forced-command line exists to prevent. */}
+      {draft.autoInstall && (
+        <div className="keyblock">{key ? key.public_key : t('common.loading')}</div>
+      )}
       {/* Reusing the existing key is the *correct* outcome for a second PBS — say so, or it
           looks like the wizard failed to make a fresh one. */}
       {key && !key.created && <span className="help">{t('wizard.ssh.reused')}</span>}

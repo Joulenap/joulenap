@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../../api/client'
 import type { PbsDevice, PveDevice, Route } from '../../api/types'
@@ -7,7 +7,7 @@ import { Modal } from '../../components/Modal'
 import { Toggle } from '../../components/Toggle'
 import { useRegisterDirty, useUnsavedGuard } from '../../shell/UnsavedGuard'
 import { guestTypeLabel, type PveGuests } from '../../utils/guestPanel'
-import { routeKindBadge } from '../../utils/routes'
+import { pbsNodeId, pveNodeId, routeKindBadge } from '../../utils/routes'
 import {
   ROUTE_COLORS,
   type FieldError,
@@ -80,13 +80,12 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
   const [saving, setSaving] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
 
-  const pbsIds = useMemo(() => pbss.map((p) => p.id), [pbss])
-  const kind = inferKind(draft.sourceIds, pbsIds, draft.onWake)
+  const kind = inferKind(draft.sourceIds, draft.onWake)
   const sections = sectionsFor(kind)
   const badge = routeKindBadge(kind)
-  const sources = pveSources(draft.sourceIds, pbsIds)
-  const tally = guestTally(draft.sourceIds, pbsIds, groups, draft.selection)
-  const overlaps = retentionOverlaps(draft, pbsIds, routes)
+  const sources = pveSources(draft.sourceIds)
+  const tally = guestTally(draft.sourceIds, groups, draft.selection)
+  const overlaps = retentionOverlaps(draft, routes)
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial.current)
   useRegisterDirty(dirty)
@@ -108,23 +107,25 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
   const formErrors = errors.filter((e) => !e.field)
   const text = (e: FieldError) => e.message ?? t(e.key ?? '', e.params ?? {})
 
-  const toggleSource = (id: string) =>
+  // Keyed `pve:<id>` / `pbs:<id>`: a PVE and a PBS may share an id, and a bare one made the
+  // two chips toggle each other.
+  const toggleSource = (key: string) =>
     patch({
-      sourceIds: draft.sourceIds.includes(id)
-        ? draft.sourceIds.filter((s) => s !== id)
-        : [...draft.sourceIds, id],
+      sourceIds: draft.sourceIds.includes(key)
+        ? draft.sourceIds.filter((s) => s !== key)
+        : [...draft.sourceIds, key],
     })
 
   // Picking a target drops it from the sources: a box cannot sync with itself, and the
-  // backend rejects it outright.
+  // backend rejects it outright. Only the PBS key can match, so a PVE of the same name stays.
   const pickTarget = (id: string) =>
-    patch({ target: id, sourceIds: draft.sourceIds.filter((s) => s !== id) })
+    patch({ target: id, sourceIds: draft.sourceIds.filter((s) => s !== pbsNodeId(id)) })
 
   const save = async () => {
     setAttempted(true)
     if (validateDraft(draft, pves, pbss).length) return
     const taken = routes.map((r) => r.id)
-    const body = draftToRoute(draft, pbsIds, taken)
+    const body = draftToRoute(draft, taken)
     setSaving(true)
     try {
       if (route) await api.updateRoute(route.id, body)
@@ -261,22 +262,22 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                 )}
                 {pves.map((p) => (
                   <SourceChip
-                    key={`pve:${p.id}`}
+                    key={pveNodeId(p.id)}
                     id={p.id}
                     kindLabel="PVE"
-                    on={draft.sourceIds.includes(p.id)}
-                    onClick={() => toggleSource(p.id)}
+                    on={draft.sourceIds.includes(pveNodeId(p.id))}
+                    onClick={() => toggleSource(pveNodeId(p.id))}
                   />
                 ))}
                 {pbss.map((p) => (
                   <SourceChip
-                    key={`pbs:${p.id}`}
+                    key={pbsNodeId(p.id)}
                     id={p.id}
                     kindLabel="PBS"
-                    on={draft.sourceIds.includes(p.id)}
+                    on={draft.sourceIds.includes(pbsNodeId(p.id))}
                     disabled={p.id === draft.target}
                     title={p.id === draft.target ? t('dashboard.routeModal.targetIsSource') : undefined}
-                    onClick={() => toggleSource(p.id)}
+                    onClick={() => toggleSource(pbsNodeId(p.id))}
                   />
                 ))}
               </div>
@@ -456,7 +457,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                     const vmids = guests.map((g) => g.vmid)
                     return (
                       <div key={pve}>
-                        {showsGuestGroups(draft.sourceIds, pbsIds) && (
+                        {showsGuestGroups(draft.sourceIds) && (
                           <div className="guest-group">{pve}</div>
                         )}
                         {guests.length === 0 && (
@@ -473,6 +474,10 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                               <Toggle
                                 size="sm"
                                 on={on}
+                                label={t('dashboard.routeModal.guestIncludeLabel', {
+                                  name: g.name,
+                                  vmid: g.vmid,
+                                })}
                                 onClick={() =>
                                   patch({ selection: toggleGuest(draft.selection, pve, g.vmid, vmids) })
                                 }

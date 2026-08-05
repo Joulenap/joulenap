@@ -79,7 +79,7 @@ Only the last of those is worth a warning; the other three are the correct outco
 - **verify** — wake, verify (`reverify_days` keeps it incremental; `0` re-verifies everything), power off.
 - **ad-hoc GC / verify on a box** — the homepage's per-PBS buttons. The same steps, so the history reads identically; only the route column is empty.
 
-All steps are logged to the DB and exposed via `/api/logs`; while a run is in progress the raw PVE/PBS task output is tailed into `/api/tasklog` for the UI's task-log panel.
+All steps are recorded in the DB and exposed on the run itself via `/api/runs/{id}` (the activity log — one line per event, not per step — is `/api/logs`); while a run is in progress the raw PVE/PBS task output is tailed into `/api/tasklog` for the UI's task-log panel.
 
 
 ## Upgrading from 0.9 (config migration)
@@ -92,14 +92,14 @@ All steps are logged to the DB and exposed via `/api/logs`; while a run is in pr
 - a scheduled verification → a second route named **Verify**;
 - a plain "at HH:MM on these weekdays" cron becomes `time` + `days`; anything richer is kept verbatim as `schedule.cron`.
 
-Two rules keep it from ever bricking a boot: the original is copied to **`config.yaml.pre-overhaul.bak`** first (an existing `.bak` is never overwritten, and the copy is chmod'd `0600` because it holds every secret), and the converted config is validated before it is adopted — if it fails, the original is kept, the app starts on it, and the reason is surfaced as `config_error` on `/api/status` so the UI says why instead of looking like a fresh install.
+Two rules keep it from ever bricking a boot: the original is copied to **`config.yaml.pre-overhaul.bak`** first (an existing `.bak` is never overwritten, and the copy is chmod'd `0600` because it holds every secret), and the converted config is validated before it is adopted — if it fails, the file on disk is left untouched, but nothing in 1.0 reads the 0.9 sections, so the app boots with **no devices and no routes and nothing scheduled**. The reason is surfaced as `config_error` on `/api/status` precisely so the UI says why instead of looking like a fresh install; the user can rewrite `config.yaml` from the Advanced tab while running empty.
 
 One conversion is lossy and deliberately widens rather than narrows: **0.9's `exclude` guest mode no longer exists**. Inverting the list would need a live guest list that is not available at load time, so the route becomes `all` and a warning is logged — a route that backs up more than before, never less. Narrow it from the UI if that is not what you want.
 
 
 ## REST API
 
-Everything is served under `/api`. Auth is a signed **session cookie** started by `/api/login`; every endpoint requires it except `/api/health`, `/api/auth/status`, `/api/auth/setup` and `/api/login` — plus `/api/dashboard` and `/metrics`, which are deliberately outside the session and authenticated by the read-only API key instead.
+Everything is served under `/api`. Auth is a signed **session cookie** started by `/api/login`; every endpoint requires it except `/api/health`, `/api/auth/status`, `/api/auth/setup`, `/api/login` and `/api/logout` (which only clears a cookie, idempotently) — plus `/api/dashboard` and `/metrics`, which are deliberately outside the session and authenticated by the read-only API key instead.
 
 **Health & meta**
 
@@ -169,7 +169,7 @@ Everything is served under `/api`. Auth is a signed **session cookie** started b
 | GET | `/api/tasklog?after=&run=` | PVE/PBS task output — the live tail, or one past run's by id |
 | POST | `/api/notify/test` | send a test notification; always 200, with a per-channel outcome |
 
-**Setup wizard** — all stateless: they return discovered values for the frontend to assemble and save with `POST /api/devices/{kind}`. Only `ssh/keygen` writes to disk.
+**Setup wizard** — all stateless: they return discovered values for the frontend to assemble and save with `POST /api/devices/{kind}`. Only `ssh/keygen` and `ssh/trust` write to disk (the shared keypair, and the confirmed host key in `data/known_hosts`).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -177,6 +177,7 @@ Everything is served under `/api`. Auth is a signed **session cookie** started b
 | POST | `/api/wizard/storage/derive` | derive PBS host/port/datastore/fingerprint from one storage |
 | POST | `/api/wizard/pbs/check` | reach a PBS, read its fingerprint |
 | POST | `/api/wizard/pbs/provision` | root mode: auto-create a scoped PBS token |
+| POST | `/api/wizard/pbs/grant-sync` | root mode: add the `/remote` roles a sync route needs to an existing token |
 | GET | `/api/wizard/interfaces` | local NICs, to pick the WoL broadcast interface |
 | POST | `/api/wizard/wol/detect-mac` | detect a PBS MAC via ping + ARP |
 | POST | `/api/wizard/wol/test` | send a test magic packet before the device exists |
@@ -219,5 +220,5 @@ Per device — each PVE and each PBS gets its own token.
 
 - **PVE token**: `VM.Audit` (list guests) + `VM.Backup` + `Datastore.Audit` + `Datastore.AllocateSpace` **and `Datastore.Allocate`** on the PBS-backed storage (the last is required for vzdump's retention/prune, which deletes old backups). Root-mode setup creates a `Joulenap` role with exactly these privileges (`connectors/provision.py`).
 - **PBS token**: `DatastoreAdmin` on the datastore (status, GC, verify) plus `Audit` on `/system` (read-only node CPU/RAM/network for the dashboard). PBS has no API to create custom roles, so root-mode setup grants these built-ins scoped by path.
-- **PBS token, additionally, for sync routes**: `RemoteAdmin` **and** `RemoteSyncPushOperator` on `/remote`, so Joulenap can create the remote and the sync job. PBS refuses ACL writes from a token, so these can only be granted while the wizard still holds a root ticket — see [`CONFIG-WIZARD.md`](CONFIG-WIZARD.md#sync-routes-need-one-extra-grant) for the one-line fix on a box set up before 1.0.
+- **PBS token, additionally, for sync routes**: `RemoteAdmin` **and** `RemoteSyncPushOperator` on `/remote`, so Joulenap can create the remote and the sync job. PBS refuses ACL writes from a token, so these can only be granted from a root login — the wizard does it while it still holds the root ticket, and a box set up before 1.0 gets them from the device editor's **Grant sync permissions** action (`POST /api/wizard/pbs/grant-sync`), which asks for root once and stores nothing. See [`CONFIG-WIZARD.md`](CONFIG-WIZARD.md#sync-routes-need-one-extra-grant).
 - **SSH to a PBS**: one dedicated key, shared by every managed box, ideally installed with a forced command that only allows `poweroff`.

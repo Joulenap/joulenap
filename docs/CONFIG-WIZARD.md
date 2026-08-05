@@ -69,7 +69,11 @@ Everything above is still discovered with a read-only token; only these become m
 
 A **sync** route makes Joulenap create a *remote* and a *sync job* on one of the two boxes, which needs privileges at `/remote` that a plain datastore token does not have. Root-mode provisioning grants them while it still holds the root ticket.
 
-**PBS refuses ACL writes from an API token**, answering *400 Unprivileged API tokens can't set ACL items*. So a box whose token you pasted by hand — or one configured with a Joulenap older than 1.0 — cannot be given them from the UI at all, and its sync routes will fail. Either re-run the wizard for that device with root credentials, or run this once on the PBS itself:
+**PBS refuses ACL writes from an API token**, answering *400 Unprivileged API tokens can't set ACL items*. So a box whose token you pasted by hand — or one configured with a Joulenap older than 1.0 — does not have them, and its sync routes will fail until it does. Because only root can make the grant, adding it takes a root login one more time:
+
+**Settings → Devices → edit the PBS → Sync routes → Grant sync permissions.** Enter the PBS root credentials and confirm. Joulenap logs in as root, adds the two roles to the token the device already uses, and discards the password — the token itself is untouched, so nothing else needs re-entering.
+
+The equivalent on the PBS itself, if you would rather not hand the password over:
 
 ```sh
 proxmox-backup-manager acl update /remote RemoteAdmin --auth-id 'root@pam!joulenap'

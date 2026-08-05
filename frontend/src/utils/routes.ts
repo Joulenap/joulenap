@@ -16,6 +16,12 @@ import type { Route, RouteKind, RouteSchedule } from '../api/types.ts'
 export const pveNodeId = (id: string) => `pve:${id}`
 export const pbsNodeId = (id: string) => `pbs:${id}`
 
+/** Whether a kind-prefixed key names a PBS. */
+export const isPbsKey = (key: string) => key.startsWith('pbs:')
+
+/** The bare device id inside a kind-prefixed key (`pbs:alpha` -> `alpha`). */
+export const deviceId = (key: string) => key.slice(key.indexOf(':') + 1)
+
 /**
  * The wires this route draws, as `[sourceNodeId, targetNodeId]` pairs.
  *

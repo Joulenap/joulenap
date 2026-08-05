@@ -256,6 +256,32 @@ def test_an_empty_string_still_clears_a_secret():
     assert out["pbss"][0]["api_token_secret"] == ""
 
 
+def test_a_device_secret_left_out_entirely_keeps_its_stored_value():
+    """Deleting the ``api_token_secret:`` line in the Advanced YAML editor must not wipe it.
+
+    ``deep_merge`` replaces lists wholesale, so an omitted key inside ``pbss`` vanishes
+    instead of being preserved the way an omitted key under ``notifications.telegram`` is —
+    and ``_unmask`` never fires, because there is no ``***REDACTED***`` left to resolve. The
+    result was 200 OK with the token gone.
+    """
+    cfg = Config()
+    cfg.pbss = [PbsDevice(id="pbs-01", api_token_secret="first", managed_power=False)]
+    out = restore_secrets({"pbss": [{"id": "pbs-01", "api_token_id": "root@pam!joulenap"}]}, cfg)
+    assert out["pbss"][0]["api_token_secret"] == "first"
+
+
+def test_an_omitted_secret_is_not_borrowed_from_another_device():
+    # The same guard as the match-by-id one: absence must resolve against *this* device only.
+    cfg = Config()
+    cfg.pbss = [
+        PbsDevice(id="pbs-01", api_token_secret="first", managed_power=False),
+        PbsDevice(id="pbs-02", api_token_secret="second", managed_power=False),
+    ]
+    out = restore_secrets({"pbss": [{"id": "pbs-02"}, {"id": "pbs-99"}]}, cfg)
+    assert out["pbss"][0]["api_token_secret"] == "second"
+    assert "api_token_secret" not in out["pbss"][1]  # a new device inherits nothing
+
+
 def test_session_defaults():
     s = Config().app.session
     assert s.https_only is False and s.max_age_days == 14

@@ -16,6 +16,7 @@ import type {
   RouteSource,
 } from '../api/types.ts'
 import type { PveGuests } from './guestPanel.ts'
+import { deviceId, isPbsKey, pbsNodeId, pveNodeId } from './routes.ts'
 
 /** The six preset swatches (NOTES decision 2), as the hex `Route.color` actually stores.
  *  The mockup keeps `var(--jn-…)` strings, which the backend's `^#[0-9a-fA-F]{6}$` rejects;
@@ -58,7 +59,15 @@ export interface RouteDraft {
   color: string
   enabled: boolean
   notify: boolean
-  /** Device ids, PVE or PBS, in the order the chips are laid out. */
+  /**
+   * Kind-prefixed device keys — `pve:alpha`, `pbs:alpha` — not bare ids.
+   *
+   * Device ids are unique only *within* `pves` and *within* `pbss` (the backend checks each
+   * list separately), so a PVE and a PBS may both be called `alpha`. A flat list of bare ids
+   * made the two indistinguishable: selecting the PVE also lit the PBS chip, flipped the kind
+   * to Sync, dropped the PVE source and saved a route that synced a box to itself. The
+   * topology has always keyed its cards this way; the editor now agrees with it.
+   */
   sourceIds: string[]
   target: string
   /** Only consulted when there are no sources at all. */
@@ -86,13 +95,9 @@ export interface RouteDraft {
  * between watching someone else's schedules and verifying the datastore. Any PBS among the
  * sources -> a PBS-to-PBS sync. Otherwise a backup from one or more PVEs.
  */
-export function inferKind(
-  sourceIds: string[],
-  pbsIds: readonly string[],
-  onWake: 'external' | 'verify',
-): RouteKind {
+export function inferKind(sourceIds: string[], onWake: 'external' | 'verify'): RouteKind {
   if (sourceIds.length === 0) return onWake
-  return sourceIds.some((id) => pbsIds.includes(id)) ? 'sync' : 'backup'
+  return sourceIds.some(isPbsKey) ? 'sync' : 'backup'
 }
 
 export interface SectionVisibility {
@@ -136,9 +141,9 @@ export function toggleGuest(
   return { ...selection, [pve]: next }
 }
 
-/** The PVE sources of this draft, in chip order, ignoring PBS chips and unknown ids. */
-export function pveSources(sourceIds: string[], pbsIds: readonly string[]): string[] {
-  return sourceIds.filter((id) => !pbsIds.includes(id))
+/** The PVE sources of this draft as bare device ids, in chip order, ignoring PBS chips. */
+export function pveSources(sourceIds: string[]): string[] {
+  return sourceIds.filter((key) => !isPbsKey(key)).map(deviceId)
 }
 
 /**
@@ -147,13 +152,12 @@ export function pveSources(sourceIds: string[], pbsIds: readonly string[]): stri
  */
 export function guestTally(
   sourceIds: string[],
-  pbsIds: readonly string[],
   groups: PveGuests[],
   selection: Record<string, number[]>,
 ): { total: number; chosen: number } {
   let total = 0
   let chosen = 0
-  for (const pve of pveSources(sourceIds, pbsIds)) {
+  for (const pve of pveSources(sourceIds)) {
     const group = groups.find((g) => g.pve === pve)
     for (const guest of group?.guests ?? []) {
       total++
@@ -164,8 +168,8 @@ export function guestTally(
 }
 
 /** Per-source group headers only appear once a route has more than one PVE source (NOTES 6). */
-export function showsGuestGroups(sourceIds: string[], pbsIds: readonly string[]): boolean {
-  return pveSources(sourceIds, pbsIds).length > 1
+export function showsGuestGroups(sourceIds: string[]): boolean {
+  return pveSources(sourceIds).length > 1
 }
 
 // --- draft <-> Route ---------------------------------------------------------
@@ -205,9 +209,9 @@ export function draftFromRoute(route: Route | null, pbss: PbsDevice[]): RouteDra
     sourceIds:
       route.kind === 'sync'
         ? route.source_pbs
-          ? [route.source_pbs]
+          ? [pbsNodeId(route.source_pbs)]
           : []
-        : route.sources.map((s) => s.pve),
+        : route.sources.map((s) => pveNodeId(s.pve)),
     target: route.target,
     onWake: route.kind === 'verify' ? 'verify' : 'external',
     // A route mixing per-source modes can only come from a hand-edited config.yaml; the form
@@ -241,13 +245,9 @@ export function slugifyRouteId(name: string, taken: readonly string[]): string {
   }
 }
 
-export function draftToRoute(
-  draft: RouteDraft,
-  pbsIds: readonly string[],
-  takenIds: readonly string[],
-): Route {
-  const kind = inferKind(draft.sourceIds, pbsIds, draft.onWake)
-  const pves = pveSources(draft.sourceIds, pbsIds)
+export function draftToRoute(draft: RouteDraft, takenIds: readonly string[]): Route {
+  const kind = inferKind(draft.sourceIds, draft.onWake)
+  const pves = pveSources(draft.sourceIds)
   const sources: RouteSource[] =
     kind === 'backup'
       ? pves.map((pve) => {
@@ -265,7 +265,7 @@ export function draftToRoute(
     notify: draft.notify,
     kind,
     sources,
-    source_pbs: kind === 'sync' ? (draft.sourceIds.find((id) => pbsIds.includes(id)) ?? '') : '',
+    source_pbs: kind === 'sync' ? deviceId(draft.sourceIds.find(isPbsKey) ?? '') : '',
     target: draft.target,
     schedule: { time: draft.time, days: [...draft.days], cron: draft.cron },
     retention: { ...draft.retention },
@@ -299,8 +299,7 @@ export function validateDraft(
   pves: PveDevice[],
   pbss: PbsDevice[],
 ): FieldError[] {
-  const pbsIds = pbss.map((p) => p.id)
-  const kind = inferKind(draft.sourceIds, pbsIds, draft.onWake)
+  const kind = inferKind(draft.sourceIds, draft.onWake)
   const errors: FieldError[] = []
 
   if (!draft.name.trim()) errors.push({ field: 'name', key: 'dashboard.routeModal.errName' })
@@ -311,7 +310,7 @@ export function validateDraft(
   }
 
   if (kind === 'backup' && draft.target) {
-    for (const id of pveSources(draft.sourceIds, pbsIds)) {
+    for (const id of pveSources(draft.sourceIds)) {
       const pve = pves.find((p) => p.id === id)
       if (pve && !pve.storages[draft.target]) {
         errors.push({
@@ -335,7 +334,7 @@ export function validateDraft(
   }
 
   if (kind === 'backup' && draft.guestMode === 'include') {
-    const sources = pveSources(draft.sourceIds, pbsIds)
+    const sources = pveSources(draft.sourceIds)
     // A source with no entry still means "all", so only a selection narrowed down to nothing
     // everywhere is empty — which would back up nothing at all.
     const covered = sources.some((pve) => {
@@ -383,14 +382,10 @@ function setsOverlap(a: number[] | null, b: number[] | null): boolean {
  *
  * Only backup routes: sync, external and verify never run vzdump's prune-backups.
  */
-export function retentionOverlaps(
-  draft: RouteDraft,
-  pbsIds: readonly string[],
-  routes: Route[],
-): string[] {
-  if (inferKind(draft.sourceIds, pbsIds, draft.onWake) !== 'backup') return []
+export function retentionOverlaps(draft: RouteDraft, routes: Route[]): string[] {
+  if (inferKind(draft.sourceIds, draft.onWake) !== 'backup') return []
   const mine = new Map<string, number[] | null>()
-  for (const pve of pveSources(draft.sourceIds, pbsIds)) {
+  for (const pve of pveSources(draft.sourceIds)) {
     mine.set(pve, draft.guestMode === 'include' ? (draft.selection[pve] ?? null) : null)
   }
   const names: string[] = []

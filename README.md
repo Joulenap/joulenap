@@ -111,8 +111,10 @@ becomes a route named **Backup**, a scheduled verification becomes one named **V
 schedule, guest selection and retention come across with them.
 
 - **A copy of the old file is kept** as `config.yaml.pre-overhaul.bak` next to it, before anything
-  is rewritten. If the conversion doesn't validate, Joulenap keeps running on your original file
-  and says why in a banner rather than starting up looking empty.
+  is rewritten. If the conversion doesn't validate, your file is left untouched — but Joulenap
+  then starts with **no devices and no routes**, so nothing is scheduled and no backup runs until
+  you fix it. That is what the banner on the dashboard is telling you: it is not a cosmetic
+  warning, it is the reason the page looks empty. The `.bak` is your rollback.
 - **One conversion is lossy, and it widens rather than narrows.** The old "back up all guests
   **except** these" mode no longer exists, so such a route becomes "all guests" — it will back up
   *more* than before, never less. Narrow it down from the route editor if that isn't what you
@@ -128,13 +130,13 @@ Joulenap can trigger backups and power machines on/off, so treat it as privilege
 
 - Use **scoped API tokens** for each PVE and each PBS, not root passwords — the exact privileges each one needs are listed in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#permissions-cheat-sheet).
 - The SSH key to a backup server should be dedicated and, ideally, restricted to the power-off command — the wizard offers exactly such a line.
-- **Every PBS API connection is TLS-pinned** to that device's certificate fingerprint (captured at setup), so a swapped/MITM cert is rejected; a legitimately renewed cert is accepted after you re-run that device's connect step in the wizard.
-- **Every PBS SSH host key is verified**: confirmed once during setup and stored in `data/known_hosts`; later power-off connections verify against it. Details in [`docs/CONFIG-WIZARD.md`](docs/CONFIG-WIZARD.md#security).
+- **A PBS API connection is TLS-pinned** to that device's stored certificate fingerprint, so a swapped/MITM cert is rejected; a legitimately renewed cert is accepted after you re-run that device's connect step in the wizard. The wizard always captures the fingerprint — but a device left without one is **not pinned and not validated**, so keep it set.
+- **A PBS SSH host key is verified** against `data/known_hosts`. The wizard's automatic key-install path confirms it with you first; a server added straight from Settings → Devices, or one where you installed the key yourself, is trusted on first use and recorded, with a warning in the log. Details in [`docs/CONFIG-WIZARD.md`](docs/CONFIG-WIZARD.md#security).
 - Keep the UI on your LAN/VPN and behind its login. Don't expose it to the internet.
 - `config.yaml` holds secrets — keep its file permissions tight and out of version control.
 - **Login lockout**: after 5 failed login attempts from an IP address, that IP is locked out for 5 minutes (protects against online brute-force attacks).
 - **Password floor**: admin passwords must be at least 8 characters.
-- **Session cookie** (`app.session` in config): set `https_only: true` when serving Joulenap over HTTPS or behind a TLS-terminating proxy; `max_age_days` controls session lifetime (default 14 days). Changing the admin password immediately invalidates all existing sessions.
+- **Session cookie** (`app.session` in config): set `https_only: true` when serving Joulenap over HTTPS or behind a TLS-terminating proxy; `max_age_days` controls session lifetime (default 14 days). Changing the admin password immediately signs out every *other* session; the one you changed it from stays signed in.
 - **First-run setup**: complete the initial account setup promptly — the setup endpoint remains open until an account is created (and is rate-limited for security).
 
 ## Roadmap

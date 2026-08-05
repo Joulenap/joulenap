@@ -207,6 +207,28 @@ function RunDetailBody({
     // makes it a free tick at the task-log poll's own cadence, with no second timer.
   }, [run.id, live, live ? liveLines.length : 0])
 
+  // A run reports its final status *before* its timeline is complete: the power-off steps are
+  // recorded by JobService after the cycle returns (it owns the lease, so it owns those
+  // steps), which means the fetch above — the one triggered by `live` flipping to false —
+  // usually lands while `poweroff` is still `running`. Nothing re-read it after that, so the
+  // row the history auto-opened sat on a blue "Running · —" power-off forever while the
+  // topology showed the box already asleep. Collapsing and re-expanding was the only cure.
+  const stepPending = detail?.steps.some((s) => s.status === 'running') ?? false
+  useEffect(() => {
+    if (live || !stepPending) return
+    let cancelled = false
+    const id = setInterval(() => {
+      api
+        .run(run.id)
+        .then((d) => !cancelled && setDetail(d))
+        .catch(() => {})
+    }, 2000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [run.id, live, stepPending])
+
   const shown = live ? liveLines : (lines ?? [])
 
   return (

@@ -277,7 +277,7 @@ buttons. Everything else sits behind **Settings**:
   edit modal for each, and a connection **Test**. Removing a device that a route still uses is
   refused, naming the routes. Re-run a device's connect step whenever its certificate is renewed or
   its address changes.
-- **Account** — the admin username and password (changing the password signs out every existing
+- **Account** — the admin username and password (changing the password signs out every *other* existing
   session immediately), plus interface language and the timezone your schedules are interpreted in.
 - **Notifications** — Telegram, ntfy, email (SMTP) and Discord with friendly forms, plus a
   catch-all list for any other [Apprise](https://github.com/caronc/apprise) URL or plain webhook.
@@ -329,7 +329,7 @@ easy path: **the first-run screen detects your timezone from your browser and se
 
 If you'd rather set it outside the UI, the order of precedence is:
 
-1. `app.timezone` in `config.yaml` (what the first-run screen and Localization page write) — wins.
+1. `app.timezone` in `config.yaml` (what the first-run screen and **Settings → Account** write) — wins.
 2. the `TZ` environment variable on the container (e.g. `TZ=Europe/Rome`) — the fallback the example
    commands leave at `Etc/UTC`.
 3. **UTC**, if neither is set.

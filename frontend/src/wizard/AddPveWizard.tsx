@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../api/client'
 import type { PveConnectResult, WizardStorage } from '../api/types'
@@ -52,8 +52,15 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
   const [failed, setFailed] = useState<string | null>(null)
   const [report, setReport] = useState<string[]>([])
   const [saved, setSaved] = useState(false)
+  // What already exists on the far side, so a retry after a partial failure resumes instead
+  // of repeating. A ref, not state: `save` reads it in the same tick it writes it.
+  const landed = useRef<{ pbsToken: { id: string; secret: string } | null; pbsId: string | null }>({
+    pbsToken: null,
+    pbsId: null,
+  })
 
   const setup = usePbsSetup(pbs, setPbs)
+  const { loadKey } = setup
   const errorFor = (field: string) => (errors ?? []).find((e) => e.field === field)
 
   const storages = connected?.storages ?? []
@@ -62,8 +69,14 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
   const skipped = chosen ? [] : [2]
 
   useEffect(() => {
-    if (step === 2) void setup.loadKey()
-  }, [step, setup])
+    if (step === 2) void loadKey()
+    // `loadKey`, not the whole `setup`: usePbsSetup returns a fresh object literal on every
+    // render, so depending on it re-ran this effect on every render. Harmless while the
+    // request is cached — but a *failed* keygen clears that cache so the user can retry, and
+    // the retry then fired from the next render instead of from a click. The result was an
+    // unbounded POST loop behind the error banner, on exactly the failures that happen in
+    // the field: a read-only data dir, a full volume, no ssh-keygen.
+  }, [step, loadKey])
 
   /** Step 1 → 2: connect, and in root mode mint the scoped PVE token on the way. */
   async function connect() {
@@ -121,6 +134,10 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       setErrors(problems)
       return null
     }
+    // A retry after a half-failed save must not mint a second token on the PBS: this step is
+    // reached again whenever the *PVE* create was the thing that failed, and each pass would
+    // otherwise leave another orphan `joulenap` token behind on the box.
+    if (landed.current.pbsToken) return landed.current.pbsToken
     let token = { id: pbs.tokenId.trim(), secret: pbs.tokenSecret }
     if (pbs.cred === 'root') {
       token = await api.wizardPbsProvision({
@@ -150,6 +167,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
         public_key: key.public_key,
       })
     }
+    landed.current.pbsToken = token
     return token
   }
 
@@ -170,7 +188,14 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
         setStep(2)
         return
       }
-      await api.createDevice('pbss', device as unknown as Record<string, unknown>)
+      // Skip the half that already landed. The PBS is created before the PVE (the storages
+      // map has to name a device that exists), so a PVE failure used to strand the pair: the
+      // retry re-posted the same PBS and got a 409 "already exists" that said nothing about
+      // half the work having succeeded, and the only escape was to cancel and start over.
+      if (landed.current.pbsId === null) {
+        await api.createDevice('pbss', device as unknown as Record<string, unknown>)
+        landed.current.pbsId = device.id
+      }
       map[device.id] = chosen.storage
       lines.push(t('wizard.report.pbsConfigured', { id: device.id }))
     }

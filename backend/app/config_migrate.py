@@ -9,7 +9,9 @@ Two rules keep this from ever bricking a boot (the BE-B1 lesson):
 * the original file is copied to ``config.yaml.pre-overhaul.bak`` before anything is
   rewritten, and an existing ``.bak`` is never overwritten — the first migration wins;
 * the converted config is validated before it is adopted. If anything about it fails to
-  validate, or the file cannot be written, the original is kept and the app starts on it.
+  validate, or the file cannot be written, the file on disk is left untouched — but nothing
+  in 1.0 reads the 0.9 sections, so the app boots empty (no devices, no routes, nothing
+  scheduled) with ``config.MIGRATION_ERROR`` set. See ``config._migrate_0_9``.
 
 The 0.9 sections are dropped from the converted config — nothing reads them any more, and
 ``config.yaml.pre-overhaul.bak`` is the rollback path if one is ever needed.
@@ -18,6 +20,7 @@ The 0.9 sections are dropped from the converted config — nothing reads them an
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -103,10 +106,16 @@ def write_backup(path: Path) -> None:
     from .config import restrict_secret_file
 
     try:
-        shutil.copyfile(path, bak)
-        # copyfile copies contents, not mode bits, so the copy would land 0644 under a
-        # container's default umask — holding every API token, secret_key, password hash,
-        # SMTP password and bot token, indefinitely (an existing .bak is never overwritten).
+        # Create owner-only *up front* rather than copying and chmod'ing after: copyfile
+        # creates at 0666 & ~umask (typically 0644), so a chmod that follows leaves a window
+        # in which every API token, secret_key, password hash, SMTP password and bot token in
+        # this file is world-readable. `save_config` and `generate_keypair` both open with
+        # 0o600 for the same reason. O_EXCL because an existing .bak is never overwritten —
+        # it holds the true 0.9 original. The chmod stays as a belt-and-braces for a mount
+        # that ignores the mode argument.
+        fd = os.open(bak, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as dst, path.open("rb") as src:
+            shutil.copyfileobj(src, dst)
         restrict_secret_file(bak)
         log.info("config: saved a pre-migration copy at %s", bak)
     except OSError as exc:

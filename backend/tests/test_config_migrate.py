@@ -198,6 +198,27 @@ def test_the_backup_is_owner_only(tmp_path: Path):
     assert stat.S_IMODE((tmp_path / BAK).stat().st_mode) == 0o600
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_the_backup_is_never_world_readable_even_for_an_instant(tmp_path: Path, monkeypatch):
+    """It must be *created* 0600, not chmod'ed to it afterwards.
+
+    `shutil.copyfile` creates at 0666 & ~umask, so a chmod that follows leaves a window in
+    which another local process can read every secret in the file. Asserting the end state
+    cannot see that window, so this asserts the mode the file is created with.
+    """
+    seen: list[int] = []
+    real_open = os.open
+
+    def spy(path, flags, mode=0o777, *args, **kwargs):
+        if str(path).endswith(BAK):
+            seen.append(mode)
+        return real_open(path, flags, mode, *args, **kwargs)
+
+    monkeypatch.setattr(config_migrate.os, "open", spy)
+    load_config(_write(tmp_path))
+    assert seen == [0o600]
+
+
 def test_an_unwritable_config_still_boots(tmp_path: Path, monkeypatch):
     path = _write(tmp_path)
     monkeypatch.setattr(

@@ -5,6 +5,8 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [1.0.0]
 
 Joulenap is no longer built around one Proxmox host backing up to one backup server. It now models
@@ -65,9 +67,9 @@ conversion that is lossy, and for the two breaking changes outside the interface
   `backup:` sections become `pves[]`, `pbss[]` and `routes[]` on the first start after the upgrade:
   the backup job becomes a route named Backup, a scheduled verification becomes one named Verify,
   and schedules, guest selections and retention come across with them. The original file is copied
-  to `config.yaml.pre-overhaul.bak` first, and if the converted config fails validation the original
-  is kept, the app starts on it, and the reason appears as a banner rather than the app looking like
-  a fresh install.
+  to `config.yaml.pre-overhaul.bak` first. If the converted config fails validation the file on disk
+  is left untouched, but the app then starts with no devices and no routes — nothing is scheduled
+  until it is fixed — and says so in a banner rather than looking like a fresh install.
 - **The `exclude` guest mode is gone, and a migrated route widens to "all guests".** Inverting an
   exclusion list needs a live guest list that is not available while the config is being read, so
   such a route is converted to "all" and a warning is logged. It will back up *more* than before,
@@ -112,7 +114,9 @@ conversion that is lossy, and for the two breaking changes outside the interface
 - **A token provisioned by the wizard could not create a remote or a sync job at all**, because
   nothing was granted at `/remote`. Provisioning now grants both `RemoteAdmin` and
   `RemoteSyncPushOperator` while it still holds the root ticket. A server set up before this — or
-  one whose token you pasted by hand — needs the grant applied by hand on the box; the command is in
+  one whose token you pasted by hand — can be brought up to date from **Settings → Devices → edit
+  the server → Grant sync permissions**, which asks for root once, adds the two roles to the token
+  already in use and stores nothing. The equivalent commands to run on the box are still in
   `docs/CONFIG-WIZARD.md`.
 - **A sync task ending in warnings surfaced as a bare task id.** It now names the direction, both
   servers, the exit status and the first warning or error line from the task log.

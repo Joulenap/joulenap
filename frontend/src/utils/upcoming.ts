@@ -19,8 +19,6 @@ export interface UpcomingRow {
   now: boolean
 }
 
-const DAY_MS = 86_400_000
-
 /**
  * The next `count` firings of a time+days schedule strictly after `after`.
  *
@@ -36,12 +34,16 @@ export function nextOccurrences(schedule: RouteSchedule, after: Date, count: num
   if (!schedule.days.some(Boolean)) return []
 
   const out: Date[] = []
-  const cursor = new Date(after.getFullYear(), after.getMonth(), after.getDate(), h, m, 0, 0)
   // Scan day by day. The sparsest legal schedule is a single weekday, so `count` firings
   // can be up to 7*count days out (+1 for a today-but-already-past start) — a `count + 7`
   // bound silently returns a short list for a weekly route.
   for (let i = 0; i <= count * 7 && out.length < count; i++) {
-    const day = new Date(cursor.getTime() + i * DAY_MS)
+    // Step the calendar date, not the clock: adding a fixed 86_400_000 ms is a fixed 24h, which is a
+    // *UTC* day. Across a DST boundary that shifts the wall-clock time by an hour, so a
+    // 04:00 route was listed at 03:00 or 05:00 for every row past the switch — while
+    // APScheduler, which is timezone-aware, still fires it at 04:00. Rebuilding the date
+    // from its parts keeps the schedule's wall-clock time exactly.
+    const day = new Date(after.getFullYear(), after.getMonth(), after.getDate() + i, h, m, 0, 0)
     // JS weeks start on Sunday; schedule.days is Mon..Sun.
     const mondayIndex = (day.getDay() + 6) % 7
     if (schedule.days[mondayIndex] && day.getTime() > after.getTime()) out.push(day)

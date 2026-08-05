@@ -78,6 +78,8 @@ pbss: []
 #     port: 8007
 #     datastore: backup
 #     fingerprint: ""         # PBS dashboard > Show Fingerprint, e.g. "aa:bb:cc:..."
+#     # Leave this empty and the connection to this PBS is NOT pinned and NOT validated —
+#     # its API token then travels over TLS nothing has checked. The wizard fills it in.
 #     # Token privileges: DatastoreAdmin on the datastore (status, GC, verify) plus Audit on
 #     # /system (read-only node CPU/RAM/network for the dashboard). A PBS taking part in a
 #     # sync route also needs RemoteAdmin AND RemoteSyncPushOperator on /remote — PBS refuses

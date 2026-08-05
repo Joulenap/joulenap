@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import type { Route, RunSummary, StatusResponse } from '../../api/types'
 import { Toggle } from '../../components/Toggle'
+import { RUNS_LIMIT } from '../../hooks/useRuns'
 import { fmtDT } from '../../utils/format'
 import { routeKindBadge, routeSourceIds, scheduleSummary } from '../../utils/routes'
 import { runStatusStyle } from '../../utils/status'
@@ -81,6 +82,11 @@ function RouteCard({
   // The history the page already polls also carries every route's last outcome, so the
   // result badge costs no extra request.
   const last = runs.find((r) => r.route_id === route.id && r.status !== 'running')
+  // ...but that buffer is the newest RUNS_LIMIT runs across *all* routes, so with a few daily
+  // routes a weekly or monthly one drops out of it within a week or two. Claiming it has
+  // never run is about the worst thing a backup UI can say incorrectly, so once the window is
+  // full, absence only licenses "nothing recent".
+  const agedOut = !last && runs.length >= RUNS_LIMIT
 
   const toggle = async () => {
     setSaving(true)
@@ -156,10 +162,14 @@ function RouteCard({
           </span>
         ) : (
           <span className="res" style={{ color: 'var(--jn-text-muted)' }}>
-            {t('dashboard.neverRun')}
+            {t(agedOut ? 'dashboard.noRecentRuns' : 'dashboard.neverRun')}
           </span>
         )}
-        <Toggle on={route.enabled} onClick={saving ? () => {} : toggle} />
+        <Toggle
+          on={route.enabled}
+          onClick={saving ? () => {} : toggle}
+          label={t('dashboard.routeEnabledLabel', { name: route.name })}
+        />
         <button type="button" className="btn" onClick={() => onEdit(route)}>
           {t('common.edit')}
         </button>

@@ -684,8 +684,33 @@ def _restore_in_place(node: Any, current: Any) -> Any:
                 _restore_in_place(value, cur)
     elif isinstance(node, list):
         for i, item in enumerate(node):
-            _restore_in_place(item, _match(item, current, i))
+            matched = _match(item, current, i)
+            _restore_in_place(item, matched)
+            _keep_omitted_secrets(item, matched)
     return node
+
+
+def _keep_omitted_secrets(item: Any, current: Any) -> None:
+    """Carry a stored secret over to ``item`` when the client left the field out entirely.
+
+    ``deep_merge`` merges mappings key-by-key but **replaces lists wholesale**, so a key
+    omitted under ``notifications.telegram`` keeps its stored value while the same omission
+    inside ``pves``/``pbss`` simply vanishes — and ``_unmask`` never sees it, because that
+    guard only fires on a ``***REDACTED***`` that is *present*. In 0.9 devices lived under
+    mappings and were protected by that asymmetry; 1.0 moved them into lists and lost it.
+
+    Deleting the ``api_token_secret:`` line in the Advanced YAML editor therefore returned
+    200 and wiped the token, which also contradicted ``api/config.py``'s documented promise
+    that "a key the user deletes keeps its stored value rather than being wiped".
+
+    Only ever *adds* a key that is absent: an explicit ``""`` still means "clear it", which
+    is the documented way to remove a credential.
+    """
+    if not (isinstance(item, dict) and isinstance(current, dict)):
+        return
+    for key in SECRET_KEYS:
+        if key not in item and key in current:
+            item[key] = deepcopy(current[key])
 
 
 def _match(item: Any, current: Any, index: int) -> Any:

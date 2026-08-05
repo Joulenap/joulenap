@@ -45,15 +45,39 @@ Joulenap is designed to run on a trusted LAN/VPN, not on the public internet.
   key, treat it as protecting all of them: the wizard deliberately reuses an existing key rather
   than regenerating one, since a new key would silently lock Joulenap out of the servers already
   configured.
+- **A backup-server token provisioned by the wizard also carries the two `/remote` roles a sync
+  route needs** (`RemoteAdmin` and `RemoteSyncPushOperator`), whether or not you ever create one.
+  They are granted at provisioning time because PBS refuses ACL writes from a token, so they cannot
+  be added later without another root login — Settings → Devices → *Grant sync permissions* is that
+  login, for a server set up before 1.0. The practical effect is that a leaked token can also
+  enumerate and modify remotes on that server. If you want a narrower token, create it yourself and
+  paste it in rather than using root-mode provisioning.
+
+### What a sync route puts on your other server
+
+A PBS→PBS sync is executed by one of the two boxes, and PBS requires a *remote* entry for the other
+— which stores that other server's **API token id and secret** in
+`/etc/proxmox-backup/remote.cfg` on the executing box. That is how PBS sync works and Joulenap
+cannot avoid it, but it is worth knowing: root on either server, or a backup of its `/etc`, exposes
+the credential Joulenap uses for the other one. Joulenap creates the remote at the start of each
+sync run and **deletes it again when the run ends**, so it is not left sitting there between runs.
 
 ### Transport
 
-- **Each backup server's API is TLS-pinned** to the certificate fingerprint captured for that device
-  at setup, so a swapped or MITM certificate is rejected rather than trusted. A legitimately renewed
-  certificate is accepted once you re-run that device's connect step.
-- **Each backup server's SSH host key is verified.** It's shown to you for confirmation during
-  setup, stored in `data/known_hosts`, and checked on every later connection. The wizard refuses to
-  send a root password over SSH before the host key has been confirmed.
+- **A backup server's API is TLS-pinned to its stored certificate fingerprint**, so a swapped or
+  MITM certificate is rejected rather than trusted. A legitimately renewed certificate is accepted
+  once you re-run that device's connect step. The wizard always captures a fingerprint, but the
+  field can be left empty in a hand-written `config.yaml` or cleared in the device editor — and a
+  device with **no fingerprint is not pinned and its certificate is not validated at all**. Joulenap
+  refuses to send root credentials over such a connection, but ordinary API traffic (carrying the
+  device's API token) still goes over it. Keep the fingerprint set.
+- **A backup server's SSH host key is verified against `data/known_hosts`.** The wizard's automatic
+  key-install path shows it to you for confirmation first, and refuses to send a root password
+  before you have confirmed it. Two paths do not populate `known_hosts`: installing the public key
+  yourself instead of letting the wizard do it, and adding a server directly from
+  Settings → Devices. For those, the first power-off **trusts the host key on first use** and
+  records it, with a warning in the activity log; every connection after that is verified. Nothing
+  authenticates with a password on that path — only the restricted key.
 - A Proxmox host's `verify_tls` is off by default, because a stock PVE serves a self-signed
   certificate. Where a PVE has a valid certificate, turn it on — it is the only protection for a
   root password used during provisioning, which is otherwise exposed to anyone who can intercept
