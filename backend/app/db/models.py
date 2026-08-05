@@ -161,6 +161,12 @@ class RunStep(Base):
     started_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=_utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     detail: Mapped[str | None] = mapped_column(Text, default=None)
+    # The localisation seam, same shape as ``Run.error_key``/``error_params``: ``detail``
+    # keeps the English rendering (and is all a pre-1.0 row has), while the key and its
+    # JSON parameters let the API rebuild the line in the user's language on read. Only
+    # details Joulenap authored carry a key — a task UPID has none.
+    detail_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    detail_params: Mapped[str | None] = mapped_column(Text, default=None)
 
     run: Mapped[Run] = relationship(back_populates="steps")
 

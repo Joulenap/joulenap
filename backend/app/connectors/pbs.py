@@ -237,6 +237,18 @@ class PbsClient:
         if any(e.get("id") == job_id for e in existing):
             self._api.request("DELETE", f"/config/sync/{job_id}")
 
+    def delete_remote(self, name: str) -> None:
+        """Drop the remote ``name`` if it exists.
+
+        A remote holds the *other* PBS's API token — id and secret — in that box's
+        ``remote.cfg``, so it must not outlive the route that created it: revoking the
+        credential in Joulenap otherwise leaves a working copy of it on the peer. Call
+        :meth:`delete_sync_job` first; PBS refuses to delete a remote a job still references.
+        """
+        existing = self._api.request("GET", "/config/remote") or []
+        if any((e.get("name") or e.get("id")) == name for e in existing):
+            self._api.request("DELETE", f"/config/remote/{name}")
+
     def ensure_sync_job(
         self,
         job_id: str,

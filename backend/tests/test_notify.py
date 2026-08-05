@@ -14,11 +14,14 @@ from sqlalchemy import select
 from app.config import Config, Route
 from app.db import session_scope
 from app.db.models import Run, RunKind, RunStatus, RunStep, RunTrigger, StepName, StepStatus
+from app.db.startup import _INTERRUPTED_STEP
+from app.jobs.lease import ReleaseOutcome
 from app.jobs.route_cycle import monitor_detail
 from app.main import create_app
 from app.notify import NotificationService
 from app.notify.apprise_urls import Channel, build_channels
 from app.notify.messages import (
+    _DETAILS,
     _ERRORS,
     _KIND_LABEL,
     _MESSAGES,
@@ -223,9 +226,13 @@ def _send(svc, config, run, **kwargs):
     return svc.send_run_result(RunContext(config=config, run=run, **kwargs))
 
 
-def _step(name: StepName, status: StepStatus, seconds: int) -> RunStep:
-    """A finished step that took ``seconds``, for the duration breakdown."""
-    step = RunStep(name=name, status=status)
+def _step(name: StepName, status: StepStatus, seconds: int, label: str | None = None) -> RunStep:
+    """A finished step that took ``seconds``, for the duration breakdown.
+
+    ``label`` produces the ``backup:pve-alpha`` / ``poweroff:pbs-02`` form a multi-device run
+    records — which is what the route cycles actually write.
+    """
+    step = RunStep(name=f"{name.value}:{label}" if label else name, status=status)
     step.started_at = datetime(2026, 6, 28, 4, 0, 0, tzinfo=UTC)
     step.finished_at = step.started_at + timedelta(seconds=seconds)
     return step
@@ -305,12 +312,29 @@ def test_run_message_duration_breaks_down_the_work_phases():
     run = _run(RunStatus.SUCCESS)
     run.steps = [
         _step(StepName.WAIT, StepStatus.SUCCESS, 40),
-        _step(StepName.BACKUP, StepStatus.SUCCESS, 70),
+        # Labelled, because that is the only shape a backup route can produce: one step per
+        # source PVE. An equality lookup matched nothing here and dropped the phase entirely.
+        _step(StepName.BACKUP, StepStatus.SUCCESS, 70, label="pve-alpha"),
         RunStep(name=StepName.GC, status=StepStatus.SKIPPED),
         _step(StepName.POWEROFF, StepStatus.SUCCESS, 9),
     ]
     _title, body = _msg(Config(), run)
     assert "Duration: 1m 23s (backup 1m 10s)" in body
+
+
+def test_run_message_sums_one_backup_phase_across_several_sources():
+    """A fan-in route records ``backup:pve-alpha`` and ``backup:pve-beta``; the line should
+    read one ``backup`` slice, not two entries and not just the last one."""
+    run = _run(RunStatus.SUCCESS)
+    run.steps = [
+        _step(StepName.WAIT, StepStatus.SUCCESS, 40),
+        _step(StepName.BACKUP, StepStatus.SUCCESS, 70, label="pve-alpha"),
+        _step(StepName.BACKUP, StepStatus.SUCCESS, 50, label="pve-beta"),
+        _step(StepName.GC, StepStatus.SUCCESS, 66),
+        _step(StepName.POWEROFF, StepStatus.SUCCESS, 9),
+    ]
+    _title, body = _msg(Config(), run)
+    assert "(backup 2m 0s · GC 1m 6s)" in body
 
 
 def test_run_message_trigger_and_next_run_are_localized():
@@ -624,10 +648,27 @@ def test_every_language_pack_holds_the_same_keys():
         ("_MESSAGES", _MESSAGES),
         ("_KIND_LABEL", _KIND_LABEL),
         ("_ERRORS", _ERRORS),
+        ("_DETAILS", _DETAILS),
     ):
         english = sorted(_flatten(packs["en"]))
         for language, pack in packs.items():
             assert sorted(_flatten(pack)) == english, f"{name}: '{language}' differs from 'en'"
+
+
+def test_every_release_outcome_has_a_detail_string():
+    """``ReleaseOutcome.key`` is derived from the member name, so a new member silently
+    renders as the raw English until the packs learn about it. This is what notices."""
+    for outcome in ReleaseOutcome:
+        assert outcome.key in _DETAILS["en"], outcome
+        # The enum's value doubles as the stored English detail: the two must agree, or the
+        # timeline reads one thing in English and another in Italian.
+        assert _DETAILS["en"][outcome.key] == outcome.value
+
+
+def test_the_interrupted_step_detail_matches_the_catalogue():
+    """``db.startup`` writes the English text and the key by hand (importing the recorder
+    there would be a cycle), so nothing but this keeps the two in step."""
+    assert _INTERRUPTED_STEP == _DETAILS["en"]["interrupted"]
 
 
 def test_error_keys_are_rendered_in_the_configured_language():

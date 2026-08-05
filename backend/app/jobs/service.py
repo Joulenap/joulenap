@@ -32,7 +32,7 @@ from ..db.prune import PruneResult, prune_history
 from ..notify.messages import LocalizedError, RunContext
 from .deps import CycleDeps
 from .lease import LeaseDeps, PbsUnreachableError, PowerLease, ReleaseOutcome
-from .recorder import RunRecorder
+from .recorder import RunRecorder, set_detail
 from .route_cycle import RUN_KINDS, run_pbs_maintenance, run_route
 
 log = logging.getLogger("joulenap.jobs")
@@ -299,6 +299,7 @@ class JobService:
         recorder = self._start(item.kind, item.trigger, route)
         item.run_id = recorder.run_id
         held: list[PbsDevice] = []
+        multi = len(devices) > 1  # labels every WAIT/POWEROFF step of this run, consistently
         try:
             with recorder:
                 log.info(
@@ -306,20 +307,39 @@ class JobService:
                 )
                 try:
                     for device in devices:
-                        self._acquire_step(device, recorder, multi=len(devices) > 1)
+                        self._acquire_step(device, recorder, multi=multi)
                         held.append(device)
                 except PbsUnreachableError as exc:
                     # A cancel abandons the wake wait the same way a timeout does, so say
                     # which one it was rather than filing every stopped run as a failure.
-                    if self._cancel.is_set():
+                    cancelled = self._cancel.is_set()
+                    if cancelled:
                         recorder.finish(RunStatus.ABORTED, error=LocalizedError("cancelled"))
                     else:
                         recorder.finish(RunStatus.FAILURE, error=exc)
-                    raise
+                    # Fall through the *same* release-and-notify path a completed run uses,
+                    # rather than re-raising. Re-raising unwound past both of them, so
+                    # "the backup server never came up" — the one failure this product
+                    # exists to have an opinion about — left a history row and nothing
+                    # else, no Telegram, no ntfy, no email. 0.9 notified here, so it was a
+                    # regression, and the `pbs_unreachable` entry in the message catalogue
+                    # was built for a message that could never be sent.
+                    #
+                    # Releasing matters just as much on a sync route: the target can be
+                    # awake when the source never answers, and that box was otherwise left
+                    # burning power with no POWEROFF step in the timeline.
+                    left_on = self._release_all(item, held, recorder, multi=multi)
+                    held = []
+                    # A stopped run stays silent on purpose — the user is standing at the UI.
+                    if not cancelled:
+                        ctx = RunContext(config=config, run=recorder.run, route=route)
+                        ctx.left_on = left_on
+                        self._notify(ctx, recorder)
+                    return
                 # The cycle sets the run's final status itself and hands back what to say
                 # about it (None = cancelled, say nothing).
                 ctx = item.job(config, subject, recorder, self.deps)
-                left_on = self._release_all(item, held, recorder)
+                left_on = self._release_all(item, held, recorder, multi=multi)
                 held = []
                 if ctx is not None:
                     ctx.left_on = left_on
@@ -366,10 +386,15 @@ class JobService:
         """
         with recorder.step(StepName.WAIT, label=device.id if multi else None) as step:
             was_awake = self.lease.acquire(device)
-            step.detail = "already awake" if was_awake else "woken by Wake-on-LAN"
+            set_detail(step, "already_awake" if was_awake else "woken")
 
     def _release_all(
-        self, item: QueuedRun, devices: list[PbsDevice], recorder: RunRecorder | None
+        self,
+        item: QueuedRun,
+        devices: list[PbsDevice],
+        recorder: RunRecorder | None,
+        *,
+        multi: bool | None = None,
     ) -> list[str]:
         """Drop every lease this run holds, recording each power-off decision. Returns the
         ids of the boxes genuinely left burning power, for the notification's warning.
@@ -379,10 +404,16 @@ class JobService:
         is why the warning cannot be a single fact about the run.
         ``recorder=None`` is the crash path — the leases must still be dropped, but the run
         row is already being finalised, so there is nothing left to record against.
+
+        ``multi`` labels the POWEROFF steps and must describe *the run*, not this call's
+        slice of it: when a wake fails half way, only the boxes that came up are released,
+        and deriving it from ``devices`` here would pair a labelled ``wait:pbs-02`` with a
+        bare ``poweroff`` in the same timeline. The caller passes what ``_acquire_step``
+        used; ``None`` keeps the old derive-it-here behaviour for the crash path.
         """
         succeeded = recorder is not None and recorder.run.status == RunStatus.SUCCESS
         power_off = self._power_off_policy(item, succeeded=succeeded)
-        multi = len(devices) > 1
+        multi = len(devices) > 1 if multi is None else multi
         left_on: list[str] = []
         for device in devices:
             if recorder is None:
@@ -391,7 +422,7 @@ class JobService:
                 continue
             with recorder.step(StepName.POWEROFF, label=device.id if multi else None) as step:
                 outcome = self.lease.release(device, power_off=power_off)
-                step.detail = str(outcome)
+                set_detail(step, outcome.key)
                 if outcome is ReleaseOutcome.POWERED_OFF:
                     continue
                 # Not a failure: leaving the box on is the *correct* outcome after a failed

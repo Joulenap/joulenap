@@ -30,7 +30,7 @@ from ..db.guest_backups import upsert_last_backups
 from ..db.models import LogLevel, RunStatus, StepName
 from ..notify.messages import GuestSummary, LocalizedError, RunContext
 from .deps import CycleDeps
-from .recorder import RunRecorder
+from .recorder import RunRecorder, set_detail
 
 # Poll cadence while tailing a task's log — snappier than the plain wait default so the
 # live Task-log panel narrates in near-real-time (Proxmox has no push API).
@@ -326,7 +326,9 @@ def _route_preflight(
         with deps.connect_pbs(target) as pbs:
             ds = pbs.datastore_status()
         _cache_route_datastore(target, recorder, ds)
-        step.detail = f"{ds.avail_pct:.1f}% free ({ds.avail / 1_000_000_000:.0f} GB)"
+        set_detail(
+            step, "free_space", free=f"{ds.avail_pct:.1f}", avail=f"{ds.avail / 1_000_000_000:.0f}"
+        )
         if ds.avail_pct < threshold:
             raise CycleAbort(
                 "datastore_full",
@@ -472,7 +474,7 @@ def run_route_backup(
         if route.options.gc:
             _route_gc_step(target, recorder, deps)
         else:
-            recorder.skip_step(StepName.GC, "GC disabled for this route")
+            recorder.skip_step(StepName.GC, "gc_disabled")
 
         if deps.cancelled():
             raise CycleCancelled("Run cancelled")
@@ -480,7 +482,7 @@ def run_route_backup(
         if route.options.verify_after:
             _route_verify_step(target, recorder, deps, outdated_after=None)
         else:
-            recorder.skip_step(StepName.VERIFY, "verify disabled for this route")
+            recorder.skip_step(StepName.VERIFY, "verify_disabled")
 
         datastore = _route_read_datastore(target, recorder, deps)
         _refresh_route_backup_cache(target, covered, recorder, deps)

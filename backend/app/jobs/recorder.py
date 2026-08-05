@@ -27,7 +27,7 @@ from ..db.models import (
     StepStatus,
     TaskLogLine,
 )
-from ..notify.messages import LocalizedError
+from ..notify.messages import LocalizedError, render_detail
 
 
 def _utcnow() -> datetime:
@@ -46,6 +46,18 @@ def _error_code(error: str | BaseException) -> tuple[str | None, dict[str, objec
     if isinstance(error, BaseException):
         return "unexpected", {"detail": str(error)}
     return None, None
+
+
+def set_detail(step: RunStep, key: str, /, **params: object) -> None:
+    """Set a step's ``detail`` from the ``_DETAILS`` catalogue, in English and as a code.
+
+    Both halves in one call, so the two can never drift: ``detail`` keeps the English
+    sentence every existing reader (and every pre-1.0 row) expects, while the key and its
+    parameters let ``api.schemas.StepInfo`` rebuild the line in the user's language.
+    """
+    step.detail = render_detail("en", key, params) or key
+    step.detail_key = key
+    step.detail_params = json.dumps(params) if params else None
 
 
 class RunRecorder:
@@ -130,7 +142,13 @@ class RunRecorder:
         except Exception as exc:
             step.status = StepStatus.FAILURE
             step.finished_at = _utcnow()
+            # Clear the key as well as the text: a step that set a localized detail and *then*
+            # failed (the pre-flight guard reports free space, then aborts on it) would
+            # otherwise keep rendering that detail — ``render_detail`` prefers a resolvable
+            # key over the raw string, so the failure message would never reach the timeline.
             step.detail = str(exc)
+            step.detail_key = None
+            step.detail_params = None
             self.log(LogLevel.ERROR, f"{full}: {exc}")
             self._session.commit()
             raise
@@ -144,22 +162,27 @@ class RunRecorder:
                 self.log(LogLevel.OK, f"{full}: done")
             self._session.commit()
 
-    def skip_step(self, name: StepName, detail: str | None = None) -> None:
-        """Record a step that was intentionally not run (e.g. GC when the toggle is off)."""
+    def skip_step(self, name: StepName, detail_key: str | None = None, **params: object) -> None:
+        """Record a step that was intentionally not run (e.g. GC when the toggle is off).
+
+        Takes a ``_DETAILS`` key rather than a sentence: a skipped step's reason is always
+        Joulenap's own copy, so it is always translatable.
+        """
         # Both ends from one clock read: letting ``started_at`` fall back to its column
         # default means it is evaluated at flush, i.e. *after* this call, and a skipped step
         # ends up finishing before it started — a negative duration in the timeline.
         now = _utcnow()
-        self._session.add(
-            RunStep(
-                run_id=self.run.id,
-                name=name,
-                status=StepStatus.SKIPPED,
-                started_at=now,
-                finished_at=now,
-                detail=detail,
-            )
+        step = RunStep(
+            run_id=self.run.id,
+            name=name,
+            status=StepStatus.SKIPPED,
+            started_at=now,
+            finished_at=now,
         )
+        if detail_key:
+            set_detail(step, detail_key, **params)
+        detail = step.detail
+        self._session.add(step)
         if detail:
             self.log(LogLevel.INFO, f"{name.value}: skipped ({detail})")
         else:

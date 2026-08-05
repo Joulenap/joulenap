@@ -41,6 +41,7 @@ def sweep_orphaned_runs(session: Session, *, now: datetime | None = None) -> lis
                 step.finished_at = ts
                 if not step.detail:
                     step.detail = _INTERRUPTED_STEP
+                    step.detail_key = "interrupted"
     return list(orphaned)
 
 

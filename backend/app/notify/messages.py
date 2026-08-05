@@ -275,6 +275,44 @@ _ERRORS: dict[str, dict[str, str]] = {
     },
 }
 
+#: Step ``detail`` strings Joulenap authored, i.e. the ones it can translate. The English
+#: rendering is still stored on the row (``run_steps.detail``) and is the fallback here, the
+#: same contract ``_ERRORS`` has with ``runs.error``.
+#:
+#: Deliberately **not** covered, and deliberately keyless: a PVE/PBS task UPID and the text
+#: of someone else's exception. Those are identifiers and foreign strings, not copy.
+_DETAILS: dict[str, dict[str, str]] = {
+    "en": {
+        "already_awake": "already awake",
+        "woken": "woken by Wake-on-LAN",
+        "powered_off": "powered off",
+        "still_needed": "left on: still needed by another run",
+        "unmanaged": "left on: Joulenap does not manage this box's power",
+        "left_on": "left powered on",
+        "gc_disabled": "GC disabled for this route",
+        "verify_disabled": "verify disabled for this route",
+        "free_space": "{free}% free ({avail} GB)",
+        "tasks_observed": "{count} task(s) observed",
+        "no_tasks_observed": "no tasks observed",
+        "interrupted": "Interrupted at startup",
+    },
+    "it": {
+        "already_awake": "già acceso",
+        "woken": "acceso con Wake-on-LAN",
+        "powered_off": "spento",
+        "still_needed": "lasciato acceso: serve ancora a un'altra esecuzione",
+        "unmanaged": "lasciato acceso: Joulenap non gestisce l'alimentazione di questa macchina",
+        "left_on": "lasciato acceso",
+        "gc_disabled": "GC disattivata per questa route",
+        "verify_disabled": "verifica disattivata per questa route",
+        "free_space": "{free}% libero ({avail} GB)",
+        "tasks_observed": "{count} task osservati",
+        "no_tasks_observed": "nessun task osservato",
+        "interrupted": "Interrotto al riavvio",
+    },
+}
+
+
 def _run_error(language: str, run: Run) -> str | None:
     """A run's failure message in ``language``, from the stored key when it has one.
 
@@ -318,13 +356,14 @@ def _pack(language: str) -> dict[str, dict[str, str]]:
     return _MESSAGES.get(language, _MESSAGES["en"])
 
 
-def render_error(
+def _render(
+    catalogue: dict[str, dict[str, str]],
     language: str,
     key: str | None,
     params: Mapping[str, object] | None,
-    raw: str | None = None,
+    raw: str | None,
 ) -> str | None:
-    """The failure message in ``language``, falling back to ``raw`` whenever it cannot be built.
+    """Look ``key`` up in ``catalogue`` and fill it in, degrading to ``raw`` at every step.
 
     Every branch degrades to readable text rather than raising: a pre-1.0 row has no key, a
     key added in a later version may be missing from a pack, and a template whose parameters
@@ -333,13 +372,38 @@ def render_error(
     """
     if not key:
         return raw
-    template = _ERRORS.get(language, _ERRORS["en"]).get(key) or _ERRORS["en"].get(key)
+    template = catalogue.get(language, catalogue["en"]).get(key) or catalogue["en"].get(key)
     if template is None:
         return raw
     try:
         return template.format(**(params or {}))
     except (KeyError, IndexError, ValueError):
         return raw or template
+
+
+def render_error(
+    language: str,
+    key: str | None,
+    params: Mapping[str, object] | None,
+    raw: str | None = None,
+) -> str | None:
+    """The failure message in ``language``, falling back to ``raw`` whenever it cannot be built."""
+    return _render(_ERRORS, language, key, params, raw)
+
+
+def render_detail(
+    language: str,
+    key: str | None,
+    params: Mapping[str, object] | None,
+    raw: str | None = None,
+) -> str | None:
+    """A step's ``detail`` in ``language``, falling back to the stored English ``raw``.
+
+    The same seam as :func:`render_error`, one level down. Only details Joulenap authored
+    carry a key; a task UPID or a connector's own error text has none and comes back
+    verbatim, which is what ``raw`` is for.
+    """
+    return _render(_DETAILS, language, key, params, raw)
 
 
 def _title_for(pack: dict[str, dict[str, str]], kind: str, event: str) -> str:
@@ -380,15 +444,21 @@ def _phase_breakdown(labels: dict[str, str], run: Run) -> str:
     Skipped steps (GC turned off) and steps still running contribute nothing, so the
     parentheses never advertise work that didn't happen. A ``StepName`` added later simply
     doesn't appear rather than raising.
+
+    Matched with ``_step_is`` rather than by equality, and summed per phase: a backup route
+    records one step **per source PVE** (``backup:pve-alpha``), so an equality test matched
+    nothing at all and every backup notification silently lost the one slice that mattered.
     """
-    parts = []
+    totals: dict[str, float] = {}
     for step in run.steps:  # the relationship is ordered by started_at
-        key = _PHASE_LABEL.get(step.name)
-        if key is None or step.status == StepStatus.SKIPPED or not step.finished_at:
+        if step.status == StepStatus.SKIPPED or not step.finished_at:
+            continue
+        key = next((k for n, k in _PHASE_LABEL.items() if _step_is(step, n)), None)
+        if key is None:
             continue
         seconds = (step.finished_at - step.started_at).total_seconds()
-        parts.append(f"{labels[key]} {_format_duration(seconds)}")
-    return " · ".join(parts)
+        totals[key] = totals.get(key, 0.0) + seconds
+    return " · ".join(f"{labels[k]} {_format_duration(s)}" for k, s in totals.items())
 
 
 def human_bytes(n: int) -> str:

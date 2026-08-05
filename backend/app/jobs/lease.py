@@ -40,13 +40,23 @@ class ReleaseOutcome(StrEnum):
     Only :attr:`LEFT_ON` means "still burning power, and nothing is going to fix that" —
     the others are boxes Joulenap either put to sleep, never powers, or will power off at
     the end of the run that still holds them. The value doubles as the POWEROFF step's
-    detail in the run timeline.
+    English detail in the run timeline; :attr:`key` is the same fact as a translatable
+    code, which is what the step actually stores alongside it.
     """
 
     POWERED_OFF = "powered off"
     STILL_NEEDED = "left on: still needed by another run"
     UNMANAGED = "left on: Joulenap does not manage this box's power"
     LEFT_ON = "left powered on"
+
+    @property
+    def key(self) -> str:
+        """This outcome's key in ``notify.messages._DETAILS`` — the member name, lowercased.
+
+        Derived rather than mapped so a new member cannot be added without a key: the
+        i18n parity test walks the enum and fails on any member the packs don't cover.
+        """
+        return self.name.lower()
 
 
 # --- device-shaped connector calls -------------------------------------------

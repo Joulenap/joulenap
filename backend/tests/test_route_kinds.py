@@ -109,8 +109,8 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
 
     run_id = _run(config, deps)
 
-    # The target pulls: remote + job live on it, pointing at the source.
-    assert pbs1.remotes == {
+    # The target pulls: remote + job are created on it, pointing at the source.
+    assert pbs1.remotes_created == {
         "joulenap-r1": {
             "host": "192.0.2.21",
             "port": 8007,
@@ -119,7 +119,7 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
             "fingerprint": "cc:dd",
         }
     }
-    assert pbs1.sync_jobs == {
+    assert pbs1.sync_jobs_created == {
         "joulenap-r1": {
             "remote": "joulenap-r1",
             "remote_store": "offsite",  # the peer's datastore
@@ -133,7 +133,16 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
     # The job is dropped before the remote is rebuilt. PBS refuses to delete a remote that a
     # sync job still references, so the reverse order fails on every run after the first —
     # a sync route that works once and then never again.
-    assert pbs1.sync_calls == ["delete_sync_job", "ensure_remote", "ensure_sync_job"]
+    # ...and both are dropped again once the sync is over: the remote holds the *peer's* API
+    # token, so leaving it behind parks a working credential for one PBS on another.
+    assert pbs1.sync_calls == [
+        "delete_sync_job",
+        "ensure_remote",
+        "ensure_sync_job",
+        "delete_sync_job",
+        "delete_remote",
+    ]
+    assert pbs1.remotes == {} and pbs1.sync_jobs == {}
     # The source is never touched by the job — it is only kept awake.
     assert (pbs2.remotes, pbs2.sync_jobs, pbs2.sync_runs) == ({}, {}, [])
     status, steps = _load(run_id)
@@ -149,15 +158,16 @@ def test_push_sync_runs_the_job_on_the_source(temp_db):
     run_id = _run(config, deps)
 
     # Mirror image: the source sends, so it executes and its remote is the target.
-    assert pbs2.remotes["joulenap-r1"]["host"] == "192.0.2.20"
-    assert pbs2.remotes["joulenap-r1"]["auth_id"] == "root@pam!jn1"
-    assert pbs2.sync_jobs["joulenap-r1"] == {
+    assert pbs2.remotes_created["joulenap-r1"]["host"] == "192.0.2.20"
+    assert pbs2.remotes_created["joulenap-r1"]["auth_id"] == "root@pam!jn1"
+    assert pbs2.sync_jobs_created["joulenap-r1"] == {
         "remote": "joulenap-r1",
         "remote_store": "backup",
         "store": "offsite",
         "direction": "push",
     }
     assert pbs2.sync_runs == [{"id": "joulenap-r1"}]
+    assert pbs2.remotes == {} and pbs2.sync_jobs == {}  # torn down after the run
     assert (pbs1.remotes, pbs1.sync_jobs, pbs1.sync_runs) == ({}, {}, [])
     assert _load(run_id)[0] == RunStatus.SUCCESS
 

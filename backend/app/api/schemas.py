@@ -8,20 +8,20 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 from ..db.models import LogEvent, Run, RunStep, TaskLogLine
-from ..notify.messages import render_error
+from ..notify.messages import render_detail, render_error
 
 
-def _error_params(run: Run) -> dict[str, object] | None:
-    """``run.error_params`` decoded, or ``None`` if it is absent or unreadable.
+def _params(raw: str | None) -> dict[str, object] | None:
+    """A stored ``*_params`` column decoded, or ``None`` if it is absent or unreadable.
 
     Never raises: the column is free-form JSON written by an older version of the app, and a
-    history page must not 500 because one row's payload is malformed. ``render_error`` falls
+    history page must not 500 because one row's payload is malformed. The renderers fall
     back to the stored English text in that case.
     """
-    if not run.error_params:
+    if not raw:
         return None
     try:
-        params = json.loads(run.error_params)
+        params = json.loads(raw)
     except ValueError:
         return None
     return params if isinstance(params, dict) else None
@@ -51,7 +51,7 @@ class RunSummary(BaseModel):
     @classmethod
     def of(cls, run: Run, language: str = "en") -> RunSummary:
         summary = cls.model_validate(run)
-        summary.error = render_error(language, run.error_key, _error_params(run), run.error)
+        summary.error = render_error(language, run.error_key, _params(run.error_params), run.error)
         return summary
 
 
@@ -76,11 +76,18 @@ class StepInfo(BaseModel):
     status: str
     started_at: datetime
     finished_at: datetime | None
+    #: Already rendered in ``app.language``, like ``RunSummary.error``: the row stores
+    #: ``detail_key``/``detail_params`` and keeps the English ``detail`` as the fallback for
+    #: pre-1.0 rows, task ids and other software's error text.
     detail: str | None = None
 
     @classmethod
-    def of(cls, step: RunStep) -> StepInfo:
-        return cls.model_validate(step)
+    def of(cls, step: RunStep, language: str = "en") -> StepInfo:
+        info = cls.model_validate(step)
+        info.detail = render_detail(
+            language, step.detail_key, _params(step.detail_params), step.detail
+        )
+        return info
 
 
 class TaskLogLineSchema(BaseModel):
@@ -117,6 +124,6 @@ class RunDetail(RunSummary):
     def of(cls, run: Run, language: str = "en") -> RunDetail:
         return cls(
             **RunSummary.of(run, language).model_dump(),
-            steps=[StepInfo.of(s) for s in run.steps],
+            steps=[StepInfo.of(s, language) for s in run.steps],
             logs=[LogLine.of(e) for e in run.logs],
         )

@@ -274,8 +274,10 @@ def test_a_sync_route_leases_both_boxes(temp_config, temp_db):
 def test_an_unreachable_pbs_fails_the_run_without_running_the_job(temp_config, temp_db):
     service, box = make_service(FakeBox(reachable=False))
     ran = []
+    seen: list[RunContext] = []
+    service.deps.notify = seen.append
 
-    enqueue(service, "r1", lambda *_a: ran.append(1, trigger=RunTrigger.SCHEDULED))
+    enqueue(service, "r1", lambda *_a: ran.append(1), trigger=RunTrigger.SCHEDULED)
     drain(service)
 
     assert ran == []
@@ -284,6 +286,38 @@ def test_an_unreachable_pbs_fails_the_run_without_running_the_job(temp_config, t
         run = session.scalars(select(Run)).one()
         assert run.status == RunStatus.FAILURE
         assert "not reachable" in (run.error or "")
+
+    # "The backup server never came up" is the failure this product exists to report, and
+    # it used to send nothing at all: the handler re-raised, unwinding past _notify.
+    assert len(seen) == 1
+    assert seen[0].run.status == RunStatus.FAILURE
+    assert seen[0].route is not None and seen[0].route.id == "r1"
+
+
+def test_a_sync_route_releases_the_box_that_did_wake_when_the_other_does_not(
+    temp_config, temp_db
+):
+    """The second-order half of the same bug: one lease held, the other unreachable.
+
+    The re-raise skipped ``_release_all`` too, so the box that *did* answer was left awake
+    with no POWEROFF step in the timeline and nothing queued to shut it down.
+    """
+    # The sync route acquires its target (pbs2) first, then its source (pbs1).
+    service, box = make_service(FakeBox(unreachable={"pbs1"}))
+    seen: list[RunContext] = []
+    service.deps.notify = seen.append
+
+    enqueue(service, "sync", lambda *_a: None, trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        assert run.status == RunStatus.FAILURE
+        steps = {s.name: s.status for s in run.steps}
+    # pbs2 woke, so its release is recorded; a failed run leaves it on for inspection.
+    assert "poweroff:pbs2" in steps
+    assert box.poweroffs == []
+    assert seen and seen[0].left_on == ["pbs2"]
 
 
 # --- what the run reports as left powered on ---------------------------------

@@ -15,9 +15,9 @@ from collections.abc import Callable
 
 from ..config import Config, PbsDevice, Route
 from ..connectors.errors import TaskError
-from ..connectors.pbs import DatastoreStatus
+from ..connectors.pbs import DatastoreStatus, PbsClient
 from ..db.models import LogLevel, RunKind, RunStatus, StepName
-from ..notify.messages import LocalizedError, RunContext
+from ..notify.messages import LocalizedError, RunContext, render_detail
 from .backup_cycle import (
     CycleAbort,
     CycleCancelled,
@@ -31,7 +31,7 @@ from .backup_cycle import (
     watch_external_tasks,
 )
 from .deps import CycleDeps
-from .recorder import RunRecorder
+from .recorder import RunRecorder, set_detail
 
 # ``(config, route, target, recorder, deps) -> datastore status for the notification``.
 RouteBody = Callable[[Config, Route, PbsDevice, RunRecorder, CycleDeps], "DatastoreStatus | None"]
@@ -76,6 +76,25 @@ def _task_reason(pbs, upid: str) -> str:
     return ""
 
 
+def _drop_sync_config(pbs: PbsClient, name: str, recorder: RunRecorder) -> None:
+    """Remove the remote and its sync job from the executing PBS once the sync is over.
+
+    A PBS remote stores the **peer's API token, id and secret**, in the executing box's
+    ``/etc/proxmox-backup/remote.cfg``. Joulenap rebuilds the pair on every run anyway, so
+    leaving them behind buys nothing and parks a working credential for one backup server on
+    another — one that survives changing the token in Joulenap, and that anyone with root on
+    that box, or a copy of its ``/etc``, can read.
+
+    Job before remote: PBS refuses to delete a remote a job still references. Best-effort and
+    never fatal — it runs in a ``finally``, so raising here would mask the run's real failure.
+    """
+    try:
+        pbs.delete_sync_job(name)
+        pbs.delete_remote(name)
+    except Exception as exc:  # noqa: BLE001 - cleanup must never replace the real outcome
+        recorder.log(LogLevel.WARN, f"could not remove sync config '{name}': {exc}")
+
+
 def _sync_body(
     config: Config, route: Route, target: PbsDevice, recorder: RunRecorder, deps: CycleDeps
 ) -> DatastoreStatus | None:
@@ -116,34 +135,37 @@ def _sync_body(
                 store=executor.datastore,
                 direction=route.sync_direction,
             )
-            upid = pbs.run_sync_job(name)
-            step.detail = upid
             try:
-                _wait_or_stop(pbs, upid, recorder, deps, StepName.SYNC.value, "pbs")
-            except TaskError as exc:
-                # The bare "Task UPID:… finished with status 'WARNINGS: 1'" is unreadable and
-                # is what the run row, the history and the notification all end up showing.
-                reason = _task_reason(pbs, upid)
-                raise LocalizedError(
-                    "sync_failed",
-                    direction=route.sync_direction,
-                    source=source.id,
-                    target=target.id,
-                    status=exc.exit_status or "unknown status",
-                    reason=f": {reason}" if reason else "",
-                ) from exc
+                upid = pbs.run_sync_job(name)
+                step.detail = upid
+                try:
+                    _wait_or_stop(pbs, upid, recorder, deps, StepName.SYNC.value, "pbs")
+                except TaskError as exc:
+                    # The bare "Task UPID:… finished with status 'WARNINGS: 1'" is unreadable
+                    # and is what the run row, the history and the notification all show.
+                    reason = _task_reason(pbs, upid)
+                    raise LocalizedError(
+                        "sync_failed",
+                        direction=route.sync_direction,
+                        source=source.id,
+                        target=target.id,
+                        status=exc.exit_status or "unknown status",
+                        reason=f": {reason}" if reason else "",
+                    ) from exc
+            finally:
+                _drop_sync_config(pbs, name, recorder)
 
     # Maintenance runs on the target: it is the box that just gained snapshots, whichever
     # side pushed or pulled them.
     if route.options.gc:
         _route_gc_step(target, recorder, deps)
     else:
-        recorder.skip_step(StepName.GC, "GC disabled for this route")
+        recorder.skip_step(StepName.GC, "gc_disabled")
 
     if route.options.verify_after:
         _route_verify_step(target, recorder, deps, outdated_after=None)
     else:
-        recorder.skip_step(StepName.VERIFY, "verify disabled for this route")
+        recorder.skip_step(StepName.VERIFY, "verify_disabled")
 
     # No last-backup cache refresh: a synced snapshot carries no hint of which PVE created
     # it, and guessing would attribute another PBS's guests to a local one.
@@ -153,16 +175,24 @@ def _sync_body(
 # --- external ----------------------------------------------------------------
 
 
+def monitor_key(observed: int | None) -> str:
+    """The MONITOR step's key in ``notify.messages._DETAILS``."""
+    return "no_tasks_observed" if observed is None else "tasks_observed"
+
+
 def monitor_detail(observed: int | None) -> str:
-    """The MONITOR step's ``detail``, in the one place that defines its shape.
+    """The MONITOR step's **English** ``detail``, in the one place that defines its shape.
 
     ``notify.messages.build_run_message`` reads the count back out of this string
     (``int(detail.split()[0])``, falling through to the "no PBS job ran" warning on
     ``ValueError``), so the format is a contract between two modules rather than free text.
     A test pins the round-trip; reword it here and that test fails instead of the
     notification quietly reporting the wrong thing.
+
+    The notifier reads the *stored* English detail, not the translated one, so this contract
+    is unaffected by which language the UI renders the step in.
     """
-    return "no tasks observed" if observed is None else f"{observed} task(s) observed"
+    return render_detail("en", monitor_key(observed), {"count": observed}) or ""
 
 
 def _external_source_pve(config: Config, target: PbsDevice, recorder: RunRecorder) -> str | None:
@@ -195,14 +225,14 @@ def _external_body(
         with deps.connect_pbs(target) as pbs:
             observed = watch_external_tasks(pbs, target.external, cancelled=deps.cancelled)
         if observed is None:
-            step.detail = monitor_detail(None)
+            set_detail(step, monitor_key(None))
             recorder.log(
                 LogLevel.WARN,
                 f"no PBS task appeared within {target.external.first_task_wait}s "
                 "— check the schedules on PVE/PBS; powering off",
             )
         else:
-            step.detail = monitor_detail(observed)
+            set_detail(step, monitor_key(observed), count=observed)
 
     # Someone else's jobs (hopefully) wrote new snapshots — refresh the caches the dashboard
     # serves while the PBS sleeps, exactly like a managed route does.

@@ -116,7 +116,11 @@ class FakePbs:
         self.verify_args: dict | None = None
         # Sync route bookkeeping: what a route asked this box to set up and run.
         self.remotes: dict[str, dict] = {}
+        # What ensure_remote was *asked* for, kept even after the run tears the remote down
+        # again — the payload is the proof the right peer and credentials were used.
+        self.remotes_created: dict[str, dict] = {}
         self.sync_jobs: dict[str, dict] = {}
+        self.sync_jobs_created: dict[str, dict] = {}
         self.sync_runs: list[dict] = []
         # Ordered method names: PBS refuses to delete a remote a sync job still references,
         # so the sequence is load-bearing and a test pins it.
@@ -152,14 +156,20 @@ class FakePbs:
     def ensure_remote(self, name: str, **kwargs) -> None:
         self.sync_calls.append("ensure_remote")
         self.remotes[name] = kwargs
+        self.remotes_created[name] = kwargs
 
     def delete_sync_job(self, job_id: str) -> None:
         self.sync_calls.append("delete_sync_job")
         self.sync_jobs.pop(job_id, None)
 
+    def delete_remote(self, name: str) -> None:
+        self.sync_calls.append("delete_remote")
+        self.remotes.pop(name, None)
+
     def ensure_sync_job(self, job_id: str, **kwargs) -> None:
         self.sync_calls.append("ensure_sync_job")
         self.sync_jobs[job_id] = kwargs
+        self.sync_jobs_created[job_id] = kwargs
 
     def run_sync_job(self, job_id: str) -> str:
         self.sync_runs.append({"id": job_id})
@@ -219,6 +229,8 @@ class FakeBox:
 
     ``reachable`` is either a constant or a list of answers consumed one probe at a time
     (the last one repeats), so a test can say "down, then up after the first wake".
+    ``unreachable`` names specific pbs ids that never answer, whatever ``reachable`` says —
+    for a multi-box run where one wakes and the other does not.
     """
 
     def __init__(
@@ -227,8 +239,10 @@ class FakeBox:
         idle: bool = True,
         idle_error: Exception | None = None,
         poweroff_error: Exception | None = None,
+        unreachable: set[str] | None = None,
     ):
         self._reachable = reachable
+        self._unreachable = unreachable or set()
         self.idle = idle
         self.idle_error = idle_error
         self.poweroff_error = poweroff_error
@@ -244,6 +258,8 @@ class FakeBox:
     def deps(self) -> LeaseDeps:
         def wait_reachable(pbs, timeout, _should_cancel=None) -> bool:
             self.waits.append(timeout)
+            if pbs.id in self._unreachable:
+                return False
             return self._answer()
 
         def send_wol(pbs) -> None:
