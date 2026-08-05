@@ -9,7 +9,7 @@ The wizard adds **devices**, one at a time — it never creates routes. Once a P
 
 1. **Connect.** Host/IP, port (8006), and either an **API token** (id + secret) or **root credentials**. In root mode Joulenap creates a minimal-privilege token for itself and discards the password. TLS verification defaults off, because a stock PVE serves a self-signed certificate. You also pick the device **name** (its id, used everywhere in the UI); it is pre-filled and you can usually leave it.
 2. **Discovery.** Joulenap reads the PVE's storage config and lists every **PBS-backed storage** on it, deriving each one's host, port, datastore and certificate fingerprint. Each storage falls into one of two groups:
-   - it matches a PBS you already registered (same host + datastore) → it is **linked automatically**, filling that PVE's `storages` map so backup routes to that box become possible;
+   - it matches a PBS you already registered (same host + datastore) → it is **linked automatically**, filling that PVE's `storages` map so backup routes to that box become possible. Only storages that exist on the PVE *at this moment* are linked; register a backup server later and you complete the map with **Re-read from Proxmox** (below) rather than by re-running this wizard, which refuses a host it already knows;
    - it is a backup server Joulenap has never seen → you can **configure it now**, which folds flow B's PBS steps into this run. One per pass; add the rest from Settings → Devices → + Add.
    The number of nodes is reported here too — that is how a cluster is detected, and it is why a PVE has no `node` field to fill in.
 3. **Configure the new PBS** (skipped when there is nothing new): the PBS half of flow B, below.
@@ -63,6 +63,29 @@ Everything above is still discovered with a read-only token; only these become m
 > proxmox-backup-manager user generate-token root@pam joulenap
 > proxmox-backup-manager acl update /datastore/<datastore> Joulenap --auth-id 'root@pam!joulenap'
 > ```
+
+
+## A backup server added after its Proxmox host
+
+`pves[].storages` — which PVE storage points at which backup server — is discovered, never
+typed. Flow A fills it in from the PVE's storage config while the wizard is open, so a server
+you register *afterwards* (all of flow B, by definition) starts out unlinked: nothing on that
+PVE knows how to reach it, and **Backup routes onto it cannot be created**. Sync, Verify and
+External routes are unaffected — they never go through a PVE storage.
+
+Completing it takes two steps, in this order:
+
+1. Add the storage on the Proxmox side (Datacenter → Storage → Add → Proxmox Backup Server),
+   pointing at the same host and datastore as the Joulenap device.
+2. **Settings → Devices → edit the PVE → Storage mapping → Re-read from Proxmox.**
+
+Joulenap re-reads the host's storage list with the token it already has and rebuilds the map,
+matching each storage to a registered server by host *and* datastore. The map is replaced, not
+merged, so a storage you removed on the Proxmox side disappears here too — and if that would
+leave an existing route without a mapping the save is refused and nothing changes.
+
+Re-running the Add-PVE wizard is **not** the way to do this: it only ever creates, so it
+refuses a host that is already registered — after having already provisioned a token.
 
 
 ## Sync routes need one extra grant

@@ -281,7 +281,7 @@
     "pbs": {
       "title": "Aggiungi Proxmox Backup Server",
       "connected": "Connesso · fingerprint fissata",
-      "orphan": "Nessun PVE registrato invia backup a {{id}}: le route di tipo Backup verso di lui non sono disponibili finché non aggiungi lo storage in PVE e ripeti “+ Aggiungi → Proxmox VE”. Le route Sync, Verify ed External funzionano subito."
+      "orphan": "Nessun PVE registrato invia backup a {{id}}: le route di tipo Backup verso di lui non sono disponibili finché non aggiungi lo storage in Proxmox VE e poi apri Impostazioni → Dispositivi → quel PVE → Modifica e premi “Rileggi da Proxmox”. Le route Sync, Verify ed External funzionano subito."
     },
     "step": {
       "pve": {
@@ -559,7 +559,7 @@
       "secretHelp": "Lascialo com'è per mantenere il segreto salvato; svuota il campo per rimuoverlo.",
       "verifyTls": "Verifica il certificato TLS",
       "storagesEmpty": "Su questo PVE nessun backup server è ancora mappato a uno storage, quindi nessuna route di backup può puntarci.",
-      "storagesHint": "Quale storage del PVE punta a quale backup server. Letto dalla configurazione storage del PVE stesso: lo storage va aggiunto in Proxmox VE, non qui.",
+      "storagesHint": "Quale storage PVE punta a quale backup server. Letto dalla configurazione storage del PVE stesso: aggiungi lo storage in Proxmox VE, poi rileggilo qui.",
       "managedPower": "Joulenap gestisce l'accensione di questa macchina",
       "managedPowerHint": "Disattivalo per un backup server sempre acceso o su cloud: Joulenap pianifica le route verso di lui ma non lo sveglia e non lo spegne mai.",
       "mac": "MAC",
@@ -578,7 +578,10 @@
       "errHost": "L'host è obbligatorio.",
       "errPort": "La porta deve essere compresa tra 1 e 65535.",
       "errDatastore": "Il datastore è obbligatorio.",
-      "errPowerField": "Obbligatorio finché Joulenap gestisce l'accensione di questa macchina."
+      "errPowerField": "Obbligatorio finché Joulenap gestisce l'accensione di questa macchina.",
+      "storagesReread": "Rileggi da Proxmox",
+      "storagesRereadOk_one": "Collegato {{count}} storage",
+      "storagesRereadOk_other": "Collegati {{count}} storage"
     }
   }
 }

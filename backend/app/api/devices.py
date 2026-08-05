@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ValidationError
 
 from ..config import PbsDevice, PveDevice, RedactionError, redact, restore_secrets_from
+from ..connectors.discovery import match_storages_to_pbss
 from ..connectors.errors import ConnectorError, WolError
 from ..core.config_store import ConfigStore
 from ..db.models import RunTrigger
@@ -197,6 +198,49 @@ def test_device(
         )
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+# --- storage re-read ---------------------------------------------------------
+
+
+class StoragesResult(BaseModel):
+    #: The rebuilt ``{pbs_device_id: pve_storage_id}`` map, as saved.
+    storages: dict[str, str]
+
+
+@router.post("/pves/{pve_id}/storages", response_model=StoragesResult)
+def refresh_storages(
+    pve_id: str,
+    store: ConfigStore = Depends(get_config_store),
+    scheduler: Scheduler = Depends(get_scheduler),
+    job_service: JobService = Depends(get_job_service),
+) -> StoragesResult:
+    """Re-read this Proxmox host's PBS-backed storages and relink them to registered devices.
+
+    The map is discovered, never typed — but until now it was only ever discovered while the
+    Add-PVE wizard was open. Register a backup server *afterwards* (which is the whole point
+    of flow B) and there was no way to complete the map from the interface at all: the wizard
+    refuses a host it already knows, and the device editor shows storages read-only. Backup
+    routes onto that server stayed impossible.
+
+    Replaces the map rather than merging into it, so a storage removed on the Proxmox side
+    disappears here too — the PVE's own configuration is the source of truth. Saving runs the
+    usual cross-reference validation, so this cannot orphan a route that is already using an
+    entry it would drop.
+    """
+    index = _find(store, "pves", pve_id)
+    device = store.config.pves[index]
+    try:
+        with job_service.deps.connect_pve(device) as client:
+            storages = client.list_pbs_storages()
+    except ConnectorError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    linked = match_storages_to_pbss(storages, store.config.pbss)
+    devices = _dump(store, "pves")
+    devices[index]["storages"] = linked
+    save_section(store, scheduler, "pves", devices)
+    return StoragesResult(storages=linked)
 
 
 # --- power -------------------------------------------------------------------

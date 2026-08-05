@@ -231,6 +231,69 @@ def test_test_502s_when_the_device_cannot_be_reached(app_ctx):
     assert client.post("/api/devices/pves/pve-alpha/test").status_code == 502
 
 
+# --- storage re-read ----------------------------------------------------------
+
+
+def test_refresh_storages_links_a_backup_server_added_later(app_ctx):
+    """The reason this endpoint exists: register a backup server *after* the Proxmox host
+    that backs up to it and nothing could complete the map — the Add-PVE wizard refuses a
+    host it already knows, and the device editor shows storages read-only. Backup routes
+    onto that server stayed impossible."""
+    client, app = app_ctx
+    # pve-beta starts knowing only pbs-01; its PVE reports a storage for pbs-02 as well.
+    _inject(
+        app,
+        pves={
+            "pve-beta": FakePve(
+                pbs_storages=[
+                    {"storage": "pbs", "server": "192.0.2.20", "datastore": "backup"},
+                    {"storage": "pbs-offsite", "server": "192.0.2.21", "datastore": "offsite"},
+                ]
+            )
+        },
+    )
+
+    r = client.post("/api/devices/pves/pve-beta/storages")
+
+    assert r.status_code == 200
+    assert r.json()["storages"] == {"pbs-01": "pbs", "pbs-02": "pbs-offsite"}
+    stored = next(p for p in load_config().pves if p.id == "pve-beta")
+    assert stored.storages == {"pbs-01": "pbs", "pbs-02": "pbs-offsite"}
+
+
+def test_refresh_storages_will_not_orphan_a_route_that_still_needs_the_mapping(app_ctx):
+    """The map is replaced, not merged — a storage removed on the Proxmox side goes away here
+    too. But route 'lab' backs pve-alpha up to pbs-02, and a backup route's target has to
+    appear in every source's map, so dropping that entry would invalidate the config. The
+    ordinary save-time cross-reference check catches it and nothing is written."""
+    client, app = app_ctx
+    _inject(
+        app,
+        pves={
+            "pve-alpha": FakePve(
+                pbs_storages=[{"storage": "pbs", "server": "192.0.2.20", "datastore": "backup"}]
+            )
+        },
+    )
+
+    r = client.post("/api/devices/pves/pve-alpha/storages")
+
+    assert r.status_code == 422
+    stored = next(p for p in load_config().pves if p.id == "pve-alpha")
+    assert stored.storages == {"pbs-01": "pbs", "pbs-02": "pbs-offsite"}
+
+
+def test_refresh_storages_502s_when_the_pve_cannot_be_reached(app_ctx):
+    client, app = app_ctx
+    _inject(app, pves={"pve-alpha": UnreachablePve()})
+    assert client.post("/api/devices/pves/pve-alpha/storages").status_code == 502
+
+
+def test_refresh_storages_404s_for_an_unknown_pve(app_ctx):
+    client, _app = app_ctx
+    assert client.post("/api/devices/pves/nope/storages").status_code == 404
+
+
 # --- power --------------------------------------------------------------------
 
 

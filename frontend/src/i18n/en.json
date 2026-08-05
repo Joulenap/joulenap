@@ -281,7 +281,7 @@
     "pbs": {
       "title": "Add Proxmox Backup Server",
       "connected": "Connected · fingerprint pinned",
-      "orphan": "No registered PVE sends backups to {{id}}: Backup routes to it are unavailable until you add the storage in PVE and run “+ Add → Proxmox VE” again. Sync, Verify and External routes work right away."
+      "orphan": "No registered PVE sends backups to {{id}}: Backup routes to it are unavailable until you add the storage in Proxmox VE, then open Settings → Devices → that PVE → Edit and press “Re-read from Proxmox”. Sync, Verify and External routes work right away."
     },
     "step": {
       "pve": {
@@ -559,7 +559,7 @@
       "secretHelp": "Leave it untouched to keep the stored secret; clear the field to remove it.",
       "verifyTls": "Verify the TLS certificate",
       "storagesEmpty": "No backup server is mapped to a storage on this PVE yet, so no backup route can target one.",
-      "storagesHint": "Which PVE storage points at which backup server. Read from the PVE's own storage configuration — add the storage in Proxmox VE, not here.",
+      "storagesHint": "Which PVE storage points at which backup server. Read from the PVE's own storage configuration — add the storage in Proxmox VE, then re-read it here.",
       "managedPower": "Joulenap manages this box's power",
       "managedPowerHint": "Off for an always-on or cloud-hosted backup server: Joulenap schedules routes against it but never wakes it and never shuts it down.",
       "mac": "MAC",
@@ -578,7 +578,10 @@
       "errHost": "A host is required.",
       "errPort": "The port must be between 1 and 65535.",
       "errDatastore": "A datastore is required.",
-      "errPowerField": "Required while Joulenap manages this box's power."
+      "errPowerField": "Required while Joulenap manages this box's power.",
+      "storagesReread": "Re-read from Proxmox",
+      "storagesRereadOk_one": "Linked {{count}} storage",
+      "storagesRereadOk_other": "Linked {{count}} storages"
     }
   }
 }

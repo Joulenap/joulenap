@@ -1263,6 +1263,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         ? { ok: true, detail: '12 guest(s) visible' }
         : { ok: true, detail: 'datastore backup: 62% used' }
   }
+  const devStorages = /^\/devices\/pves\/([^/]+)\/storages$/.exec(bare)
+  if (devStorages && method === 'POST') {
+    body = { storages: CONFIG.pves.find((p) => p.id === devStorages[1])?.storages ?? {} }
+  }
   // ROUTES is keyed on exact paths, so /runs/{id} needs its own match.
   const runId = method === 'GET' ? /^\/runs\/(\d+)$/.exec(bare)?.[1] : undefined
   if (runId !== undefined && body === undefined) {

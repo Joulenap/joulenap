@@ -40,6 +40,29 @@ def derive_pbs_from_storage(storage: dict) -> dict:
     }
 
 
+def match_storages_to_pbss(storages: list[dict], pbss: list) -> dict[str, str]:
+    """Build a PVE's ``{pbs_device_id: pve_storage_id}`` map from its storage config.
+
+    A storage belongs to a registered backup server when it points at the same host *and*
+    the same datastore: one box can serve several datastores, and each is a separate device
+    as far as routes are concerned, so the host alone is not enough. Hosts are compared
+    case-insensitively and trimmed because they are free text on both sides.
+
+    The frontend's ``matchStorage``/``linkedStorages`` do the same thing while the Add-PVE
+    wizard is open; this is the half that runs later, when a backup server is added *after*
+    the Proxmox host that backs up to it and the map needs filling in.
+    """
+    linked: dict[str, str] = {}
+    for storage in storages:
+        derived = derive_pbs_from_storage(storage)
+        host = derived["host"].strip().lower()
+        for pbs in pbss:
+            if pbs.host.strip().lower() == host and pbs.datastore == derived["datastore"]:
+                linked[pbs.id] = storage.get("storage", "")
+                break
+    return linked
+
+
 def _ping(host: str, timeout: float = 1.0) -> None:
     """Best-effort single ping to populate the ARP cache (Windows vs Unix flags differ)."""
     if _IS_WINDOWS:

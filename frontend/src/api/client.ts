@@ -206,6 +206,13 @@ export const api = {
   // A failure is a 502 with the reason, not a 200 with ok:false.
   testDevice: (kind: DeviceKind, id: string) =>
     req<DeviceTestResult>('POST', `/devices/${kind}/${encodeURIComponent(id)}/test`),
+  // Re-read a PVE's PBS-backed storages and relink them. The map is discovered, never
+  // typed, and this is the only way to refresh it once the device exists.
+  refreshPveStorages: (id: string) =>
+    req<{ storages: Record<string, string> }>(
+      'POST',
+      `/devices/pves/${encodeURIComponent(id)}/storages`,
+    ),
   pbsPower: (id: string, action: 'wake' | 'poweroff') =>
     req<{ ok: boolean }>('POST', `/devices/pbss/${encodeURIComponent(id)}/power`, { action }),
   // One-off GC / verify on a box rather than a route ("Run GC" / "Run verify" on the homepage).

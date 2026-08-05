@@ -49,6 +49,27 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
   const [grantBusy, setGrantBusy] = useState(false)
   const [grantNote, setGrantNote] = useState<{ ok: boolean; text: string } | null>(null)
 
+  // Re-reading storages writes straight to the stored device, not to the draft: the map is
+  // discovered from the Proxmox host, so there is nothing here for the user to save or
+  // discard afterwards.
+  const [rereading, setRereading] = useState(false)
+  const [rereadNote, setRereadNote] = useState<{ ok: boolean; text: string } | null>(null)
+
+  async function onRereadStorages() {
+    setRereading(true)
+    setRereadNote(null)
+    try {
+      const out = await api.refreshPveStorages(device.id)
+      patch({ storages: out.storages })
+      const n = Object.keys(out.storages).length
+      setRereadNote({ ok: true, text: t(`${ns}.storagesRereadOk`, { count: n }) })
+    } catch (e) {
+      setRereadNote({ ok: false, text: e instanceof ApiError ? e.message : String(e) })
+    } finally {
+      setRereading(false)
+    }
+  }
+
   const live = useMemo(() => validateDevice(draft), [draft])
   const shown = errors ?? []
   const errorFor = (field: string) => shown.find((e) => e.field === field)
@@ -211,9 +232,11 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
             </label>
 
             <span className="msec">{t(`${ns}.secStorages`)}</span>
-            {/* Read-only: which PVE storage points at which PBS is discovered from the PVE's
-                own storage config, so editing it here would only desynchronise the two.
-                The wizard (M12) is what fills it in. */}
+            {/* Not editable, but re-readable: which PVE storage points at which PBS is
+                discovered from the PVE's own storage config, so typing it here would only
+                desynchronise the two. Re-reading is what completes the map when a backup
+                server is registered *after* this host — the wizard only ever fills it in
+                while it is open, and it refuses a host it already knows. */}
             {Object.keys(pve.storages).length === 0 ? (
               <p className="modal-note">{t(`${ns}.storagesEmpty`)}</p>
             ) : (
@@ -223,6 +246,19 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
                   .join('\n')}
               </div>
             )}
+            <div className="inline-row">
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={rereading}
+                onClick={() => void onRereadStorages()}
+              >
+                {t(`${ns}.storagesReread`)}
+              </button>
+              {rereadNote && (
+                <span className={rereadNote.ok ? 'ok-note' : 'err-note'}>{rereadNote.text}</span>
+              )}
+            </div>
             <span className="help">{t(`${ns}.storagesHint`)}</span>
           </>
         )}

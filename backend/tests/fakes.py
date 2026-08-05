@@ -24,6 +24,9 @@ class UnreachablePve:
     def list_cluster_guests(self):
         raise ConnectorError("connection refused")
 
+    def list_pbs_storages(self):
+        raise ConnectorError("connection refused")
+
 
 class FakePve:
     def __init__(
@@ -31,10 +34,13 @@ class FakePve:
         guests: list[Guest] | None = None,
         fail_task: bool = False,
         log_lines: list[str] | None = None,
+        pbs_storages: list[dict] | None = None,
     ):
         self.guests = guests or []
         self.fail_task = fail_task
         self.log_lines = log_lines or []
+        # Raw PVE `type=pbs` storage rows, as /storage?type=pbs returns them.
+        self.pbs_storages = pbs_storages if pbs_storages is not None else []
         self.vzdump_args: dict | None = None  # the last call (0.9 single-vzdump cycle)
         self.vzdump_calls: list[dict] = []  # every call, in order (a route backs up per node)
         self.stopped: list[str] = []  # upids passed to stop_task
@@ -50,6 +56,9 @@ class FakePve:
 
     def list_cluster_guests(self) -> list[Guest]:
         return self.guests
+
+    def list_pbs_storages(self) -> list[dict]:
+        return self.pbs_storages
 
     def vzdump(
         self,
