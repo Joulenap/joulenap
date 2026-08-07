@@ -70,10 +70,13 @@ export function RunHistory({
       </div>
 
       {error && <div className="panel-empty">{t('dashboard.runsError')}</div>}
-      {shown.length === 0 ? (
-        <div className="panel-empty">{t('dashboard.noRuns')}</div>
-      ) : (
-        <div className={`table-scroll${open !== null ? ' uncapped' : ''}`}>
+      {/* The empty state lives *inside* .table-scroll so the box keeps its fixed height:
+          the bottom grid takes its row height from this panel, and a collapsed one leaves
+          "Last backup per guest" one row tall. */}
+      <div className={`table-scroll${open !== null ? ' uncapped' : ''}`}>
+        {shown.length === 0 ? (
+          <div className="panel-empty">{t('dashboard.noRuns')}</div>
+        ) : (
           <table className="htable">
             <thead>
               <tr>
@@ -108,8 +111,8 @@ export function RunHistory({
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   )
 }

@@ -584,17 +584,20 @@
   color: var(--jn-text);
   background: color-mix(in srgb, var(--jn-accent) 9%, transparent);
 }
-/* 10 rows before it scrolls: 28px header + 10 × 39px (8+8 padding + the 22px status pill
-   + 1px divider) — keep in step if the cell padding or the pill changes. */
+/* 10 rows: 28px header + 10 × 39px (8+8 padding + the 22px status pill + 1px divider) —
+   keep in step if the cell padding or the pill changes. This is a fixed height, not a cap:
+   the bottom grid takes its row height from this panel alone (see .gcell), so letting it
+   shrink on few or zero runs squashed "Last backup per guest" down to a single row. */
 .table-scroll {
   overflow-x: auto;
   overflow-y: auto;
-  max-height: 418px;
+  height: 418px;
 }
-/* An expanded row carries the steps + task log: too tall to read through a 12-row window,
-   so RunHistory lifts the cap for as long as one is open. */
+/* An expanded row carries the steps + task log: too tall to read through a 10-row window,
+   so RunHistory grows past it for as long as one is open — but never below it. */
 .table-scroll.uncapped {
-  max-height: none;
+  height: auto;
+  min-height: 418px;
 }
 .htable {
   width: 100%;
