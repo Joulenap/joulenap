@@ -19,7 +19,7 @@ The wizard adds **devices**, one at a time — it never creates routes. Once a P
 ## Flow B — Add a PBS
 
 1. **Connect.** Host/IP, port (8007), datastore, and an API token — or root credentials, from which Joulenap provisions a scoped token. The certificate **fingerprint is read from the box and filled in for you** on connect; from then on every API call is pinned to it. Also here: the device name, and **"Joulenap manages this box's power"**. Turn that off for an always-on PBS — steps 2 and 3 then do not apply and are skipped.
-2. **Wake-up.** The **WoL broadcast interface** (leave it on `auto` unless you have several networks) and the **MAC address**, detected by pinging the box and reading the ARP table — so the PBS must be *powered on* while you set it up. A **Test** button sends one real magic packet and names the broadcast address it used: Wake-on-LAN left un-armed in the BIOS is the single most common cause of a failed run, and finding that out at 04:00 is the worst way.
+2. **Wake-up.** The **WoL broadcast interface** (leave it on `auto` unless you have several networks) and the **MAC address**, detected by opening a connection to the box and reading the ARP table — so the PBS must be *powered on* while you set it up. A **Test** button sends one real magic packet and names the broadcast address it used: Wake-on-LAN left un-armed in the BIOS is the single most common cause of a failed run, and finding that out at 04:00 is the worst way.
 3. **Power-off.** Joulenap needs SSH to the box, because PBS has no power-off API.
    - **The key is get-or-create.** All managed PBSs share one `data/id_ed25519`, so the wizard returns the existing public key rather than generating a new one — regenerating would silently orphan the `authorized_keys` line on the box you added first, and nothing in the UI would tell you.
    - **The host key is confirmed first.** The wizard scans the PBS SSH host key, shows its SHA256 fingerprint, and only saves it to `data/known_hosts` once you confirm. Every later connection verifies against it. Automatic key installation refuses to run before this, because that is when a root password would be sent over the connection.
@@ -41,7 +41,7 @@ For each field: **auto** = discovered/derived, **manual** = entered.
 | PBS datastore | auto | from the storage config |
 | PBS fingerprint | auto | from the storage config, or read from the PBS certificate on connect |
 | WoL broadcast interface | auto | the NIC with the route to the PBS subnet; override allowed |
-| PBS MAC | auto | ping + read ARP, with the PBS powered on ("Detect MAC") |
+| PBS MAC | auto | connect + read ARP, with the PBS powered on ("Detect MAC") |
 | PBS API token | manual, or auto in root mode | see the privileges below |
 | PBS SSH host key | auto | scanned, shown, saved to `data/known_hosts` on your confirmation |
 | SSH user + key | mixed | user defaults to `root`; the key is Joulenap's own, installed for you in root mode |

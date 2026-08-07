@@ -56,7 +56,9 @@ consecutive routes across them can sleep and wake that machine once more than st
   you already registered and offering to configure a new one inline. *Add a Proxmox Backup Server*
   walks connection, wake-up (with a Test button that sends a real magic packet before you find out
   at 04:00 that Wake-on-LAN was never armed) and power-off. Both work from pasted API tokens, or
-  provision everything themselves from a root login used once and never stored.
+  provision everything themselves from a root login used once and never stored. **Detect MAC** now
+  works in the container: it used to shell out to `ping`, which the image does not contain, so it
+  only ever found a machine something else had recently talked to.
 - **A backup server's API token is named after its datastore** — `joulenap-backup`,
   `joulenap-offsite` — so one machine serving several datastores gets one token per device instead
   of the setups fighting over a single name. Deleting an API token also drops the permissions

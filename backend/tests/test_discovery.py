@@ -32,52 +32,45 @@ def test_derive_pbs_from_storage_missing_fields():
 
 
 def test_detect_mac_found():
-    pings: list[str] = []
+    primed: list[tuple[str, int]] = []
     mac = detect_mac(
         "pbs.local",
-        ping=pings.append,
+        prime=lambda ip, port: primed.append((ip, port)),
         read_arp_table=lambda: {"10.0.0.5": "00:11:22:33:44:55"},
         resolve=lambda _h: "10.0.0.5",
     )
     assert mac == "00:11:22:33:44:55"
-    assert pings == ["10.0.0.5"]  # pings the resolved IP
+    # Connects to the resolved IP, on the default PBS port unless told otherwise: that
+    # connection is the only thing that puts the neighbour in the ARP cache.
+    assert primed == [("10.0.0.5", 8007)]
+
+
+def test_detect_mac_primes_arp_with_a_real_connect():
+    """The priming step must be a socket connect, not a subprocess.
+
+    It used to shell out to ``ping``, which does not exist in the shipped
+    ``python:3.12-slim`` image — the failure was swallowed, so the cache was never
+    populated and the lookup only ever succeeded on traffic somebody else had made.
+    """
+    with mock.patch("app.connectors.net.socket.create_connection") as connect:
+        discovery._prime_arp("10.0.0.5", 8007)
+    assert connect.call_args.args[0] == ("10.0.0.5", 8007)
+
+
+def test_detect_mac_primes_even_when_the_port_refuses():
+    # A refused port still resolves the MAC: ARP happens below TCP.
+    with mock.patch("app.connectors.net.socket.create_connection", side_effect=OSError):
+        discovery._prime_arp("10.0.0.5", 8007)  # must not raise
 
 
 def test_detect_mac_not_in_table():
     mac = detect_mac(
         "pbs.local",
-        ping=lambda _h: None,
+        prime=lambda _ip, _port: None,
         read_arp_table=lambda: {},
         resolve=lambda _h: "10.0.0.5",
     )
     assert mac is None
-
-
-_WINDOWS_ARP = """
-Interface: 192.0.2.21 --- 0x3
-  Internet Address      Physical Address      Type
-  192.0.2.1         aa-11-bb-22-cc-33     dynamic
-  192.0.2.213       00-11-22-33-44-55     dynamic
-  255.255.255.255       ff-ff-ff-ff-ff-ff     static
-"""
-
-_UNIX_ARP = "pbs (192.0.2.213) at 00:11:22:33:44:55 [ether] on eth0\n"
-
-
-def test_read_arp_command_parses_windows_output():
-    completed = mock.Mock(stdout=_WINDOWS_ARP)
-    with mock.patch("subprocess.run", return_value=completed):
-        table = discovery._read_arp_command()
-    # Dash-separated MACs are normalised to lower-case colon form.
-    assert table["192.0.2.213"] == "00:11:22:33:44:55"
-    assert table["192.0.2.1"] == "aa:11:bb:22:cc:33"
-
-
-def test_read_arp_command_parses_unix_output():
-    completed = mock.Mock(stdout=_UNIX_ARP)
-    with mock.patch("subprocess.run", return_value=completed):
-        table = discovery._read_arp_command()
-    assert table == {"192.0.2.213": "00:11:22:33:44:55"}
 
 
 def test_generate_keypair_writes_private_and_returns_public(tmp_path: Path):

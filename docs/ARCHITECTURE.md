@@ -185,7 +185,7 @@ Everything is served under `/api`. Auth is a signed **session cookie** started b
 | POST | `/api/wizard/pbs/provision` | root mode: auto-create a scoped PBS token |
 | POST | `/api/wizard/pbs/grant-sync` | root mode: add the `/remote` roles a sync route needs to an existing token |
 | GET | `/api/wizard/interfaces` | local NICs, to pick the WoL broadcast interface |
-| POST | `/api/wizard/wol/detect-mac` | detect a PBS MAC via ping + ARP |
+| POST | `/api/wizard/wol/detect-mac` | detect a PBS MAC by connecting to it, then reading ARP |
 | POST | `/api/wizard/wol/test` | send a test magic packet before the device exists |
 | POST | `/api/wizard/ssh/keygen` | **get-or-create** the poweroff SSH keypair |
 | POST | `/api/wizard/ssh/hostkey` | scan a PBS SSH host key + fingerprint (to confirm before a root password is sent) |
