@@ -133,8 +133,10 @@ Browse to `http://<container-ip>:8080` and continue at [First run](#first-run) b
 
 ## Option B — Docker Compose
 
-Use this if you already run Docker somewhere, or you want to **pre-edit `config.yaml`** instead of
-using the wizards. (On a fresh Proxmox host, do steps 1–4 of [Option A](#option-a--proxmox-lxc--docker-recommended)
+<details>
+<summary>Use this if you already run Docker somewhere, or want to pre-edit <code>config.yaml</code> instead of using the wizards — click for the steps</summary>
+
+(On a fresh Proxmox host, do steps 1–4 of [Option A](#option-a--proxmox-lxc--docker-recommended)
 first to get an LXC with Docker.)
 
 ```bash
@@ -158,13 +160,17 @@ create** — it's seeded into `./data` on first run.
 documented in [`config.example.yaml`](../config.example.yaml)), then bring it back up. You can also
 pre-hash the admin password (see [First run](#first-run)).
 
+</details>
+
 ---
 
 ## Option C — Native install, no Docker
 
-For those who'd rather not use Docker — run Joulenap directly as a Python service. This is more
-manual: you build the frontend once and run the backend under systemd. A small Debian/Ubuntu LXC (or
-any always-on Linux host on the PBS's LAN) works well.
+<details>
+<summary>Run Joulenap directly as a Python service, no Docker involved — click for the steps</summary>
+
+This is more manual: you build the frontend once and run the backend under systemd. A small
+Debian/Ubuntu LXC (or any always-on Linux host on the PBS's LAN) works well.
 
 **You need:** Python **3.12+**, `git`, and Node.js **24** (only to build the web UI once — 24 is what
 CI and the container image build with, so it's the combination that's actually tested).
@@ -230,6 +236,8 @@ systemctl enable --now joulenap
 
 > Wake-on-LAN sends a broadcast, so run this on a host with direct LAN broadcast access to the PBS's
 > subnet. `network_mode: host` isn't a concept here — a native process already uses the host network.
+
+</details>
 
 ---
 

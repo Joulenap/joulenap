@@ -1,5 +1,8 @@
 # Integrations
 
+<details>
+<summary><b>Upgrading from 0.9?</b> Both payloads changed shape — the field-by-field 0.9 → 1.0 mapping is here</summary>
+
 > **Breaking in 1.0.** Both payloads changed shape, because a Joulenap install
 > now has several routes and several backup servers — there is no single "next
 > run" or "the datastore" left to report. Update any widget or query built on
@@ -19,6 +22,8 @@
 >
 > Settings → Integrations always shows a snippet generated for the version you
 > are running; if in doubt, copy from there rather than from this page.
+
+</details>
 
 Joulenap exposes two read-only, API-key-protected endpoints for other tools:
 
@@ -127,7 +132,8 @@ The endpoint URL is your Joulenap instance's origin plus `/api/dashboard`,
 e.g. `http://192.168.1.50:8080/api/dashboard`. Replace `<your-api-key>` with
 the key from step 2 above in every snippet below.
 
-#### Homepage
+<details>
+<summary><b>Homepage — the built-in <code>customapi</code> widget</b></summary>
 
 Homepage's built-in `customapi` widget maps JSON response fields directly
 onto labelled rows:
@@ -157,7 +163,10 @@ onto labelled rows:
 # .0 is the first configured route / backup server — add more mappings for the rest.
 ```
 
-#### Glance
+</details>
+
+<details>
+<summary><b>Glance — the <code>custom-api</code> widget with a Go template</b></summary>
 
 Glance's `custom-api` widget fetches the JSON and renders it through a Go
 template:
@@ -184,7 +193,10 @@ Glance ranges over both lists, so it grows with your config on its own — no
 index to pick and nothing to edit when you add a route or a second backup
 server.
 
-#### Homarr
+</details>
+
+<details>
+<summary><b>Homarr — the Custom API widget (v1.65+, configured in the dashboard)</b></summary>
 
 > **Note:** Homarr's widget system changed significantly in 2026. Older
 > Homarr releases only offered a generic iframe/link-style widget with no
@@ -219,7 +231,10 @@ server.
 > fallback for the URL field instead:
 > `http://192.168.1.50:8080/api/dashboard?key=<your-api-key>`
 
-#### Dashy
+</details>
+
+<details>
+<summary><b>Dashy — the <code>customapi</code> widget</b></summary>
 
 > **Note:** Dashy's generic JSON widget is called `customapi` (it was
 > explicitly modeled after Homepage's widget of the same name), not a plain
@@ -251,6 +266,8 @@ instead of from the browser. If your Dashy version predates the `customapi`
 widget, use the query-string fallback
 (`http://192.168.1.50:8080/api/dashboard?key=<your-api-key>`) with whatever
 generic widget your version offers.
+
+</details>
 
 ## Prometheus & Grafana
 
