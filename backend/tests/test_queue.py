@@ -458,6 +458,35 @@ def test_a_box_a_queued_route_still_needs_is_not_reported_as_left_on(temp_config
     assert seen[0].left_on == []
 
 
+def test_a_sync_between_two_datastores_of_one_box_powers_it_off_once(temp_config, temp_db):
+    """The G3-5 regression, found on real hardware.
+
+    ``pbs2`` and ``pbs3`` are one machine. Keyed per device, the run held two leases on it:
+    releasing the first shut the box down, releasing the second reached a machine already
+    going down and reported LEFT_ON — so a run that had tidied up perfectly notified the
+    user "PBS left powered on — check it".
+    """
+    service, box = make_service()
+    config = service._store.config
+    config.pbss.append(
+        PbsDevice(id="pbs3", host="192.0.2.21", datastore="archive", mac="00:11:22:33:44:66")
+    )
+    config.routes.append(Route(id="local-sync", kind="sync", source_pbs="pbs2", target="pbs3"))
+    seen = sent(service)
+
+    enqueue(service, "local-sync", notifying_job(), trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    assert seen[0].left_on == []  # the warning that was false
+    assert box.poweroffs == ["pbs3"]  # one machine, one power-off
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        # One physical event, one step each — not a pair where the second reports on a box
+        # the first already shut down.
+        assert [s.name for s in run.steps].count(StepName.POWEROFF) == 1
+        assert [s.name for s in run.steps].count(StepName.WAIT) == 1
+
+
 def test_the_power_off_step_records_why_the_box_stayed_up(temp_config, temp_db):
     # The timeline says which of the three "not powered off" reasons applied, so the run
     # detail view doesn't just show a bare SKIPPED.

@@ -132,8 +132,25 @@ class LeaseState:
     was_awake: bool = False
 
 
+def lease_key(pbs: PbsDevice) -> str:
+    """The lease's identity for a device: the *machine*, not the config entry.
+
+    Power is physical. Two devices can be two datastores on one box (that is a supported
+    setup), and an SSH poweroff takes down every PBS instance on it — so keying the refcount
+    per device meant one run could hold two leases on one machine, power it off on the first
+    release, and then report the second as "left powered on" after failing to reach a box it
+    had itself just shut down.
+
+    The port is deliberately not part of the key, for that same reason. Host is free text on
+    both sides, so it is normalised the way ``discovery.match_storages_to_pbss`` normalises
+    it; a device with no host yet (legal mid-wizard) falls back to its id so half-configured
+    entries don't all collide on ``""``.
+    """
+    return pbs.host.strip().lower() or pbs.id
+
+
 class PowerLease:
-    """Refcounted wake/power-off, one entry per PBS id.
+    """Refcounted wake/power-off, one entry per physical machine (see :func:`lease_key`).
 
     ponytail: the refcount lives in this process's memory, which is correct while Joulenap
     runs as a single instance (the whole app assumes that). Two instances against one PBS
@@ -144,21 +161,26 @@ class PowerLease:
         self,
         deps: LeaseDeps,
         *,
-        pending_pbs_ids: Callable[[], set[str]] | None = None,
+        pending_pbs_keys: Callable[[], set[str]] | None = None,
         cancelled: Callable[[], bool] | None = None,
     ):
         self._deps = deps
-        # Which PBS devices the *queued* runs still need. Injected so the lease never has to
-        # know about the queue or the config.
-        self._pending = pending_pbs_ids or (lambda: set())
+        # Which machines the *queued* runs still need, as lease keys. Injected so the lease
+        # never has to know about the queue or the config.
+        self._pending = pending_pbs_keys or (lambda: set())
         self._cancelled = cancelled or (lambda: False)
         self._lock = threading.Lock()
         self._state: dict[str, LeaseState] = {}
 
-    def state(self, pbs_id: str) -> LeaseState:
-        """A snapshot of one device's lease — introspection for the API/UI."""
+    def state(self, pbs: PbsDevice) -> LeaseState:
+        """A snapshot of one machine's lease — introspection for the API/UI.
+
+        Takes the device rather than an id because the key is the machine: every device on a
+        held box reports the same holders, which is what disables the ⏻ button on all of
+        them.
+        """
         with self._lock:
-            held = self._state.get(pbs_id)
+            held = self._state.get(lease_key(pbs))
             return LeaseState(held.holders, held.was_awake) if held else LeaseState()
 
     # --- manual power buttons ------------------------------------------------
@@ -188,8 +210,9 @@ class PowerLease:
         Raises :class:`PbsUnreachableError` if the box never answers; the holder is only
         registered on success, so a failed acquire needs no release.
         """
+        key = lease_key(pbs)
         with self._lock:
-            held = self._state.get(pbs.id)
+            held = self._state.get(key)
             if held is not None and held.holders:
                 held.holders += 1
                 log.info("PBS %s already awake and leased by %d run(s)", pbs.id, held.holders)
@@ -204,7 +227,7 @@ class PowerLease:
             # setdefault + increment, not a plain assignment: two first-acquires racing on the
             # same box would otherwise each write holders=1 and the first release would power
             # it off under the second.
-            held = self._state.setdefault(pbs.id, LeaseState(was_awake=was_awake))
+            held = self._state.setdefault(key, LeaseState(was_awake=was_awake))
             held.holders += 1
         return was_awake
 
@@ -221,8 +244,9 @@ class PowerLease:
         the lease is the only place that can tell them apart — a caller re-deriving "was
         that a real 'left on'?" would have to duplicate every condition below.
         """
+        key = lease_key(pbs)
         with self._lock:
-            held = self._state.get(pbs.id)
+            held = self._state.get(key)
             if held is None or not held.holders:
                 log.warning("Release of an unheld lease on PBS %s — ignoring", pbs.id)
                 # A bug, not a policy: say "left on" so it is at least visible.
@@ -230,7 +254,7 @@ class PowerLease:
             held.holders -= 1
             remaining = held.holders
             if not remaining:
-                del self._state[pbs.id]
+                del self._state[key]
 
         # Order matters for the *reason*, not for the action — every branch below stops the
         # power-off equally. The caller's policy is checked last on purpose: "this run
@@ -242,7 +266,7 @@ class PowerLease:
         if not pbs.managed_power:
             # An always-on / cloud-hosted PBS: Joulenap never touches its power.
             return ReleaseOutcome.UNMANAGED
-        if pbs.id in self._pending():
+        if key in self._pending():
             log.info("PBS %s is needed by a queued route; leaving it on", pbs.id)
             return ReleaseOutcome.STILL_NEEDED
         if not power_off:

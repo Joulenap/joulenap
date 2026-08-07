@@ -31,7 +31,7 @@ from ..db.models import LogLevel, RunKind, RunStatus, RunTrigger, StepName, Step
 from ..db.prune import PruneResult, prune_history
 from ..notify.messages import LocalizedError, RunContext
 from .deps import CycleDeps
-from .lease import LeaseDeps, PbsUnreachableError, PowerLease, ReleaseOutcome
+from .lease import LeaseDeps, PbsUnreachableError, PowerLease, ReleaseOutcome, lease_key
 from .recorder import RunRecorder, set_detail
 from .route_cycle import RUN_KINDS, run_pbs_maintenance, run_route
 
@@ -101,7 +101,7 @@ class JobService:
         # The lease reads both of the above live: a cancel must also abandon a wake wait.
         self.lease = PowerLease(
             lease_deps or LeaseDeps.default(),
-            pending_pbs_ids=self._pending_pbs_ids,
+            pending_pbs_keys=self._pending_pbs_keys,
             cancelled=self._cancel.is_set,
         )
 
@@ -232,9 +232,13 @@ class JobService:
                     return True
         return False
 
-    def _pending_pbs_ids(self) -> set[str]:
-        """Which PBS devices the queued runs still need, so the lease doesn't power one down
-        seconds before the next run needs it."""
+    def _pending_pbs_keys(self) -> set[str]:
+        """Which machines the queued runs still need, so the lease doesn't power one down
+        seconds before the next run needs it.
+
+        Returned as lease keys, not device ids: the lease counts machines, and the two must
+        agree or a queued run on the *other* datastore of a box would not hold it.
+        """
         pending = self.pending()
         ids = {item.pbs_id for item in pending if item.pbs_id}
         queued_routes = {item.route_id for item in pending if item.route_id}
@@ -243,7 +247,9 @@ class JobService:
                 ids.add(route.target)
                 if route.source_pbs:
                     ids.add(route.source_pbs)
-        return ids
+        # A device deleted between queueing and now resolves to nothing and is dropped: the
+        # run itself will be skipped for the same reason.
+        return {lease_key(pbs) for pbs in self._store.config.pbss if pbs.id in ids}
 
     def _ensure_worker(self) -> None:
         """Start the drain thread if it isn't running. Caller holds ``_state_lock`` — the
@@ -365,6 +371,11 @@ class JobService:
 
         A route needs its target plus, for a sync, its source. ``None`` means the subject
         was deleted between queueing and starting — the run is skipped rather than half-run.
+
+        Devices sharing a machine are collapsed to one: a sync between two datastores on one
+        box is a supported setup, and waking or powering off a machine twice within a single
+        run gives the timeline two steps for one physical event — the second of which can
+        only ever report something already done.
         """
         if item.pbs_id is not None:
             device = next((p for p in config.pbss if p.id == item.pbs_id), None)
@@ -377,14 +388,14 @@ class JobService:
         if route is None:
             log.warning("Route '%s' was deleted before its run started; dropped", item.route_id)
             return None
-        devices: list[PbsDevice] = []
+        devices: dict[str, PbsDevice] = {}
         for pbs_id in [route.target, *([route.source_pbs] if route.source_pbs else [])]:
             device = next((p for p in config.pbss if p.id == pbs_id), None)
             if device is None:
                 log.error("Route '%s' points at unknown pbs '%s'; run skipped", route.id, pbs_id)
                 return None
-            devices.append(device)
-        return route, devices
+            devices.setdefault(lease_key(device), device)
+        return route, list(devices.values())
 
     def _acquire_step(self, device: PbsDevice, recorder: RunRecorder, *, multi: bool) -> None:
         """Take the lease on one device, recorded as a WAIT step so the wake shows up in the

@@ -124,5 +124,6 @@ def _status_word(last) -> str:
 
 def _busy_pbs_ids(config, job_service: JobService) -> set[str]:
     """Which PBS devices a run is currently holding — the power lease is the one place that
-    knows, and it knows per device rather than "is anything running at all"."""
-    return {pbs.id for pbs in config.pbss if job_service.lease.state(pbs.id).holders}
+    knows, and it knows per machine rather than "is anything running at all". Two devices on
+    one box are therefore both busy, which is true: the run is using that machine."""
+    return {pbs.id for pbs in config.pbss if job_service.lease.state(pbs).holders}

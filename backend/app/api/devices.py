@@ -333,8 +333,10 @@ def power(
     try:
         with job_service.exclusive():
             # Belt and braces: a lease is only ever taken inside the lock we now hold, so
-            # this cannot fire in production — but it names the box when it does.
-            if job_service.lease.state(pbs_id).holders:
+            # this cannot fire in production — but it names the box when it does. The lease
+            # counts machines, so a run on this box's *other* datastore blocks it too — an
+            # SSH poweroff would take that run's server down with it.
+            if job_service.lease.state(device).holders:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"A run is using '{pbs_id}'; cannot power it off",

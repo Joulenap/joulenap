@@ -157,7 +157,7 @@ def _pbs_state(pbs, probes: dict[str, _probe.PbsProbe], job_service: JobService)
         id=pbs.id,
         online=bool(probe and probe.online),
         managed_power=pbs.managed_power,
-        holders=job_service.lease.state(pbs.id).holders,
+        holders=job_service.lease.state(pbs).holders,
         datastore=DatastoreInfo(used=ds.used, total=ds.total, used_pct=ds.used_pct) if ds else None,
         load=LoadInfo(cpu=load.cpu, mem=load.mem, uptime=load.uptime) if load else None,
     )
