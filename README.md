@@ -118,7 +118,8 @@ schedule, guest selection and retention come across with them.
   is rewritten. If the conversion doesn't validate, your file is left untouched — but Joulenap
   then starts with **no devices and no routes**, so nothing is scheduled and no backup runs until
   you fix it. That is what the banner on the dashboard is telling you: it is not a cosmetic
-  warning, it is the reason the page looks empty. The `.bak` is your rollback.
+  warning, it is the reason the page looks empty. The `.bak` is your rollback — see below for how
+  to use it.
 - **One conversion is lossy, and it widens rather than narrows.** The old "back up all guests
   **except** these" mode no longer exists, so such a route becomes "all guests" — it will back up
   *more* than before, never less. Narrow it down from the route editor if that isn't what you
@@ -127,6 +128,33 @@ schedule, guest selection and retention come across with them.
   because there is no longer a single "next run" or "the datastore". Dashboard widgets and
   Grafana alerts built on 0.9 need updating — the field-by-field mapping is at the top of
   [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+
+### Going back to 0.9
+
+The config rolls back on its own; the database needs one extra step. 1.0 widened the two *cache*
+tables (`guest_backups`, `datastore_stats`) with columns 0.9 never writes, so 0.9 left on a 1.0
+database logs a cache warning after every backup and, worse, returns a **500 from the dashboard
+whenever a backup server is awake**. Dropping the two caches fixes it and keeps your run history —
+both versions rebuild them from the backup server:
+
+```bash
+docker rm -f joulenap
+cd /opt/joulenap/data
+cp config.yaml.pre-overhaul.bak config.yaml
+docker run --rm -v /opt/joulenap/data:/app/data catubba/joulenap:0.9.0 python -c \
+  "import sqlite3; d = sqlite3.connect('/app/data/joulenap.db'); \
+   d.execute('DROP TABLE IF EXISTS guest_backups'); \
+   d.execute('DROP TABLE IF EXISTS datastore_stats'); d.commit()"
+# then start 0.9 with your usual docker run, pinned to catubba/joulenap:0.9.0
+```
+
+If you would rather not run that, `mv joulenap.db joulenap.db.1.0` instead — 0.9 builds a fresh
+one and you lose only the run history. Your backups live on the backup server and none of this
+touches them, and forgetting the config step is safe: 0.9 refuses to start on a 1.0 config rather
+than coming up empty.
+
+**0.9 gets no fixes, including security fixes** ([`SECURITY.md`](SECURITY.md)). This is a way to
+buy an evening, not a place to stay — please open an issue for whatever sent you back.
 
 ## Security
 
