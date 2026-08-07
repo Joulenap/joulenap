@@ -1,5 +1,8 @@
 # --- Joulenap secrets & local state (NEVER commit) ---
 config.yaml
+# The 1.0 migration's rollback parachute (config.yaml.pre-overhaul.bak) is a verbatim copy
+# of the old config — same tokens, same hosts. It must never be committed either.
+config.yaml.*
 *.key
 *.pem
 id_*

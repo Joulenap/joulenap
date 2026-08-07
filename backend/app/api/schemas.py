@@ -2,11 +2,29 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
 from ..db.models import LogEvent, Run, RunStep, TaskLogLine
+from ..notify.messages import render_detail, render_error
+
+
+def _params(raw: str | None) -> dict[str, object] | None:
+    """A stored ``*_params`` column decoded, or ``None`` if it is absent or unreadable.
+
+    Never raises: the column is free-form JSON written by an older version of the app, and a
+    history page must not 500 because one row's payload is malformed. The renderers fall
+    back to the stored English text in that case.
+    """
+    if not raw:
+        return None
+    try:
+        params = json.loads(raw)
+    except ValueError:
+        return None
+    return params if isinstance(params, dict) else None
 
 
 class RunSummary(BaseModel):
@@ -18,13 +36,23 @@ class RunSummary(BaseModel):
     status: str
     started_at: datetime
     finished_at: datetime | None
+    # The route this run came from, for the history's route column. Both null for an ad-hoc
+    # PBS maintenance run; ``route_name`` is denormalised on the row, so a deleted route's
+    # history still reads correctly.
+    route_id: str | None = None
+    route_name: str | None = None
     # Nullable while a run is in flight, and for kinds that don't touch guests (GC/verify).
     guests_ok: int | None = None
+    #: Already rendered in ``app.language`` — the UI shows this string as-is. The row stores
+    #: ``error_key``/``error_params``; ``error`` (English) is the fallback for pre-1.0 rows
+    #: and for text that came from someone else's software.
     error: str | None = None
 
     @classmethod
-    def of(cls, run: Run) -> RunSummary:
-        return cls.model_validate(run)
+    def of(cls, run: Run, language: str = "en") -> RunSummary:
+        summary = cls.model_validate(run)
+        summary.error = render_error(language, run.error_key, _params(run.error_params), run.error)
+        return summary
 
 
 class LogLine(BaseModel):
@@ -48,11 +76,18 @@ class StepInfo(BaseModel):
     status: str
     started_at: datetime
     finished_at: datetime | None
+    #: Already rendered in ``app.language``, like ``RunSummary.error``: the row stores
+    #: ``detail_key``/``detail_params`` and keeps the English ``detail`` as the fallback for
+    #: pre-1.0 rows, task ids and other software's error text.
     detail: str | None = None
 
     @classmethod
-    def of(cls, step: RunStep) -> StepInfo:
-        return cls.model_validate(step)
+    def of(cls, step: RunStep, language: str = "en") -> StepInfo:
+        info = cls.model_validate(step)
+        info.detail = render_detail(
+            language, step.detail_key, _params(step.detail_params), step.detail
+        )
+        return info
 
 
 class TaskLogLineSchema(BaseModel):
@@ -86,9 +121,9 @@ class RunDetail(RunSummary):
     logs: list[LogLine]
 
     @classmethod
-    def of(cls, run: Run) -> RunDetail:
+    def of(cls, run: Run, language: str = "en") -> RunDetail:
         return cls(
-            **RunSummary.of(run).model_dump(),
-            steps=[StepInfo.of(s) for s in run.steps],
+            **RunSummary.of(run, language).model_dump(),
+            steps=[StepInfo.of(s, language) for s in run.steps],
             logs=[LogLine.of(e) for e in run.logs],
         )

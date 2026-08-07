@@ -4,36 +4,26 @@ import type { StatusResponse } from '../api/types'
 import { useConfig } from '../config/ConfigContext'
 import { useClock } from '../hooks/useClock'
 import { applyTheme, c, currentTheme, mono, tint } from '../theme'
-import { fmtClock } from '../utils/format'
-import { runningLabelKey } from '../utils/status'
+import { fmtClock, fmtDT } from '../utils/format'
+import { headerPill, type PillTone } from '../utils/status'
 
 interface HeaderProps {
-  host: string
   status: StatusResponse | null
   view: 'main' | 'settings'
   onToggleView: () => void
   onLogout: () => void
 }
 
-function pill(status: StatusResponse | null, t: (k: string) => string) {
-  if (status?.job_running)
-    return { label: t(runningLabelKey(status.running_kind)), color: c.blue, busy: true, sub: '' }
-  if (status?.pbs_online) {
-    return {
-      label: t('status.on'),
-      color: c.green,
-      busy: false,
-      sub: status.scheduler_enabled ? '' : t('status.timerDisabled'),
-    }
-  }
-  return { label: t('status.off'), color: c.textFaint, busy: false, sub: '' }
-}
+// The single-PBS host readout that used to sit beside the pill is gone for good: with N
+// backup servers it described nothing, and per-device state lives in the topology now.
+const TONE: Record<PillTone, string> = { blue: c.blue, amber: c.amber, neutral: c.textFaint }
 
-export function Header({ host, status, view, onToggleView, onLogout }: HeaderProps) {
+export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
   const { t } = useTranslation()
   const { config, save } = useConfig()
   const now = useClock()
-  const p = pill(status, t)
+  const p = headerPill(status)
+  const color = TONE[p.tone]
   const [theme, setTheme] = useState(currentTheme())
 
   const onToggleTheme = () => {
@@ -65,11 +55,6 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
       </div>
 
       <div className="jn-header-status">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: mono, fontSize: 16, color: c.textFaint }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.color }} />
-          {host || '—'}
-        </div>
-
         <div
           style={{
             display: 'flex',
@@ -79,7 +64,7 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
             borderRadius: 999,
             whiteSpace: 'nowrap',
             background: c.hover,
-            border: `1px solid ${tint(p.color, 33)}`,
+            border: `1px solid ${tint(color, 33)}`,
           }}
         >
           {p.busy ? (
@@ -88,18 +73,22 @@ export function Header({ host, status, view, onToggleView, onLogout }: HeaderPro
                 width: 13,
                 height: 13,
                 borderRadius: '50%',
-                border: `2px solid ${tint(p.color, 20)}`,
-                borderTopColor: p.color,
+                border: `2px solid ${tint(color, 20)}`,
+                borderTopColor: color,
                 animation: 'spin .7s linear infinite',
               }}
             />
           ) : (
             <div
-              style={{ width: 9, height: 9, borderRadius: '50%', background: p.color, boxShadow: `0 0 0 3px ${tint(p.color, 13)}` }}
+              style={{ width: 9, height: 9, borderRadius: '50%', background: color, boxShadow: `0 0 0 3px ${tint(color, 13)}` }}
             />
           )}
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{p.label}</span>
-          {p.sub && <span style={{ fontSize: 12, color: c.textDim, fontWeight: 500 }}>· {p.sub}</span>}
+          <span style={{ fontSize: 13, fontWeight: 600 }}>
+            {t(p.labelKey, {
+              route: p.route,
+              when: p.nextAt ? fmtDT(new Date(p.nextAt)) : '',
+            })}
+          </span>
         </div>
 
         <div style={{ fontFamily: mono, fontSize: 15, fontWeight: 500, color: c.textMid, minWidth: 78, textAlign: 'right' }}>

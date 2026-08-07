@@ -34,12 +34,14 @@ def sweep_orphaned_runs(session: Session, *, now: datetime | None = None) -> lis
         run.finished_at = ts
         if not run.error:
             run.error = _INTERRUPTED_RUN
+            run.error_key = "interrupted"
         for step in run.steps:
             if step.status == StepStatus.RUNNING:
                 step.status = StepStatus.FAILURE
                 step.finished_at = ts
                 if not step.detail:
                     step.detail = _INTERRUPTED_STEP
+                    step.detail_key = "interrupted"
     return list(orphaned)
 
 

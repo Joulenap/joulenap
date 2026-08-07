@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <em>Your Proxmox backup server sleeps. <strong>Joulenap</strong> wakes it, runs the backup, and tucks it back in.</em>
+  <em>Your Proxmox backup servers sleep. <strong>Joulenap</strong> wakes them, runs the backups, and tucks them back in.</em>
 </p>
 
 <p align="center">
@@ -15,7 +15,9 @@
   <a href="https://hub.docker.com/r/catubba/joulenap"><img src="https://img.shields.io/badge/docker-catubba%2Fjoulenap-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
 </p>
 
-Joulenap is a small self-hosted **web UI + scheduler** that runs automated Proxmox VE backups to a **Proxmox Backup Server (PBS) that stays powered off** most of the time. At the scheduled hour it wakes the PBS over the network (Wake-on-LAN), runs the backup, applies retention and garbage collection, powers the PBS back down, and notifies you — so you get off-site, deduplicated backups **without keeping a second machine running 24/7**.
+Joulenap is a small self-hosted **web UI + scheduler** that runs automated Proxmox VE backups to **Proxmox Backup Servers (PBS) that stay powered off** most of the time. At the scheduled hour it wakes the backup server over the network (Wake-on-LAN), runs the job, applies retention and garbage collection, powers it back down, and notifies you — so you get deduplicated backups **without keeping a second machine running 24/7**.
+
+You describe your setup as **routes**: which Proxmox hosts back up to which backup server, on what schedule, with what retention. A route can fan several PVE hosts into one PBS, or copy one PBS to another for a genuinely off-site second copy — and Joulenap wakes and sleeps every box each route touches, in the right order.
 
 The name says it: a *joule* saved, while your backup server takes a *nap*. 💤
 
@@ -23,9 +25,9 @@ The name says it: a *joule* saved, while your backup server takes a *nap*. 💤
 
 ## Why
 
-A dedicated PBS box is the right way to keep backups on separate hardware (3-2-1 rule), but leaving it on 24/7 wastes power for a job that runs a few minutes a night. Proxmox's built-in scheduled backups assume the target is always reachable, so they can't drive a "wake → backup → sleep" cycle.
+A dedicated PBS box is the right way to keep backups on separate hardware (3-2-1 rule), but leaving it on 24/7 wastes power for a job that runs a few minutes a night. Proxmox's built-in scheduled backups assume the target is always reachable, so they can't drive a "wake → backup → sleep" cycle. Neither can they drive one for a *second* backup server that only comes up once a week to take an off-site copy.
 
-Joulenap fills that gap with a friendly UI: pick the time, pick which guests to back up, and forget it.
+Joulenap fills that gap with a friendly UI: draw the routes, pick the times, pick which guests go where, and forget it.
 
 
 <img src="assets/homepage.jpg" width="830" title="Homepage">
@@ -34,16 +36,19 @@ Joulenap fills that gap with a friendly UI: pick the time, pick which guests to 
 
 <center><img src="assets/howitworks.png" width="500" title="Wizard"></center>
 
-Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Proxmox host needs to be modified. It talks to PVE and PBS through their **APIs** (scoped tokens) and uses a single **SSH** command only for the PBS power-off, which has no API.
+Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Proxmox host needs to be modified. It talks to every PVE and PBS through their **APIs** (scoped tokens, one per device) and uses a single **SSH** command only for the power-off, which has no API.
 
 ## Features
 
-- ⏰ Web UI scheduler: choose backup time, enable/disable, see next/last run
-- 🔌 Wake-on-LAN of the PBS, with readiness wait and timeout
-- 🗂️ Per-guest selection: back up **all** guests, all **except** a list, or an explicit **include** list (new guests are covered automatically in the first two)
-- ♻️ Retention (daily/weekly/monthly/yearly), Garbage Collection after each backup, and a separately scheduled verify
-- 🔔 Notifications: Apprise, Telegram, ntfy, Discord, email — on success and/or failure
-- 📜 Live log viewer, run history with per-step detail, live PVE/PBS task output, and manual "Run backup now" / "Run GC now" (optionally leaving the PBS awake) — stoppable mid-run
+- 🔀 **Routes**: any number of Proxmox hosts and backup servers, wired together explicitly — fan several PVEs into one PBS, or copy one PBS to another (**off-site sync**, pull or push)
+- ⏰ A schedule per route, with its own retention, guest selection and options — plus a global pause switch
+- 🔌 Wake-on-LAN of every backup server a route touches, with readiness wait, retries and timeout; boxes you keep always on are supported too
+- 🧵 One run at a time, the rest queued — and a box stays awake between two runs that both need it instead of being woken twice
+- 🗂️ Per-source guest selection: back up **all** guests of a host (new ones included automatically) or an explicit **include** list
+- ♻️ Retention (last/daily/weekly/monthly/yearly), plus optional Garbage Collection and verification after a route runs
+- 👀 **External schedules**: a route kind that starts nothing of its own — PVE/PBS run their own jobs, Joulenap just wakes the box, watches the tasks and powers it off when they go quiet
+- 🔔 Notifications: Apprise, Telegram, ntfy, Discord, email — on success and/or failure, per route
+- 📜 Live log viewer, run history with a per-step timeline, live PVE/PBS task output, and manual runs — per route, or an ad-hoc GC/verify on one box — stoppable mid-run
 - ⚙️ Advanced settings tab with a built-in `config.yaml` editor, plus an opt-in update check
 - 📊 Integrations: backup status for Homepage, Homarr, Dashy or Glance, plus a Prometheus `/metrics` endpoint for Grafana (alert when a guest stops being backed up) — see [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)
 - 🌍 Multi-language UI
@@ -51,21 +56,28 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 ## Status
 
-**v0.9.0.** Feature-complete: scheduler + Wake-on-LAN + vzdump + retention + GC + verify +
-notifications + setup wizard, packaged as a Docker image — with transport hardening (PBS TLS
-pinning + SSH host-key verification) and auth hardening (login rate-limit, session hardening).
-Includes an external-schedules mode (PVE/PBS run their own jobs; Joulenap wakes the PBS, watches
-the tasks and powers it off when they finish), run history with per-step detail, the ability to
-stop a job mid-run, [integrations](docs/INTEGRATIONS.md) for dashboards
-(Homepage/Homarr/Dashy/Glance) and Prometheus, persistent datastore usage shown even while the
-PBS is powered off, a per-channel notification test report, and a responsive UI that works on a
-phone.
+**v1.0.0.** Built around routes over any number of PVE and PBS devices: backup, PBS→PBS sync,
+external-schedule watching and verification, driven by a run queue and a per-server power lease
+so a box is woken once and slept once no matter how many routes need it. Packaged as a Docker
+image, with transport hardening (per-device PBS TLS pinning + SSH host-key verification) and auth
+hardening (login rate-limit, session hardening). Includes guided wizards for adding a PVE or a
+PBS, run history with a per-step timeline and live task output, the ability to stop a run
+mid-flight, [integrations](docs/INTEGRATIONS.md) for dashboards (Homepage/Homarr/Dashy/Glance)
+and Prometheus, persistent datastore usage shown even while a server is powered off, a
+per-channel notification test report, and a responsive UI that works on a phone.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and API.
+
+**Known limitation.** Joulenap reads the **root namespace** of a PBS datastore: if your Proxmox
+storage entry writes into a namespace, backups, retention and garbage collection all work, but
+*Last backup per guest* reads "never" for those guests.
+
+**Upgrading from 0.9?** Your `config.yaml` is converted automatically on the first start — see
+[Upgrading](#upgrading-from-09) below before you pull.
 
 ## Quick start (Docker)
 
 One command — no files to download, no config to edit first. The container creates its own config on
-first run and you fill it in through the web wizard:
+first run and you fill it in through the web UI:
 
 ```bash
 mkdir -p /opt/joulenap/data
@@ -93,21 +105,72 @@ install, timezone, and first-run setup. Every config field is documented in
 
 <img src="assets/wizard.jpg" width="830" title="Wizard">
 
-All settings live in `config.yaml` (see [`config.example.yaml`](config.example.yaml) for every field, grouped and commented). You normally never touch it by hand — the container creates it on first run inside the mounted `data/` directory, and the **setup wizard** fills it in. Secrets (API tokens, SSH key, bot token) stay in that `config.yaml`; the repo's copy is **git-ignored** so it's never committed.
+All settings live in `config.yaml` (see [`config.example.yaml`](config.example.yaml) for every field, grouped and commented). You normally never touch it by hand — the container creates it on first run inside the mounted `data/` directory, and the **wizards** under **Settings → Devices → + Add** fill it in: one flow adds a Proxmox host and discovers the backup servers it already knows about, the other adds a backup server and sets up its wake-up and power-off. Routes are then drawn from the homepage. Secrets (API tokens, SSH key, bot token) stay in that `config.yaml`; the repo's copy is **git-ignored** so it's never committed.
+
+## Upgrading from 0.9
+
+Pull the new image and start it — nothing else. On the first start Joulenap converts your
+`config.yaml` from the old single-PVE/single-PBS layout into devices and routes: your backup job
+becomes a route named **Backup**, a scheduled verification becomes one named **Verify**, and your
+schedule, guest selection and retention come across with them.
+
+- **A copy of the old file is kept** as `config.yaml.pre-overhaul.bak` next to it, before anything
+  is rewritten. If the conversion doesn't validate, your file is left untouched — but Joulenap
+  then starts with **no devices and no routes**, so nothing is scheduled and no backup runs until
+  you fix it. That is what the banner on the dashboard is telling you: it is not a cosmetic
+  warning, it is the reason the page looks empty. The `.bak` is your rollback — see below for how
+  to use it.
+- **One conversion is lossy, and it widens rather than narrows.** The old "back up all guests
+  **except** these" mode no longer exists, so such a route becomes "all guests" — it will back up
+  *more* than before, never less. Narrow it down from the route editor if that isn't what you
+  want. It's the one thing worth checking after the upgrade.
+- **Breaking for anything outside the UI**: `GET /api/dashboard` and `/metrics` changed shape,
+  because there is no longer a single "next run" or "the datastore". Dashboard widgets and
+  Grafana alerts built on 0.9 need updating — the field-by-field mapping is at the top of
+  [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+
+<details>
+<summary><b>Going back to 0.9</b> — the config rolls back on its own, the database needs one step</summary>
+
+1.0 widened the two *cache* tables (`guest_backups`, `datastore_stats`) with columns 0.9 never
+writes, so 0.9 left on a 1.0 database logs a cache warning after every backup and, worse, returns a
+**500 from the dashboard whenever a backup server is awake**. Dropping the two caches fixes it and
+keeps your run history — both versions rebuild them from the backup server:
+
+```bash
+docker rm -f joulenap
+cd /opt/joulenap/data
+cp config.yaml.pre-overhaul.bak config.yaml
+docker run --rm -v /opt/joulenap/data:/app/data catubba/joulenap:0.9.0 python -c \
+  "import sqlite3; d = sqlite3.connect('/app/data/joulenap.db'); \
+   d.execute('DROP TABLE IF EXISTS guest_backups'); \
+   d.execute('DROP TABLE IF EXISTS datastore_stats'); d.commit()"
+# then start 0.9 with your usual docker run, pinned to catubba/joulenap:0.9.0
+```
+
+If you would rather not run that, `mv joulenap.db joulenap.db.1.0` instead — 0.9 builds a fresh
+one and you lose only the run history. Your backups live on the backup server and none of this
+touches them, and forgetting the config step is safe: 0.9 refuses to start on a 1.0 config rather
+than coming up empty.
+
+**0.9 gets no fixes, including security fixes** ([`SECURITY.md`](SECURITY.md)). This is a way to
+buy an evening, not a place to stay — please open an issue for whatever sent you back.
+
+</details>
 
 ## Security
 
 Joulenap can trigger backups and power machines on/off, so treat it as privileged:
 
-- Use **scoped API tokens** for PVE and PBS, not root passwords — the exact privileges each one needs are listed in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#permissions-cheat-sheet).
-- The SSH key to PBS should be dedicated and, ideally, restricted to the power-off command.
-- **PBS API is TLS-pinned**: calls to PBS are pinned to its certificate fingerprint (captured at setup), so a swapped/MITM cert is rejected; a legitimately renewed cert is accepted after you re-run PBS detection in the wizard.
-- **PBS SSH host key is verified**: confirmed once during setup and stored in `data/known_hosts`; later power-off/GC connections verify against it. Details in [`docs/CONFIG-WIZARD.md`](docs/CONFIG-WIZARD.md#security).
+- Use **scoped API tokens** for each PVE and each PBS, not root passwords — the exact privileges each one needs are listed in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#permissions-cheat-sheet).
+- The SSH key to a backup server should be dedicated and, ideally, restricted to the power-off command — the wizard offers exactly such a line.
+- **A PBS API connection is TLS-pinned** to that device's stored certificate fingerprint, so a swapped/MITM cert is rejected; a legitimately renewed cert is accepted after you re-run that device's connect step in the wizard. The wizard always captures the fingerprint — but a device left without one is **not pinned and not validated**, so keep it set.
+- **A PBS SSH host key is verified** against `data/known_hosts`. The wizard's automatic key-install path confirms it with you first; a server added straight from Settings → Devices, or one where you installed the key yourself, is trusted on first use and recorded, with a warning in the log. Details in [`docs/CONFIG-WIZARD.md`](docs/CONFIG-WIZARD.md#security).
 - Keep the UI on your LAN/VPN and behind its login. Don't expose it to the internet.
 - `config.yaml` holds secrets — keep its file permissions tight and out of version control.
 - **Login lockout**: after 5 failed login attempts from an IP address, that IP is locked out for 5 minutes (protects against online brute-force attacks).
 - **Password floor**: admin passwords must be at least 8 characters.
-- **Session cookie** (`app.session` in config): set `https_only: true` when serving Joulenap over HTTPS or behind a TLS-terminating proxy; `max_age_days` controls session lifetime (default 14 days). Changing the admin password immediately invalidates all existing sessions.
+- **Session cookie** (`app.session` in config): set `https_only: true` when serving Joulenap over HTTPS or behind a TLS-terminating proxy; `max_age_days` controls session lifetime (default 14 days). Changing the admin password immediately signs out every *other* session; the one you changed it from stays signed in.
 - **First-run setup**: complete the initial account setup promptly — the setup endpoint remains open until an account is created (and is rate-limited for security).
 
 ## Roadmap
@@ -115,8 +178,9 @@ Joulenap can trigger backups and power machines on/off, so treat it as privilege
 - [✅] v0.1: scheduler + WoL + vzdump + retention + notifications + web UI
 - [✅] Garbage Collection after each backup, and scheduled verify jobs
 - [✅] Per-guest last-backup status from PBS
+- [✅] v1.0: multiple PVE and PBS devices, routes, and PBS→PBS off-site sync
 - [ ] RTC-wake option (BIOS alarm) as an alternative to WoL
-- [ ] Multiple PBS targets / off-site sync
+- [ ] Per-route notification routing (which channel hears about which route)
 
 ## License
 

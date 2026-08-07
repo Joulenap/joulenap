@@ -11,6 +11,7 @@ import os
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -19,19 +20,50 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import __version__
+from . import config as config_mod
 from .api import api_router
 from .api import metrics as metrics_api
 from .config import Config
+from .core import heartbeat
 from .core.config_store import ConfigStore
 from .core.ratelimit import LoginRateLimiter
 from .core.scheduler import Scheduler
 from .db import init_db, session_scope
+from .db.models import LogEvent, LogLevel
 from .db.startup import sweep_orphaned_runs
 from .jobs import JobService
 from .notify import NotificationService
 from .notify.messages import build_interrupted_message
 
 log = logging.getLogger("joulenap.main")
+
+#: Container log verbosity. `JOULENAP_LOG_LEVEL=DEBUG` for a noisy run.
+_LOG_LEVEL_ENV = "JOULENAP_LOG_LEVEL"
+
+
+def setup_logging() -> None:
+    """Give the app's own loggers somewhere to go.
+
+    Without this nothing configures the root logger, so every ``log.info`` in the package is
+    dropped and ``docker logs`` shows uvicorn's handful of lines and nothing else — including
+    across a 0.9 -> 1.0 config migration, which is the single riskiest thing this app ever
+    does and left no trace of having happened.
+
+    ``basicConfig`` is a no-op once handlers exist, so calling this from both entry points is
+    safe, and uvicorn's own loggers (which configure themselves) are untouched.
+    """
+    logging.basicConfig(
+        level=os.environ.get(_LOG_LEVEL_ENV, "INFO").upper(),
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    )
+
+
+#: How long shutdown waits for a startup thread. Both only make one notification round-trip, so
+#: this is generous; it exists so a black-holing channel can't hang the process on exit. Kept
+#: comfortably under Docker's 10s SIGTERM→SIGKILL grace, so a hung channel costs a slow stop
+#: rather than a killed one.
+_STARTUP_THREAD_JOIN_TIMEOUT = 5.0
+
 
 def _frontend_dir() -> Path:
     """Directory of the built SPA (Vite output) served as static files.
@@ -59,57 +91,85 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     with session_scope() as session:
         swept = sweep_orphaned_runs(session)
         interrupted_alerts = [build_interrupted_message(store.config, run) for run in swept]
+        # The config was loaded before the DB existed, so a refused 0.9 migration can only
+        # reach the activity log from here. Run-less row: it belongs to no cycle.
+        if config_mod.MIGRATION_ERROR:
+            session.add(LogEvent(level=LogLevel.ERROR, message=config_mod.MIGRATION_ERROR))
     if swept:
         log.warning("Marked %d interrupted run(s) as failed at startup", len(swept))
     service = JobService(store)
     scheduler = Scheduler(
-        service.submit_backup,
+        service.run_route,
         service.run_prune,
-        service.submit_verify,
         timezone=store.config.app.timezone,
     )
+    # Read the previous run's liveness stamp BEFORE the heartbeat starts overwriting it —
+    # that gap is the only window in which a scheduled run can honestly be called missed.
+    last_seen = heartbeat.last_seen()
     scheduler.start()
-    scheduler.rearm(store.config)
-    scheduler.arm_prune()
-    # Late-bound so a cycle can put the next scheduled run in its notification: the cycle
-    # only ever sees its CycleDeps, and the Scheduler doesn't exist yet when JobService
-    # builds them (same reason cancelled/cancel_power_off are wired this way).
-    service.deps.next_run = lambda: scheduler.next_run_time
+    scheduler.rearm(store.config)  # arms the prune job too, so it needs no second call here
+    scheduler.arm_heartbeat()
+    # Late-bound so a finished run can put its route's next fire in the notification: the
+    # Scheduler doesn't exist yet when JobService builds its deps (same reason
+    # cancelled/cancel_power_off are wired this way).
+    service.deps.next_run = scheduler.next_run_time
     app.state.job_service = service
     app.state.scheduler = scheduler
     app.state.notifier = NotificationService()
-    # Detect a scheduled backup missed while the process was down (BE-R1). Off the startup
+    # Detect scheduled runs missed while the process was down (BE-R1). Off the startup
     # path on a daemon thread so a slow/black-holing notification channel can't delay the app
     # becoming ready, and wrapped so it can never crash boot.
-    threading.Thread(
-        target=_startup_missed_backup_check,
-        args=(store.config, scheduler, app.state.notifier),
-        daemon=True,
-        name="missed-backup-check",
-    ).start()
+    startup_threads = [
+        threading.Thread(
+            target=_startup_missed_run_check,
+            args=(store.config, scheduler, app.state.notifier, last_seen),
+            daemon=True,
+            name="missed-backup-check",
+        )
+    ]
     # Alert on any run a restart interrupted (BE-R2) — same off-thread, boot-safe pattern.
     if interrupted_alerts:
-        threading.Thread(
-            target=_send_startup_alerts,
-            args=(store.config, app.state.notifier, interrupted_alerts),
-            daemon=True,
-            name="interrupted-run-alert",
-        ).start()
+        startup_threads.append(
+            threading.Thread(
+                target=_send_startup_alerts,
+                args=(store.config, app.state.notifier, interrupted_alerts),
+                daemon=True,
+                name="interrupted-run-alert",
+            )
+        )
+    for thread in startup_threads:
+        thread.start()
     try:
         yield
     finally:
         scheduler.shutdown()
+        # Stamp the exact moment we stopped: without it a clean restart leaves up to one
+        # heartbeat interval looking like downtime nobody was there for.
+        heartbeat.touch()
+        # Both read the DB and/or send notifications, so shutdown waits for them instead of
+        # abandoning a half-sent alert — and, in tests, instead of leaving a thread that
+        # outlives its app and touches the *next* test's database.
+        # ponytail: the job service's queue worker is deliberately NOT joined — it may be
+        # mid-backup, and blocking shutdown on a running vzdump is worse than dropping the
+        # thread on process exit. Give JobService a stop() if that ever stops being true.
+        for thread in startup_threads:
+            thread.join(timeout=_STARTUP_THREAD_JOIN_TIMEOUT)
+            if thread.is_alive():
+                log.warning("Startup thread '%s' did not finish before shutdown", thread.name)
 
 
-def _startup_missed_backup_check(
-    config: Config, scheduler: Scheduler, notifier: NotificationService
+def _startup_missed_run_check(
+    config: Config,
+    scheduler: Scheduler,
+    notifier: NotificationService,
+    last_seen: datetime | None,
 ) -> None:
-    from .core.catchup import check_missed_backup
+    from .core.catchup import check_missed_runs
 
     try:
-        check_missed_backup(config, scheduler, notifier)
+        check_missed_runs(config, scheduler, notifier, last_seen=last_seen)
     except Exception:  # noqa: BLE001 - a startup safety net must never take the app down
-        log.exception("missed-backup startup check failed")
+        log.exception("missed-run startup check failed")
 
 
 def _send_startup_alerts(
@@ -123,6 +183,7 @@ def _send_startup_alerts(
 
 
 def create_app() -> FastAPI:
+    setup_logging()
     # Load (or first-run create) config before building the app: the session
     # middleware needs the signing key, and routers read config via app.state.
     store = ConfigStore.load_or_create()
@@ -186,6 +247,8 @@ def run() -> None:
     """
     import uvicorn
 
+    # Before the config load below, which is where a 0.9 -> 1.0 migration runs and logs.
+    setup_logging()
     port = ConfigStore.load_or_create().config.app.port
     uvicorn.run("app.main:create_app", factory=True, host="0.0.0.0", port=port, reload=False)
 

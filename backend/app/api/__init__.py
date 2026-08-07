@@ -1,5 +1,5 @@
-"""Aggregate API router: auth (M1), the M4 status/config/guests/jobs/logs routers, and
-the M5 setup-wizard router."""
+"""Aggregate API router: auth, the route/device CRUD the UI is built on, the
+status/dashboard/logs read models, and the setup-wizard helpers."""
 
 from fastapi import APIRouter
 
@@ -7,16 +7,16 @@ from . import (
     auth,
     config,
     dashboard,
+    devices,
     guests,
     jobs,
     logs,
     notify,
-    power,
+    routes,
     scheduler,
     status,
     update,
     wizard,
-    wol,
 )
 
 api_router = APIRouter(prefix="/api")
@@ -24,11 +24,11 @@ api_router.include_router(auth.router)
 api_router.include_router(status.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(config.router)
+api_router.include_router(routes.router)
+api_router.include_router(devices.router)
 api_router.include_router(guests.router)
 api_router.include_router(scheduler.router)
 api_router.include_router(jobs.router)
-api_router.include_router(power.router)
-api_router.include_router(wol.router)
 api_router.include_router(notify.router)
 api_router.include_router(logs.router)
 api_router.include_router(wizard.router)

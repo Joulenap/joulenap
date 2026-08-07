@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field
 
 from .. import paths
 from ..connectors import net
-from ..connectors.errors import ConnectorError
+from ..connectors.errors import ConnectorError, TokenExistsError
+from ..connectors.provision import pbs_token_name
 from ..core import wizard
-from ..core.config_store import ConfigStore
-from .deps import get_config_store, require_auth
+from .deps import require_auth
 
 router = APIRouter(prefix="/wizard", dependencies=[Depends(require_auth)], tags=["wizard"])
 
@@ -25,9 +25,16 @@ _KEY_FILENAME = "id_ed25519"
 
 
 def _connector_call(func, **kwargs) -> Any:
-    """Run a wizard helper, mapping connector failures to 502 Bad Gateway."""
+    """Run a wizard helper, mapping connector failures to 502 Bad Gateway.
+
+    ``TokenExistsError`` is the exception: nothing failed upstream, we declined to replace a
+    token the user has not agreed to lose. 409 so the wizard can tell it apart from a real
+    connection problem and offer to go ahead.
+    """
     try:
         return func(**kwargs)
+    except TokenExistsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -47,6 +54,8 @@ class PveConnectRequest(BaseModel):
     username: str | None = None
     password: str | None = None
     token_name: str = "joulenap"
+    #: The user's answer to the 409 this endpoint raises when ``token_name`` is taken.
+    replace_token: bool = False
 
 
 @router.post("/pve/connect")
@@ -62,6 +71,7 @@ def pve_connect(body: PveConnectRequest) -> dict[str, Any]:
         username=body.username,
         password=body.password,
         token_name=body.token_name,
+        replace_token=body.replace_token,
     )
 
 
@@ -113,8 +123,12 @@ class PbsProvisionRequest(BaseModel):
     username: str = "root@pam"
     password: str = Field(min_length=1)
     datastore: str = Field(min_length=1)
-    token_name: str = "joulenap"
+    #: Left unset by the UI: the name is derived from the datastore, so two devices on one
+    #: backup server never contend for it. Still overridable for anyone driving the API.
+    token_name: str | None = None
     fingerprint: str = ""
+    #: The user's answer to the 409 this endpoint raises when ``token_name`` is taken.
+    replace_token: bool = False
 
 
 @router.post("/pbs/provision")
@@ -127,7 +141,36 @@ def pbs_provision(body: PbsProvisionRequest) -> dict[str, Any]:
         username=body.username,
         password=body.password,
         datastore=body.datastore,
-        token_name=body.token_name,
+        token_name=body.token_name or pbs_token_name(body.datastore),
+        fingerprint=body.fingerprint,
+        replace_token=body.replace_token,
+    )
+
+
+# --- PBS sync grants on an existing token ------------------------------------
+
+
+class PbsGrantSyncRequest(BaseModel):
+    host: str = Field(min_length=1)
+    port: int = Field(default=8007, ge=1, le=65535)
+    verify_tls: bool = False
+    username: str = "root@pam"
+    password: str = Field(min_length=1)
+    api_token_id: str = Field(min_length=1)
+    fingerprint: str = ""
+
+
+@router.post("/pbs/grant-sync")
+def pbs_grant_sync(body: PbsGrantSyncRequest) -> dict[str, Any]:
+    """Grant the /remote roles a Sync route needs to a PBS token that already exists."""
+    return _connector_call(
+        wizard.pbs_grant_sync,
+        host=body.host,
+        port=body.port,
+        verify_tls=body.verify_tls,
+        username=body.username,
+        password=body.password,
+        token_id=body.api_token_id,
         fingerprint=body.fingerprint,
     )
 
@@ -161,8 +204,8 @@ def detect_mac(body: DetectMacRequest) -> dict[str, Any]:
 
 @router.post("/ssh/keygen")
 def ssh_keygen() -> dict[str, Any]:
-    # Always write into the (writable, auto-created) data dir; the frontend points
-    # config.pbs.ssh_key_path at the returned path.
+    # Always write into the (writable, auto-created) data dir; the frontend points the
+    # device's ssh_key_path at the returned path.
     key_path = paths.data_dir() / _KEY_FILENAME
     return _connector_call(wizard.ssh_keygen, key_path=key_path)
 
@@ -212,36 +255,31 @@ def ssh_trust(body: SshTrustRequest) -> dict[str, Any]:
     )
 
 
-# --- reset setup -------------------------------------------------------------
-
-# Connection-identity fields the wizard populates. Reset blanks exactly these so the wizard
-# starts fresh, while tuning left elsewhere (ports, TLS, wake timeouts, backup safety,
-# notifications, schedule, the admin account) is preserved. The generated SSH key file is
-# intentionally kept — only its reference is cleared here.
-_PVE_RESET = ("host", "node", "api_token_id", "api_token_secret", "storage_id")
-_PBS_RESET = (
-    "host",
-    "datastore",
-    "fingerprint",
-    "api_token_id",
-    "api_token_secret",
-    "mac",
-    "wol_broadcast_iface",
-)
+# --- Wake-on-LAN smoke test --------------------------------------------------
+#
+# Stateless like the rest of this router: the wizard tests a MAC it has just detected,
+# before there is a device to save it on. Waking a *configured* PBS is
+# POST /api/devices/pbss/{id}/power instead.
 
 
-@router.post("/reset")
-def reset_setup(store: ConfigStore = Depends(get_config_store)) -> dict[str, bool]:
-    """Clear the saved PVE/PBS connection so the setup wizard restarts from scratch.
+class WolTestRequest(BaseModel):
+    mac: str = Field(min_length=1)
+    # The PBS's address, so the packet goes to that subnet's directed broadcast rather than
+    # the whole network. Optional: pre-setup we may not know it yet.
+    host: str = ""
+    iface: str = ""
 
-    Only the connection-identity fields are wiped; everything else (schedule, retention,
-    notifications, backup-safety tuning, the login account) is left untouched."""
 
-    def clear(cfg: Any) -> None:
-        for field in _PVE_RESET:
-            setattr(cfg.pve, field, "")
-        for field in _PBS_RESET:
-            setattr(cfg.pbs, field, "")
+@router.post("/wol/test")
+def wol_test(body: WolTestRequest) -> dict[str, Any]:
+    return _connector_call(
+        wizard.wol_test, mac=body.mac, host=body.host, iface=body.iface
+    )
 
-    store.update(clear)
-    return {"ok": True}
+
+# The per-device flows (M12) are orchestrated by the frontend wizard out of these same
+# stateless calls and finalised with POST /api/devices/{kind} — there is no wizard-owned
+# device state to keep on this side. The one thing that had to move into the wizard's
+# transient-root step is the /remote ACL grant a Sync route needs on the peer: PBS refuses
+# ACL writes from a token, so `PbsProvisioner.provision_token` now makes it while it still
+# holds the root ticket.

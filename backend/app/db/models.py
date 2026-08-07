@@ -51,6 +51,7 @@ class RunKind(StrEnum):
     CYCLE = "cycle"  # full wake -> backup -> maintenance -> poweroff cycle
     # External-schedules mode: wake -> watch the PBS's own scheduled jobs -> poweroff.
     MONITOR = "monitor"
+    SYNC = "sync"  # a sync route: PBS -> PBS, pull or push
 
 
 class RunTrigger(StrEnum):
@@ -81,6 +82,8 @@ class StepName(StrEnum):
     BACKUP = "backup"
     # External-schedules mode: the watch phase (waiting for + following the PBS's own jobs).
     MONITOR = "monitor"
+    # Sync route: the remote + sync job run on the executing PBS.
+    SYNC = "sync"
     GC = "gc"
     VERIFY = "verify"
     POWEROFF = "poweroff"
@@ -106,9 +109,21 @@ class Run(Base):
     started_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=_utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
 
+    # Which route produced this run. Nullable: runs recorded before 1.0 have none, and a
+    # manual one-off need not belong to a route. ``route_name`` is denormalised on purpose
+    # so history still reads correctly after the route it came from has been deleted.
+    route_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    route_name: Mapped[str | None] = mapped_column(String(128), default=None)
+
     # Result summary (populated as the job progresses; nullable while running).
     guests_ok: Mapped[int | None] = mapped_column(default=None)
+    # ``error`` is the English rendering; ``error_key``/``error_params`` are the same failure
+    # in a form ``notify.messages.render_error`` can rebuild in any language, for both the
+    # notification and the history row. Nullable: pre-1.0 rows and raw-string callers have
+    # only the English text, which is why it stays the fallback rather than being replaced.
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    error_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    error_params: Mapped[str | None] = mapped_column(Text, default=None)
 
     logs: Mapped[list[LogEvent]] = relationship(
         back_populates="run",
@@ -138,12 +153,20 @@ class RunStep(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
-    name: Mapped[str] = mapped_column(String(16))
+    # A StepName value, optionally suffixed with what it applied to: a backup route records
+    # one step per source PVE, ``backup:pve-alpha``.
+    name: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), default=StepStatus.RUNNING)
 
     started_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=_utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
     detail: Mapped[str | None] = mapped_column(Text, default=None)
+    # The localisation seam, same shape as ``Run.error_key``/``error_params``: ``detail``
+    # keeps the English rendering (and is all a pre-1.0 row has), while the key and its
+    # JSON parameters let the API rebuild the line in the user's language on read. Only
+    # details Joulenap authored carry a key — a task UPID has none.
+    detail_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    detail_params: Mapped[str | None] = mapped_column(Text, default=None)
 
     run: Mapped[Run] = relationship(back_populates="steps")
 
@@ -182,7 +205,7 @@ class TaskLogLine(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
-    step: Mapped[str] = mapped_column(String(16))  # StepName value (backup/gc/verify)
+    step: Mapped[str] = mapped_column(String(64))  # RunStep.name (e.g. gc, backup:pve-alpha)
     source: Mapped[str] = mapped_column(String(8))  # "pve" | "pbs"
     line_no: Mapped[int] = mapped_column()  # the task's own 1-based line number
     text: Mapped[str] = mapped_column(Text)
@@ -196,32 +219,41 @@ Index("ix_task_log_lines_run_id", TaskLogLine.run_id, TaskLogLine.id)
 
 
 class GuestBackup(Base):
-    """Cached most-recent backup time per guest, keyed by vmid.
+    """Cached most-recent backup time per guest, per source PVE, per target PBS.
 
     The dashboard's guest list wants each guest's last backup date, but the PBS is powered
     off most of the time so its snapshots can't be read on demand. The backup cycle upserts
     these rows whenever it has the PBS awake; ``GET /api/guests`` serves the cached values
     so the dashboard shows last-known dates while the PBS sleeps.
+
+    Purely a cache: every row is re-derived the next time a route runs, which is why the
+    schema upgrade is free to drop the table instead of rebuilding it.
     """
 
     __tablename__ = "guest_backups"
 
+    # All three are the key: a vmid is only unique within one PVE, and the same guest can
+    # be backed up to more than one PBS by different routes.
+    pve_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     vmid: Mapped[int] = mapped_column(primary_key=True)
+    pbs_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     # The snapshot's own backup time (not when we cached it).
     last_backup: Mapped[datetime] = mapped_column(UtcDateTime())
 
 
 class DatastoreStat(Base):
-    """Cached PBS datastore usage, keyed by datastore name.
+    """Cached PBS datastore usage, one row per datastore per PBS.
 
     The PBS is powered off most of the time, so its datastore usage can't be read on
     demand. The backup cycle (and any live status probe that finds the PBS online) upserts
     this row while the PBS is awake; /api/status and /api/dashboard serve the cached values
-    so disk usage shows while the PBS sleeps. Mirrors GuestBackup.
+    so disk usage shows while the PBS sleeps. Mirrors GuestBackup, cache nature included.
     """
 
     __tablename__ = "datastore_stats"
 
+    # Both are the key: two PBSs may each have a datastore called "backup".
+    pbs_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     datastore: Mapped[str] = mapped_column(String(128), primary_key=True)
     total: Mapped[int] = mapped_column()  # bytes
     used: Mapped[int] = mapped_column()  # bytes

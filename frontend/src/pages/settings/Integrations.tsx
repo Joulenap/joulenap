@@ -1,21 +1,39 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, ApiError } from '../../api/client'
+import { ApiError, api } from '../../api/client'
 import { ConfirmModal, type ConfirmState } from '../../components/ConfirmModal'
-import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
-import { c, ghostBtn, labelStyle, panelStyle, primaryBtn } from '../../theme'
 import { copyToClipboard } from '../../utils/clipboard'
 
 type Dashboard = 'homepage' | 'glance' | 'homarr' | 'dashy'
 const DASHBOARDS: Dashboard[] = ['homepage', 'glance', 'homarr', 'dashy']
+
+const ns = 'settings.integrations'
+
+type TFunc = (key: string, opts?: Record<string, unknown>) => string
 
 // The endpoint URL uses the current origin so the snippet is copy-paste-ready.
 function endpointUrl(): string {
   return `${window.location.origin}/api/dashboard`
 }
 
-function snippet(dash: Dashboard, url: string, key: string): string {
+/**
+ * Widget config for each supported dashboard.
+ *
+ * **Rewritten for 1.0.** `GET /api/dashboard` used to answer a flat single-PBS object
+ * (`pbs_state`, `next_run`, `datastore_used_pct`); M07 turned it into
+ * `{state, routes[], pbss[]}` because with several routes and several backup servers there
+ * is no single "next run" or "datastore" to report. Every snippet below therefore indexes
+ * into a list — `routes.0` is the first configured route, not "the" route.
+ *
+ * **Only the lines addressed to the reader go through `t()`.** Everything else stays
+ * English on purpose: the YAML/JSON keys are syntax the target tool parses, the `label:`
+ * values render in the user's *own* dashboard rather than in Joulenap, and the Homarr
+ * navigation ("Management -> Custom Widgets", "API Key (Header)", "Display Type") names
+ * controls in Homarr's own English UI — translating those would send the user hunting for
+ * a menu item that does not exist.
+ */
+function snippet(dash: Dashboard, url: string, key: string, t: TFunc): string {
   const iconUrl = `${window.location.origin}/assets/joulenap-icon.svg`
   const href = window.location.origin
   switch (dash) {
@@ -29,16 +47,19 @@ function snippet(dash: Dashboard, url: string, key: string): string {
       headers:
         X-API-Key: ${key}
       mappings:
-        - field: pbs_state
-          label: PBS
-        - field: next_run
-          label: Next backup
+        - field: state
+          label: Joulenap
+        - field: routes.0.name
+          label: Route
+        - field: routes.0.next_run
+          label: Next run
           format: relativeDate
-        - field: last_run_status
+        - field: routes.0.last_run_status
           label: Last run
-        - field: datastore_used_pct
+        - field: pbss.0.datastore_used_pct
           label: Datastore
-          format: percent`
+          format: percent
+${t(`${ns}.snippetIndexNote`)}`
     case 'glance':
       return `- type: custom-api
   title: Joulenap
@@ -46,10 +67,15 @@ function snippet(dash: Dashboard, url: string, key: string): string {
   headers:
     X-API-Key: ${key}
   template: |
-    <div>PBS: {{ .JSON.String "pbs_state" }}</div>
-    <div>Next: {{ .JSON.String "next_run" }}</div>
-    <div>Last run: {{ .JSON.String "last_run_status" }}</div>
-    <div>Datastore: {{ .JSON.Int "datastore_used_pct" }}%</div>`
+    <div>State: {{ .JSON.String "state" }}</div>
+    {{ range .JSON.Array "routes" }}
+      <div>{{ .String "name" }}: {{ .String "last_run_status" }}
+           (next {{ .String "next_run" }})</div>
+    {{ end }}
+    {{ range .JSON.Array "pbss" }}
+      <div>{{ .String "id" }}: {{ .String "state" }}
+           — {{ .Int "datastore_used_pct" }}%</div>
+    {{ end }}`
     case 'homarr':
       return `# Homarr v1.65+: Management -> Custom Widgets -> Add -> Custom API
 URL: ${url}
@@ -57,12 +83,18 @@ HTTP Method: GET
 Authentication: API Key (Header)
   Header Name: X-API-Key
   Value: ${key}
-  (or API Key (Query), param "key", if your version lacks header auth:
+  ${t(`${ns}.snippetQueryAuth`)}
    ${url}?key=${key})
 Display Type: Key Value
 
-Fields available: pbs_state, next_run, last_run_status, last_run_time,
-                  datastore_used_pct, datastore_used_bytes, datastore_total_bytes`
+${t(`${ns}.snippetFields`)}
+  state                            idle | running | paused
+  routes[]  id, name, kind, enabled, next_run,
+            last_run_status, last_run_time
+  pbss[]    id, state, datastore_used_pct,
+            datastore_used_bytes, datastore_total_bytes
+
+${t(`${ns}.snippetIndexHint`)}`
     case 'dashy':
       return `- type: customapi
   options:
@@ -70,59 +102,69 @@ Fields available: pbs_state, next_run, last_run_status, last_run_time,
     headers:
       X-API-Key: ${key}
     mappings:
-      - field: pbs_state
-        label: PBS
-      - field: next_run
-        label: Next backup
+      - field: routes.0.name
+        label: Route
+      - field: routes.0.next_run
+        label: Next run
         format: relativeDate
-      - field: last_run_status
+      - field: routes.0.last_run_status
         label: Last run
-      - field: datastore_used_pct
+      - field: pbss.0.datastore_used_pct
         label: Datastore
         format: percent
-# No CORS? set useProxy: true, or fall back to ${url}?key=${key}`
+${t(`${ns}.snippetCors`, { url: `${url}?key=${key}` })}`
   }
 }
 
-// Opt-in outbound release check. Toggling saves immediately (single boolean — no draft to
-// keep, same as the scheduler switch on the dashboard); the footer badge reacts to it.
-export function UpdateCheck() {
+// Straight from backend/app/api/metrics.py. Labels matter as much as the names: with routes
+// every series is per-route or per-PBS, so a query without them sums unrelated boxes.
+const METRICS: { name: string; labels?: string }[] = [
+  { name: 'joulenap_build_info', labels: 'version' },
+  { name: 'joulenap_scheduler_enabled' },
+  { name: 'joulenap_job_running' },
+  { name: 'joulenap_queued_runs' },
+  { name: 'joulenap_pbs_online', labels: 'pbs' },
+  { name: 'joulenap_pbs_cpu_percent', labels: 'pbs' },
+  { name: 'joulenap_pbs_memory_percent', labels: 'pbs' },
+  { name: 'joulenap_pbs_uptime_seconds', labels: 'pbs' },
+  { name: 'joulenap_datastore_used_bytes', labels: 'pbs, datastore' },
+  { name: 'joulenap_datastore_total_bytes', labels: 'pbs, datastore' },
+  { name: 'joulenap_route_next_run_timestamp_seconds', labels: 'route' },
+  { name: 'joulenap_route_last_run_timestamp_seconds', labels: 'route' },
+  { name: 'joulenap_route_last_run_success', labels: 'route' },
+  { name: 'joulenap_route_last_run_duration_seconds', labels: 'route' },
+  { name: 'joulenap_route_last_run_guests', labels: 'route' },
+  { name: 'joulenap_guest_last_backup_timestamp_seconds', labels: 'pve, pbs, vmid' },
+  { name: 'joulenap_runs_recent', labels: 'status' },
+]
+
+function promSnippet(key: string): string {
+  return `# prometheus.yml
+scrape_configs:
+  - job_name: joulenap
+    metrics_path: /metrics
+    params: { key: ["${key}"] }
+    scrape_interval: 60s
+    static_configs:
+      - targets: ["${window.location.host}"]`
+}
+
+/** Copy button that reports the outcome in its own label, as the mockup does. */
+function CopyButton({ text, small }: { text: string; small?: boolean }) {
   const { t } = useTranslation()
-  const { config, save } = useConfig()
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const on = Boolean(config?.app.update_check)
-
-  async function toggle() {
-    if (!config) return
-    setBusy(true)
-    setErr(null)
-    try {
-      await save({ ...config, app: { ...config.app, update_check: !on } })
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   return (
-    <div style={{ ...panelStyle, padding: '24px 26px', maxWidth: 640, marginTop: 18 }}>
-      <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
-        {t('settings.updates.title')}
-      </span>
-      <span style={{ display: 'block', fontSize: 13, color: c.textDim, lineHeight: 1.5, marginBottom: 18 }}>
-        {t('settings.updates.subtitle')}
-      </span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Toggle on={on} onClick={() => void (busy ? null : toggle())} />
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{t('settings.updates.toggle')}</span>
-      </div>
-      <div style={{ fontSize: 12, color: c.textDim, marginTop: 8 }}>
-        {t('settings.updates.toggleHint')}
-      </div>
-      {err && <div style={{ fontSize: 12, color: c.red, marginTop: 8 }}>{err}</div>}
-    </div>
+    <button
+      type="button"
+      className={`btn${small ? ' btn-sm' : ''}`}
+      onClick={async () => {
+        const ok = await copyToClipboard(text)
+        setState(ok ? 'copied' : 'failed')
+        setTimeout(() => setState('idle'), ok ? 1500 : 3000)
+      }}
+    >
+      {state === 'copied' ? t(`${ns}.copied`) : state === 'failed' ? t(`${ns}.copyFailed`) : t(`${ns}.copy`)}
+    </button>
   )
 }
 
@@ -132,22 +174,19 @@ export function Integrations() {
   const [freshKey, setFreshKey] = useState<string | null>(null)
   const [dash, setDash] = useState<Dashboard>('homepage')
   const [busy, setBusy] = useState(false)
-  const [keyCopyState, setKeyCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const [snippetCopyState, setSnippetCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
 
-  // Derive "a key is configured" from the shared config (api_key is redacted to a non-empty
-  // sentinel when set) instead of a standalone fetch, and reload() after mutating it so the
+  // "A key is configured" comes from the shared config (api_key is redacted to a non-empty
+  // sentinel when set) rather than a standalone fetch; reload() after mutating it so the
   // shared cache never goes stale (FE-M10).
   const enabled = Boolean(config?.app.api_key)
 
-  async function doGenerate() {
+  async function run(fn: () => Promise<void>) {
     setBusy(true)
     setErr(null)
     try {
-      const { api_key } = await api.generateApiKey()
-      setFreshKey(api_key)
+      await fn()
       await reload()
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
@@ -156,177 +195,125 @@ export function Integrations() {
     }
   }
 
-  async function doDisable() {
-    setBusy(true)
-    setErr(null)
-    try {
+  const doGenerate = () =>
+    run(async () => {
+      setFreshKey((await api.generateApiKey()).api_key)
+    })
+
+  const doDisable = () =>
+    run(async () => {
       await api.deleteApiKey()
       setFreshKey(null)
-      await reload()
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
+    })
 
-  const keyForSnippet = freshKey ?? t('settings.integrations.keyPlaceholder')
-  const code = snippet(dash, endpointUrl(), keyForSnippet)
-
-  async function copyKey() {
-    if (!freshKey) return
-    const ok = await copyToClipboard(freshKey)
-    setKeyCopyState(ok ? 'copied' : 'failed')
-    setTimeout(() => setKeyCopyState('idle'), ok ? 1500 : 3000)
-  }
-
-  async function copySnippet() {
-    const ok = await copyToClipboard(code)
-    setSnippetCopyState(ok ? 'copied' : 'failed')
-    setTimeout(() => setSnippetCopyState('idle'), ok ? 1500 : 3000)
-  }
+  const keyForSnippet = freshKey ?? t(`${ns}.keyPlaceholder`)
+  const code = snippet(dash, endpointUrl(), keyForSnippet, t)
+  const prom = promSnippet(keyForSnippet)
 
   return (
-    <div style={{ ...panelStyle, padding: '24px 26px', maxWidth: 640 }}>
-      <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
-        {t('settings.integrations.title')}
-      </span>
-      <span style={{ display: 'block', fontSize: 13, color: c.textDim, lineHeight: 1.5, marginBottom: 20 }}>
-        {t('settings.integrations.subtitle')}
-      </span>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: enabled ? c.green : c.textDim }}>
-          {enabled ? t('settings.integrations.statusEnabled') : t('settings.integrations.statusDisabled')}
-        </span>
-        <button
-          onClick={() =>
-            enabled
-              ? setConfirm({
-                  title: t('settings.integrations.regenerateConfirmTitle'),
-                  message: t('settings.integrations.regenerateConfirmBody'),
-                  confirmLabel: t('settings.integrations.regenerate'),
-                  danger: true,
-                  icon: '⟳',
-                  onConfirm: doGenerate,
-                })
-              : doGenerate()
-          }
-          disabled={busy}
-          style={{ ...primaryBtn, padding: '9px 18px' }}
-        >
-          {enabled ? t('settings.integrations.regenerate') : t('settings.integrations.generate')}
-        </button>
-        {enabled && (
-          <button
-            onClick={() =>
-              setConfirm({
-                title: t('settings.integrations.disableConfirmTitle'),
-                message: t('settings.integrations.disableConfirmBody'),
-                confirmLabel: t('settings.integrations.disable'),
-                danger: true,
-                icon: '⨯',
-                onConfirm: doDisable,
-              })
-            }
-            disabled={busy}
-            style={{ ...ghostBtn, padding: '9px 18px' }}
-          >
-            {t('settings.integrations.disable')}
-          </button>
-        )}
-      </div>
-
-      {freshKey && (
-        <div
-          style={{
-            background: c.inputBg,
-            border: `1px solid ${c.border}`,
-            borderRadius: 8,
-            padding: '12px 14px',
-            marginBottom: 18,
-          }}
-        >
-          <div style={{ fontSize: 12, color: c.accent, marginBottom: 8 }}>
-            {t('settings.integrations.keyShownOnce')}
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <code style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, wordBreak: 'break-all' }}>
-              {freshKey}
-            </code>
-            <button onClick={() => void copyKey()} style={{ ...ghostBtn, padding: '6px 12px', flex: '0 0 auto' }}>
-              {keyCopyState === 'copied' ? t('settings.integrations.copied') : t('settings.integrations.copy')}
-            </button>
-          </div>
-          {keyCopyState === 'failed' && (
-            <div style={{ fontSize: 12, color: c.red, marginTop: 8 }}>
-              {t('settings.integrations.copyFailed')}
-            </div>
-          )}
+    <div>
+      <section className="panel">
+        <div className="panel-hd">
+          <h2>{t(`${ns}.title`)}</h2>
+          <span className="panel-hint">{t(`${ns}.subtitle`)}</span>
         </div>
-      )}
-
-      {enabled && !freshKey && (
-        <div style={{ fontSize: 12, color: c.textDim, marginBottom: 18 }}>
-          {t('settings.integrations.keyHiddenNote')}
-        </div>
-      )}
-
-      <div style={{ marginBottom: 10 }}>
-        <span style={labelStyle}>{t('settings.integrations.dashboardLabel')}</span>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {DASHBOARDS.map((d) => (
+        <div className="panel-bd stack tight">
+          <div className="url-row">
+            <input
+              type="text"
+              className="in-mono"
+              readOnly
+              value={freshKey ?? (enabled ? t(`${ns}.keyHidden`) : t(`${ns}.keyNone`))}
+              aria-label={t(`${ns}.title`)}
+            />
+            {freshKey && <CopyButton text={freshKey} />}
             <button
-              key={d}
-              onClick={() => setDash(d)}
-              style={{
-                ...ghostBtn,
-                padding: '6px 14px',
-                textTransform: 'capitalize',
-                background: dash === d ? 'rgba(232,131,15,.12)' : 'transparent',
-                borderColor: dash === d ? c.accent : c.border,
-              }}
+              type="button"
+              className="btn btn-accent"
+              disabled={busy}
+              onClick={() =>
+                enabled
+                  ? setConfirm({
+                      title: t(`${ns}.regenerateConfirmTitle`),
+                      message: t(`${ns}.regenerateConfirmBody`),
+                      confirmLabel: t(`${ns}.regenerate`),
+                      danger: true,
+                      icon: '⟳',
+                      onConfirm: () => void doGenerate(),
+                    })
+                  : void doGenerate()
+              }
             >
-              {d}
+              {enabled ? t(`${ns}.regenerate`) : t(`${ns}.generate`)}
             </button>
-          ))}
+            {enabled && (
+              <button
+                type="button"
+                className="btn btn-danger-ghost"
+                disabled={busy}
+                onClick={() =>
+                  setConfirm({
+                    title: t(`${ns}.disableConfirmTitle`),
+                    message: t(`${ns}.disableConfirmBody`),
+                    confirmLabel: t(`${ns}.disable`),
+                    danger: true,
+                    icon: '⨯',
+                    onConfirm: () => void doDisable(),
+                  })
+                }
+              >
+                {t(`${ns}.disable`)}
+              </button>
+            )}
+          </div>
+          <span className="help">{t(`${ns}.keyShownOnce`)}</span>
+          {err && <span className="err-note">{err}</span>}
         </div>
-      </div>
+      </section>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ ...labelStyle, marginBottom: 0 }}>{t('settings.integrations.snippetLabel')}</span>
-        <button
-          onClick={() => void copySnippet()}
-          style={{ ...ghostBtn, padding: '4px 10px', fontSize: 12, flex: '0 0 auto' }}
-        >
-          {snippetCopyState === 'copied' ? t('settings.integrations.copied') : t('settings.integrations.copySnippet')}
-        </button>
-      </div>
-      <pre
-        style={{
-          background: c.inputBg,
-          border: `1px solid ${c.border}`,
-          borderRadius: 8,
-          padding: '12px 14px',
-          overflowX: 'auto',
-          fontSize: 12.5,
-          fontFamily: "'IBM Plex Mono', monospace",
-          color: c.textMid,
-          margin: 0,
-        }}
-      >
-        {code}
-      </pre>
-      <div style={{ fontSize: 12, color: c.textDim, marginTop: 8 }}>
-        {t('settings.integrations.snippetHint')}
-      </div>
-      {snippetCopyState === 'failed' && (
-        <div style={{ fontSize: 12, color: c.red, marginTop: 4 }}>
-          {t('settings.integrations.copyFailed')}
+      <section className="panel">
+        <div className="panel-hd">
+          <h2>{t(`${ns}.dashboardLabel`)}</h2>
+          <div className="seg seg-inline">
+            {DASHBOARDS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                className={`seg-btn${dash === d ? ' on' : ''}`}
+                style={{ textTransform: 'capitalize' }}
+                onClick={() => setDash(d)}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
+        <div className="panel-bd stack tight">
+          <pre className="yaml">{code}</pre>
+          <div className="save-row bare">
+            <span className="help spacer">{t(`${ns}.snippetHint`)}</span>
+            <CopyButton text={code} />
+          </div>
+        </div>
+      </section>
 
-      {err && <div style={{ fontSize: 12, color: c.red, marginTop: 12 }}>{err}</div>}
+      <section className="panel">
+        <div className="panel-hd">
+          <h2>{t(`${ns}.promTitle`)}</h2>
+          <span className="panel-hint">{t(`${ns}.promSubtitle`)}</span>
+        </div>
+        <div className="panel-bd stack tight">
+          <pre className="yaml">{prom}</pre>
+          <span className="help">{t(`${ns}.promMetricsHint`)}</span>
+          <pre className="yaml">
+            {METRICS.map((m) => (m.labels ? `${m.name}{${m.labels}}` : m.name)).join('\n')}
+          </pre>
+          <div className="save-row bare">
+            <span className="spacer" />
+            <CopyButton text={prom} />
+          </div>
+        </div>
+      </section>
 
       <ConfirmModal state={confirm} onCancel={() => setConfirm(null)} />
     </div>

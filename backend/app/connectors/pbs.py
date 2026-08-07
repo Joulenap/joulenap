@@ -179,6 +179,106 @@ class PbsClient:
             "POST", f"/admin/datastore/{self.datastore}/verify", data=data
         )
 
+    # --- sync (remote + sync job) --------------------------------------------
+    #
+    # PBS has no "copy this datastore to that one" call: a sync is a *remote* (the peer's
+    # address + credentials) plus a *sync job* referencing it, which you then run. Joulenap
+    # owns both objects for a route and names them ``joulenap-<route_id>``.
+
+    def _replace(self, section: str, name: str, data: dict[str, Any]) -> None:
+        """Create ``/config/{section}/{name}``, replacing any object of that name.
+
+        Delete-then-create rather than PUT: the update endpoints take their own updater
+        schemas, and everything about the object is derived from the route on every run.
+
+        ``sync-direction`` is a field of the job *body* and nothing else. PBS rejects it as
+        an unknown parameter on the delete (and run) calls, so neither sends it. Listing is
+        the one place it must be passed: the default listing hides push jobs, so without
+        ``all`` an existing push job is never seen, never deleted, and the create that
+        follows fails with "job already exists" on every run after the first.
+        """
+        params = {"sync-direction": "all"} if section == "sync" else None
+        existing = self._api.request("GET", f"/config/{section}", params=params) or []
+        if any((e.get("name") or e.get("id")) == name for e in existing):
+            self._api.request("DELETE", f"/config/{section}/{name}")
+        self._api.request("POST", f"/config/{section}", data=data)
+
+    def ensure_remote(
+        self,
+        name: str,
+        *,
+        host: str,
+        auth_id: str,
+        password: str,
+        port: int = 8007,
+        fingerprint: str = "",
+    ) -> None:
+        """(Re)create the remote ``name`` pointing at another PBS. Needs ``Remote.Modify``."""
+        data: dict[str, Any] = {
+            "name": name,
+            "host": host,
+            "auth-id": auth_id,
+            "password": password,
+        }
+        if port != 8007:
+            data["port"] = port
+        if fingerprint:
+            data["fingerprint"] = fingerprint
+        self._replace("remote", name, data)
+
+    def delete_sync_job(self, job_id: str) -> None:
+        """Drop the sync job ``job_id`` if it exists.
+
+        Must run *before* the remote is replaced: PBS refuses to delete a remote a sync job
+        still points at ("remote 'x' is used by sync job 'y'"), so rebuilding the pair in the
+        other order fails on every run after the first — for pull and push alike.
+        """
+        existing = self._api.request("GET", "/config/sync", params={"sync-direction": "all"}) or []
+        if any(e.get("id") == job_id for e in existing):
+            self._api.request("DELETE", f"/config/sync/{job_id}")
+
+    def delete_remote(self, name: str) -> None:
+        """Drop the remote ``name`` if it exists.
+
+        A remote holds the *other* PBS's API token — id and secret — in that box's
+        ``remote.cfg``, so it must not outlive the route that created it: revoking the
+        credential in Joulenap otherwise leaves a working copy of it on the peer. Call
+        :meth:`delete_sync_job` first; PBS refuses to delete a remote a job still references.
+        """
+        existing = self._api.request("GET", "/config/remote") or []
+        if any((e.get("name") or e.get("id")) == name for e in existing):
+            self._api.request("DELETE", f"/config/remote/{name}")
+
+    def ensure_sync_job(
+        self,
+        job_id: str,
+        *,
+        remote: str,
+        remote_store: str,
+        store: str,
+        direction: str = "pull",
+    ) -> None:
+        """(Re)create a sync job between the local datastore ``store`` and ``remote_store``
+        on ``remote``. ``direction`` says which way the data moves: ``pull`` (this PBS fetches)
+        or ``push`` (this PBS sends) — the job always lives on the side that does the work."""
+        data: dict[str, Any] = {
+            "id": job_id,
+            "store": store,
+            "remote": remote,
+            "remote-store": remote_store,
+        }
+        if direction == "push":
+            data["sync-direction"] = "push"
+        self._replace("sync", job_id, data)
+
+    def run_sync_job(self, job_id: str) -> str:
+        """Run a sync job now; returns the task UPID.
+
+        No ``sync-direction``: a job id is unique across both directions, so PBS resolves a
+        push job from the id alone and rejects the parameter here as unknown.
+        """
+        return self._api.request("POST", f"/admin/sync/{job_id}/run")
+
     def task_status(self, upid: str) -> dict[str, Any]:
         return self._api.request("GET", f"/nodes/{self.node}/tasks/{upid}/status")
 

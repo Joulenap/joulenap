@@ -72,6 +72,132 @@ def test_start_gc_returns_upid():
     assert make_client(handler).start_gc().startswith("UPID:")
 
 
+def _recorder(existing: dict[str, list]):
+    """A handler that records every call and answers ``/config/*`` listings from ``existing``."""
+    calls: list[tuple[str, str, str]] = []  # (method, path, body + query)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        calls.append((request.method, path, request.content.decode() + request.url.query.decode()))
+        for section, entries in existing.items():
+            if request.method == "GET" and path.endswith(f"/config/{section}"):
+                return json_data(entries)
+        return json_data("UPID:pbs:sync::")
+
+    return handler, calls
+
+
+def test_ensure_remote_creates_when_absent():
+    handler, calls = _recorder({"remote": []})
+
+    make_client(handler).ensure_remote(
+        "joulenap-r1", host="pbs2.local", auth_id="root@pam!jn", password="s", fingerprint="aa:bb"
+    )
+
+    assert [(m, p) for m, p, _b in calls] == [
+        ("GET", "/api2/json/config/remote"),
+        ("POST", "/api2/json/config/remote"),
+    ]
+    body = calls[-1][2]
+    assert "name=joulenap-r1" in body
+    assert "auth-id=root%40pam%21jn" in body  # PBS 4.x field name, form-encoded
+    assert "fingerprint=aa%3Abb" in body
+    assert "port" not in body  # the default is left out
+
+
+def test_ensure_remote_replaces_an_existing_one():
+    handler, calls = _recorder({"remote": [{"name": "joulenap-r1"}]})
+
+    make_client(handler).ensure_remote(
+        "joulenap-r1", host="pbs2.local", auth_id="root@pam!jn", password="s", port=8123
+    )
+
+    # Delete-then-create: a route whose peer or direction changed must not be patched.
+    assert [(m, p) for m, p, _b in calls] == [
+        ("GET", "/api2/json/config/remote"),
+        ("DELETE", "/api2/json/config/remote/joulenap-r1"),
+        ("POST", "/api2/json/config/remote"),
+    ]
+    assert "port=8123" in calls[-1][2]
+
+
+def test_pull_sync_job_omits_the_direction():
+    handler, calls = _recorder({"sync": []})
+
+    make_client(handler).ensure_sync_job(
+        "joulenap-r1", remote="joulenap-r1", remote_store="offsite", store="backup"
+    )
+
+    body = calls[-1][2]
+    assert "store=backup" in body and "remote-store=offsite" in body
+    # Pull is PBS's default; omitting it keeps the call identical to what servers without
+    # push support accept.
+    assert "sync-direction" not in body
+
+
+def test_push_sync_job_sends_the_direction_only_in_the_job_body():
+    handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
+    client = make_client(handler)
+
+    client.ensure_sync_job(
+        "joulenap-r1",
+        remote="joulenap-r1",
+        remote_store="backup",
+        store="offsite",
+        direction="push",
+    )
+    upid = client.run_sync_job("joulenap-r1")
+
+    # Verified against a live PBS 4.2: `sync-direction` describes the job, so only the create
+    # takes it. The delete and the run answer 400 "schema does not allow additional
+    # properties" if it is sent, and resolve the job from its id alone.
+    assert calls[1][:2] == ("DELETE", "/api2/json/config/sync/joulenap-r1")
+    assert "sync-direction" not in calls[1][2]
+    assert "sync-direction=push" in calls[2][2]  # the POST that recreates it
+    assert calls[-1][:2] == ("POST", "/api2/json/admin/sync/joulenap-r1/run")
+    assert "sync-direction" not in calls[-1][2]
+    assert upid.startswith("UPID:")
+
+
+def test_delete_sync_job_removes_an_existing_job_in_either_direction():
+    handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
+
+    make_client(handler).delete_sync_job("joulenap-r1")
+
+    assert [(m, p) for m, p, _b in calls] == [
+        ("GET", "/api2/json/config/sync"),
+        ("DELETE", "/api2/json/config/sync/joulenap-r1"),
+    ]
+    assert "sync-direction=all" in calls[0][2]  # or a push job is invisible here too
+
+
+def test_delete_sync_job_is_a_no_op_when_there_is_none():
+    handler, calls = _recorder({"sync": []})
+
+    make_client(handler).delete_sync_job("joulenap-r1")
+
+    assert [m for m, _p, _b in calls] == ["GET"]
+
+
+def test_the_sync_existence_check_lists_both_directions():
+    handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
+
+    make_client(handler).ensure_sync_job(
+        "joulenap-r1",
+        remote="joulenap-r1",
+        remote_store="backup",
+        store="offsite",
+        direction="push",
+    )
+
+    # PBS's default sync listing hides push jobs, so without `all` an existing push job is
+    # never seen, never deleted, and the create that follows fails with "job already exists"
+    # on every run after the first.
+    assert calls[0][:2] == ("GET", "/api2/json/config/sync")
+    assert "sync-direction=all" in calls[0][2]
+    assert calls[1][0] == "DELETE"
+
+
 def test_wait_task_success_and_failure():
     def ok(request: httpx.Request) -> httpx.Response:
         return json_data({"status": "stopped", "exitstatus": "OK"})

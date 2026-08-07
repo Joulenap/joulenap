@@ -1,0 +1,98 @@
+# A configured 0.9 config.yaml — every key config.example.yaml shipped at tag v0.9.0
+# (verified key-for-key against that file),
+# filled in with RFC 5737 TEST-NET addresses and placeholder secrets. The migration tests
+# run against this rather than a hand-picked subset so a forgotten key shows up as a
+# failure, not as silent data loss.
+app:
+  language: it
+  theme: light
+  port: 8081
+  timezone: "Europe/Rome"
+  secret_key: "test-secret-key"
+  api_key: "test-api-key"
+  update_check: true
+  session:
+    https_only: true
+    max_age_days: 30
+  auth:
+    username: admin
+    password_hash: "$2b$12$abcdefghijklmnopqrstuv"
+
+pve:
+  host: "192.0.2.10"
+  port: 8006
+  node: "pve-lab"
+  verify_tls: true
+  api_token_id: "root@pam!joulenap"
+  api_token_secret: "test-pve-secret"
+  storage_id: "pbs-store"
+
+pbs:
+  host: "pbs.example.test"
+  port: 8007
+  datastore: "backup"
+  fingerprint: "aa:bb:cc:dd:ee:ff"
+  api_token_id: "root@pam!joulenap"
+  api_token_secret: "test-pbs-secret"
+  mac: "00:11:22:33:44:55"
+  wol_broadcast_iface: "eth0"
+  wait_timeout: 240
+  wol_retries: 3
+  poweroff_task_wait: 900
+  ssh_user: "backup"
+  ssh_key_path: "/app/data/id_ed25519"
+
+backup:
+  enabled: true
+  schedule: "30 2 * * 1,2,3,4,5"
+  mode: suspend
+  bwlimit: 5000
+  min_free_percent: 15
+  guests:
+    mode: include
+    list: [104, 106, 202]
+  retention:
+    keep_last: 2
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    keep_yearly: 1
+  external:
+    enabled: false
+    first_task_wait: 1200
+    idle_wait: 420
+
+maintenance:
+  gc:
+    enabled: false
+  verify:
+    after_backup: true
+    enabled: false
+    schedule: "0 3 1 * *"
+    reverify_days: 45
+  history:
+    retention_days: 21
+
+notifications:
+  on_success: false
+  on_failure: true
+  telegram:
+    enabled: true
+    bot_token: "test-bot-token"
+    chat_id: "12345"
+  ntfy:
+    enabled: false
+    url: ""
+    topic: ""
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    smtp_user: ""
+    smtp_password: ""
+    from_addr: "joulenap@example.com"
+    to_addr: ""
+  discord:
+    enabled: false
+    webhook_url: ""
+  custom_urls: ["gotify://example.test/token"]

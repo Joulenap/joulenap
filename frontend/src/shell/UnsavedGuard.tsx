@@ -1,16 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ConfirmModal, type ConfirmState } from '../components/ConfirmModal'
 
-// A single-slot "unsaved changes" guard (FE-M2). The one editing surface that's mounted at a
-// time (Dashboard scheduler, or the active Settings tab — never both) registers its dirty
-// state; in-app navigation routes through `guard()`, which asks before discarding a dirty
-// draft instead of unmounting it silently. The setup wizard doesn't participate — its state
-// already survives navigation via WizardProvider.
+// The "unsaved changes" guard (FE-M2). Editing surfaces register their dirty state; in-app
+// navigation routes through `guard()`, which asks before discarding a dirty draft instead of
+// unmounting it silently. The setup wizard doesn't participate — its state already survives
+// navigation via WizardProvider.
+//
+// The registry is keyed, not single-slot: M11 put two independently-saved forms on one tab
+// (Account's credentials + localization, Advanced's application card + the YAML editor), and
+// with one slot the second to mount silently unregistered the first — its edits were then
+// thrown away with no prompt. Any registrant being dirty is enough.
 type DirtyGetter = () => boolean
 
 interface UnsavedGuardValue {
-  registerDirty: (getter: DirtyGetter | null) => void
+  registerDirty: (key: string, getter: DirtyGetter | null) => void
   guard: (action: () => void) => void
 }
 
@@ -18,14 +22,15 @@ const Ctx = createContext<UnsavedGuardValue | null>(null)
 
 export function UnsavedGuardProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
-  const dirtyRef = useRef<DirtyGetter | null>(null)
+  const dirtyRef = useRef(new Map<string, DirtyGetter>())
   const [confirm, setConfirm] = useState<ConfirmState | null>(null)
 
-  const registerDirty = useCallback((getter: DirtyGetter | null) => {
-    dirtyRef.current = getter
+  const registerDirty = useCallback((key: string, getter: DirtyGetter | null) => {
+    if (getter) dirtyRef.current.set(key, getter)
+    else dirtyRef.current.delete(key)
   }, [])
 
-  const isDirty = useCallback(() => !!dirtyRef.current?.(), [])
+  const isDirty = useCallback(() => [...dirtyRef.current.values()].some((g) => g()), [])
 
   const guard = useCallback(
     (action: () => void) => {
@@ -40,9 +45,9 @@ export function UnsavedGuardProvider({ children }: { children: ReactNode }) {
         danger: true,
         icon: '⚠',
         onConfirm: () => {
-          // The surface we're leaving is about to unmount; drop its registration now so a
-          // stale getter can't mis-guard the next navigation before its cleanup runs.
-          dirtyRef.current = null
+          // The surfaces we're leaving are about to unmount; drop their registrations now so
+          // a stale getter can't mis-guard the next navigation before their cleanup runs.
+          dirtyRef.current.clear()
           action()
         },
       })
@@ -78,13 +83,15 @@ export function useUnsavedGuard(): UnsavedGuardValue {
 
 // Publish this surface's dirty state to the guard for as long as it's mounted. The registered
 // getter reads a ref so the value stays current without re-registering on every keystroke, and
-// the registration is cleared on unmount.
+// the registration is cleared on unmount. `useId` gives each caller its own slot, so two forms
+// on the same tab don't overwrite each other.
 export function useRegisterDirty(dirty: boolean): void {
   const { registerDirty } = useUnsavedGuard()
+  const key = useId()
   const ref = useRef(dirty)
   ref.current = dirty
   useEffect(() => {
-    registerDirty(() => ref.current)
-    return () => registerDirty(null)
-  }, [registerDirty])
+    registerDirty(key, () => ref.current)
+    return () => registerDirty(key, null)
+  }, [registerDirty, key])
 }

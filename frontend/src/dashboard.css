@@ -1,0 +1,1369 @@
+/* Homepage stylesheet, ported from the mockup `design/overhaul/src/home2.html`.
+ *
+ * The rest of the app is inline-style heavy (see theme.ts). The homepage is not, on
+ * purpose: it is dense with :hover dim/highlight, keyframes, sticky dividers, the
+ * absolute-fill equal-height trick and a 1200px breakpoint — none of which an inline
+ * `style` can express, and the mockup's own CSS is the spec. Copying it keeps the
+ * implementation pixel-comparable to the design instead of a re-derivation of it.
+ *
+ * Every colour here is a --jn-* token, so both themes follow automatically. The one thing
+ * that stays inline is a route's colour: it is a #rrggbb value from config, not a token.
+ *
+ * Inline `style` beats these rules regardless of specificity (same warning as
+ * responsive.css): a property that varies by breakpoint must not also be set inline.
+ */
+
+/* ---- Layout -----------------------------------------------------------------
+ * Equal heights by construction: grid items stretch, so the taller column sets the row
+ * height and the sibling adapts. In each pair only one panel is elastic — top: "Upcoming
+ * runs" (row-granular, count from a ResizeObserver); bottom: the guest list (scrolls). */
+.jn-home {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.grid-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: stretch;
+}
+.grid-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: stretch;
+}
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.panel.elastic {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* The guest cell contributes no intrinsic height (absolute child), so the history panel
+   alone decides the bottom row height and the guest list scrolls inside it. */
+.gcell {
+  position: relative;
+  min-width: 0;
+}
+.gcell .panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gcell .glist {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+@media (max-width: 1200px) {
+  .grid-top,
+  .grid-bottom {
+    grid-template-columns: 1fr;
+  }
+  .gcell .panel {
+    position: static;
+  }
+  .gcell .glist {
+    max-height: 360px;
+  }
+}
+
+.panel {
+  background: var(--jn-panel);
+  border: 1px solid var(--jn-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.panel-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--jn-border-soft);
+  flex-wrap: wrap;
+}
+.panel-hd h2 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+.panel-hd .count {
+  color: var(--jn-text-muted);
+  font-weight: 400;
+}
+.panel-bd {
+  padding: 16px;
+}
+.panel-empty {
+  padding: 26px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--jn-text-dim);
+}
+
+.mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* ---- Topology (hero) --------------------------------------------------------- */
+.rlegend {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--jn-panel-alt);
+  border: 1px solid var(--jn-border);
+  border-radius: 999px;
+  padding: 4px 12px 4px 9px;
+  font-size: 12px;
+  cursor: default;
+  color: var(--jn-text-mid);
+  font-family: inherit;
+}
+.rpill:hover {
+  border-color: var(--jn-ghost-border);
+}
+.rpill .rdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.rpill .rwhen {
+  color: var(--jn-text-faint);
+  font-size: 11.5px;
+}
+.rpill .rwhen.run {
+  color: var(--jn-accent);
+  font-weight: 600;
+}
+
+.diagram-scroll {
+  overflow-x: auto;
+}
+.diagram {
+  position: relative;
+  min-width: 620px;
+  padding: 8px 84px 8px 8px;
+  display: grid;
+  grid-template-columns: 235px 235px;
+  justify-content: space-between;
+  gap: 40px;
+}
+.wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.wires path {
+  fill: none;
+  stroke-width: 2;
+  transition:
+    opacity 0.15s ease,
+    stroke-width 0.15s ease;
+}
+.wires .dim {
+  opacity: 0.18;
+}
+.wires path.hl {
+  stroke-width: 3;
+}
+@keyframes wireflow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+.wires path.running {
+  stroke-dasharray: 7 5;
+  animation: wireflow 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wires path.running,
+  .dot.pulse,
+  .runbar::after {
+    animation: none;
+  }
+}
+.dcol {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
+}
+.dcol-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--jn-text-muted);
+}
+.device {
+  background: var(--jn-panel-alt);
+  border: 1px solid var(--jn-border);
+  border-radius: 10px;
+  padding: 10px 13px;
+  transition:
+    opacity 0.15s ease,
+    border-color 0.15s ease;
+}
+.device.dim {
+  opacity: 0.35;
+}
+.device.hl {
+  border-color: var(--jn-ghost-border);
+}
+.device-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.device-ico {
+  color: var(--jn-text-dim);
+  display: inline-flex;
+  flex: none;
+}
+.device-name {
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device-host {
+  font-size: 12px;
+  color: var(--jn-text-dim);
+  margin-top: 2px;
+}
+.device-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 6px;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.dot.on {
+  background: var(--jn-green);
+}
+.dot.off {
+  background: var(--jn-text-muted);
+}
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.dot.pulse {
+  animation: pulseDot 1.4s ease infinite;
+}
+.state-on {
+  color: var(--jn-green);
+}
+.state-off {
+  color: var(--jn-text-faint);
+}
+
+/* PBS power button (in-card, top right) */
+.pwr {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.pwr:hover:not(:disabled) {
+  border-color: var(--jn-accent);
+  color: var(--jn-accent);
+}
+.pwr:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* PBS datastore bar (in-card) */
+.dbar {
+  height: 8px;
+  background: var(--jn-input-bg);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.dbar > div {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e8830f, #f5a83a);
+}
+.dbar-lab {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--jn-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Route cards (full-width strip between topology and history) ------------- */
+.route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* Four columns, and only the last one is `auto`. The outcome pill gets its own `fr` column
+   because its width varies per route; leaving it in the `auto` column made every card size
+   its grid differently, so the schedule column never lined up. What is left in `auto` is the
+   toggle plus the Edit button — the same width on every card. */
+.route-card {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.3fr) minmax(170px, 1fr) minmax(150px, 0.8fr) auto;
+  gap: 8px 18px;
+  align-items: center;
+  background: var(--jn-panel-alt);
+  border: 1px solid var(--jn-border);
+  border-radius: 10px;
+  padding: 12px 15px;
+  cursor: default;
+}
+.route-card:hover {
+  background: var(--jn-hover);
+  border-color: var(--jn-ghost-border);
+}
+.route-card.off {
+  opacity: 0.55;
+}
+.route-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.route-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.route-name {
+  font-weight: 600;
+}
+.badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--jn-text-dim);
+  border: 1px solid var(--jn-input-border);
+}
+.badge.sync {
+  color: var(--jn-amber);
+  border-color: var(--jn-amber);
+}
+.badge.ext {
+  color: var(--jn-route-violet);
+  border-color: var(--jn-route-violet);
+}
+.badge.verify {
+  color: var(--jn-route-teal);
+  border-color: var(--jn-route-teal);
+}
+.route-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.chip-s {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  border-radius: 6px;
+  padding: 1px 7px;
+  color: var(--jn-text-mid);
+}
+.arrow {
+  color: var(--jn-text-muted);
+}
+.route-mid {
+  font-size: 12.5px;
+  color: var(--jn-text-dim);
+}
+.route-mid .cron {
+  color: var(--jn-text-mid);
+  font-size: 12px;
+}
+.route-mid div + div {
+  margin-top: 3px;
+}
+.route-status {
+  min-width: 0;
+}
+.route-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-self: end;
+}
+@media (max-width: 640px) {
+  .route-card {
+    grid-template-columns: 1fr;
+  }
+  .route-right {
+    justify-self: start;
+  }
+}
+
+/* ---- Upcoming runs -----------------------------------------------------------
+ * flex:1 rows absorb the leftover pixels so the list is always flush with the panel
+ * bottom — whole rows only, count decided by the ResizeObserver in UpcomingRuns. */
+.uplist {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.uprow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 0 auto;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--jn-divider);
+  font-size: 13px;
+}
+.uprow:last-child {
+  border-bottom: none;
+}
+.uprow .rdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.uprow .rname {
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.uprow .uwhen {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--jn-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.uprow.now .uwhen {
+  color: var(--jn-accent);
+  font-weight: 600;
+}
+
+/* ---- Buttons (shared by the manual-run panel, the route strip and history) ---- */
+.man-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.btn {
+  background: var(--jn-btn-bg);
+  border: 1px solid var(--jn-btn-border);
+  color: var(--jn-text-mid);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.btn:hover {
+  border-color: var(--jn-ghost-border);
+  color: var(--jn-text);
+}
+.btn-accent {
+  background: var(--jn-accent);
+  border-color: var(--jn-accent);
+  color: var(--jn-accent-ink);
+  font-weight: 600;
+}
+.btn-accent:hover {
+  background: var(--jn-accent-hover);
+  border-color: var(--jn-accent-hover);
+  color: var(--jn-accent-ink);
+}
+.btn-outline-danger {
+  color: var(--jn-red);
+  border-color: color-mix(in srgb, var(--jn-red) 45%, transparent);
+}
+.btn-outline-danger:hover {
+  color: var(--jn-red);
+  border-color: var(--jn-red);
+}
+.btn-danger-solid {
+  background: var(--jn-red);
+  border-color: var(--jn-red);
+  color: #fff;
+  font-weight: 600;
+}
+.btn-danger-solid:hover {
+  background: color-mix(in srgb, var(--jn-red) 85%, black);
+  border-color: var(--jn-red);
+  color: #fff;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---- Run history ------------------------------------------------------------- */
+.fchips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fchip {
+  background: transparent;
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text-dim);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fchip .rdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.fchip.on {
+  border-color: var(--jn-accent);
+  color: var(--jn-text);
+  background: color-mix(in srgb, var(--jn-accent) 9%, transparent);
+}
+/* 10 rows: 28px header + 10 × 39px (8+8 padding + the 22px status pill + 1px divider) —
+   keep in step if the cell padding or the pill changes. This is a fixed height, not a cap:
+   the bottom grid takes its row height from this panel alone (see .gcell), so letting it
+   shrink on few or zero runs squashed "Last backup per guest" down to a single row. */
+.table-scroll {
+  overflow-x: auto;
+  overflow-y: auto;
+  height: 418px;
+}
+/* An expanded row carries the steps + task log: too tall to read through a 10-row window,
+   so RunHistory grows past it for as long as one is open — but never below it. */
+.table-scroll.uncapped {
+  height: auto;
+  min-height: 418px;
+}
+.htable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.htable th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--jn-text-faint);
+  padding: 4px 16px 8px;
+  border-bottom: 1px solid var(--jn-border-soft);
+  /* Pinned while the rows scroll. A collapsed border does not travel with a sticky cell
+     (it is painted by the table), so the rule is redrawn as an inset shadow. */
+  position: sticky;
+  top: 0;
+  background: var(--jn-panel);
+  box-shadow: inset 0 -1px 0 var(--jn-border-soft);
+}
+.htable td {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--jn-divider);
+  vertical-align: middle;
+}
+.htable tr:last-child td {
+  border-bottom: none;
+}
+.htable .rdot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: 0;
+}
+.htable .when,
+.htable .dur {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--jn-text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kind {
+  font-size: 11px;
+  color: var(--jn-text-faint);
+}
+.res {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+/* expandable run rows */
+.hrow.x {
+  cursor: pointer;
+}
+.hrow.x:hover td {
+  background: var(--jn-hover);
+}
+.xbtn {
+  display: inline-block;
+  width: 14px;
+  margin-right: 4px;
+  color: var(--jn-text-faint);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+.hrow.open .xbtn {
+  transform: rotate(90deg);
+}
+.drow td {
+  background: var(--jn-panel-alt);
+  padding: 12px 16px 14px 46px;
+  border-bottom: 1px solid var(--jn-divider);
+}
+
+/* run steps, above the task log in an expanded row */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+.step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--jn-text-dim);
+}
+.step .sname {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  color: var(--jn-text-mid);
+  min-width: 130px;
+}
+.step .sdur {
+  font-variant-numeric: tabular-nums;
+  color: var(--jn-text-faint);
+}
+.step .sdetail {
+  color: var(--jn-text-faint);
+  min-width: 0;
+}
+
+/* task-log tail */
+.tasklog {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--jn-text-mid);
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+}
+.tasklog .tl-err {
+  color: var(--jn-red);
+}
+.tasklog .tl-warn {
+  color: var(--jn-amber);
+}
+.tasklog-empty {
+  font-size: 12px;
+  color: var(--jn-text-muted);
+}
+.runbar {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--jn-input-bg);
+  margin-top: 10px;
+}
+.runbar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 33%;
+  background: var(--jn-accent);
+  border-radius: 2px;
+  animation: slide 1.6s ease-in-out infinite alternate;
+}
+@keyframes slide {
+  from {
+    left: 0;
+  }
+  to {
+    left: 67%;
+  }
+}
+.drow-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* ---- Guest last-backup panel -------------------------------------------------- */
+.glist {
+  max-height: 360px;
+  overflow-y: auto;
+}
+.grow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--jn-divider);
+}
+.grow:last-child {
+  border-bottom: none;
+}
+.gdiv {
+  padding: 7px 16px 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--jn-text-muted);
+  background: var(--jn-panel-alt);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.gtype {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 0;
+  border-radius: 5px;
+}
+.gtype.vm {
+  color: var(--jn-blue);
+  background: color-mix(in srgb, var(--jn-blue) 14%, transparent);
+}
+.gtype.ct {
+  color: var(--jn-green);
+  background: color-mix(in srgb, var(--jn-green) 14%, transparent);
+}
+.gid {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--jn-text-faint);
+  width: 34px;
+  flex: none;
+}
+.gname {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gwhen {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--jn-text-dim);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.pbschip {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text-dim);
+  border-radius: 5px;
+  padding: 0 5px;
+  flex: none;
+}
+.pbschip.two {
+  border-color: var(--jn-amber);
+  color: var(--jn-amber);
+}
+.gerr {
+  font-size: 12px;
+  color: var(--jn-red);
+}
+.gsearch {
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  width: 150px;
+}
+.gsearch:focus {
+  outline: none;
+  border-color: var(--jn-accent);
+}
+.gsearch::placeholder {
+  color: var(--jn-text-muted);
+}
+
+/* ---- Modal shell (route editor + the action dialogs) ------------------------- */
+.modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: none;
+}
+.modal-layer.open {
+  display: block;
+}
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--jn-backdrop);
+}
+.modal-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 14vh 16px 6vh;
+}
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  background: var(--jn-panel);
+  border: 1px solid var(--jn-border);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+}
+.modal.modal-lg {
+  max-width: 700px;
+}
+/* The route editor is tall; opening it near the top of the viewport wastes a third of the
+   screen on backdrop, so the large size starts higher than the small dialogs. */
+.modal-lg-scroll {
+  padding-top: 6vh;
+}
+.modal-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--jn-border-soft);
+}
+.modal-hd h2 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+}
+.modal-x {
+  background: none;
+  border: none;
+  color: var(--jn-text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  line-height: 1;
+}
+.modal-x:hover {
+  color: var(--jn-text);
+  background: var(--jn-hover);
+}
+.modal-bd {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.modal-bd .lab {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--jn-text-mid);
+  display: block;
+  margin-bottom: 6px;
+}
+.modal-note {
+  font-size: 12.5px;
+  color: var(--jn-text-dim);
+  line-height: 1.5;
+  margin: 0;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--jn-border-soft);
+  padding: 13px 16px;
+}
+/* Anything pinned to the left of the footer (the route editor's Delete). */
+.foot-left {
+  margin-right: auto;
+}
+.tglrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--jn-text-mid);
+  cursor: pointer;
+}
+
+/* ---- Form controls. Scoped to .modal: Login and the wizard still style their inputs
+        inline (theme.ts), and a bare input/select rule here would reach into them. The
+        Settings tabs have their own equivalent block, scoped to .jn-settings. --- */
+.modal input[type='text'],
+.modal input[type='password'],
+.modal input[type='number'],
+.modal input[type='time'] {
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13.5px;
+  font-family: inherit;
+  width: 100%;
+}
+.modal input[type='time'] {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 500;
+}
+.modal input:focus,
+.modal select:focus {
+  outline: none;
+  border-color: var(--jn-accent);
+}
+.modal input::placeholder {
+  color: var(--jn-text-muted);
+}
+.modal select {
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+}
+
+/* ---- Route editor body ------------------------------------------------------- */
+.rm-bd {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.frow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 26px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.field label,
+.field .lab {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--jn-text-mid);
+}
+.field .help {
+  font-size: 12px;
+  color: var(--jn-text-faint);
+}
+.field .err {
+  font-size: 12px;
+  color: var(--jn-red);
+}
+.form-banner {
+  background: color-mix(in srgb, var(--jn-red) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--jn-red) 40%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--jn-red);
+}
+.form-warn {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--jn-amber);
+}
+.swatches {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  height: 35px;
+}
+.swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  flex: none;
+  position: relative;
+}
+.swatch.sel {
+  box-shadow:
+    0 0 0 2px var(--jn-panel),
+    0 0 0 4px var(--jn-text-mid);
+}
+.swatch.sel::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  font-weight: 700;
+}
+/* Custom colour: a native <input type="color"> disguised as a rainbow swatch — clicking
+   opens the OS picker, no library needed. Once picked it shows the chosen colour. */
+.swatch.custom {
+  display: inline-flex;
+  overflow: hidden;
+  background: conic-gradient(#e5675b, #e0a92b, #3fb27f, #3b82f6, #9d7bd8, #e5675b);
+}
+.swatch.custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  color: var(--jn-text-mid);
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+.chip .k {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--jn-text-muted);
+  text-transform: uppercase;
+}
+.chip:hover {
+  border-color: var(--jn-ghost-border);
+}
+.chip.on {
+  border-color: var(--jn-accent);
+  color: var(--jn-text);
+  background: color-mix(in srgb, var(--jn-accent) 9%, transparent);
+}
+.chip.on .k {
+  color: var(--jn-accent);
+}
+.chip[aria-disabled='true'] {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.preview-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--jn-input-bg);
+  border: 1px dashed var(--jn-input-border);
+  border-radius: 10px;
+  padding: 11px 14px;
+}
+.preview-lab {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--jn-text-muted);
+  margin-right: 2px;
+}
+.preview-note {
+  color: var(--jn-text-faint);
+  font-size: 12px;
+}
+.preview-err {
+  color: var(--jn-red);
+  font-size: 12px;
+}
+.sched-row {
+  display: flex;
+  gap: 22px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.days {
+  display: grid;
+  grid-template-columns: repeat(7, 46px);
+  gap: 7px;
+}
+.day-btn {
+  text-align: center;
+  background: transparent;
+  color: var(--jn-text-faint);
+  border: 1px solid var(--jn-input-border);
+  border-radius: 7px;
+  padding: 8px 0;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.day-btn.on {
+  background: var(--jn-accent);
+  color: var(--jn-accent-ink);
+  border-color: var(--jn-accent);
+}
+.seg {
+  display: flex;
+  background: var(--jn-input-bg);
+  border: 1px solid var(--jn-input-border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+  max-width: 300px;
+}
+.seg.seg-wide {
+  max-width: 380px;
+}
+.seg-btn {
+  flex: 1;
+  text-align: center;
+  background: transparent;
+  color: var(--jn-text-dim);
+  border: none;
+  border-radius: 6px;
+  padding: 7px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.seg-btn.on {
+  background: var(--jn-accent);
+  color: var(--jn-accent-ink);
+}
+.guest-list {
+  border: 1px solid var(--jn-border-soft);
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.guest-group {
+  padding: 7px 14px 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--jn-text-muted);
+  background: var(--jn-panel-alt);
+  position: sticky;
+  top: 0;
+}
+.guest-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--jn-divider);
+}
+.guest-row:last-child {
+  border-bottom: none;
+}
+.guest-row.off .gname {
+  color: var(--jn-text-muted);
+}
+.guest-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--jn-text-muted);
+}
+.retention-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.retention-row .r {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 92px;
+}
+.retention-row .r span {
+  font-size: 11.5px;
+  color: var(--jn-text-faint);
+}
+.retention-row input {
+  font-variant-numeric: tabular-nums;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+.radio-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--jn-text-mid);
+}
+.radio-row label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-weight: 400;
+  cursor: pointer;
+}
+/* Collapsed-by-default "Advanced" section at the bottom of the route modal */
+details.adv {
+  border-top: 1px solid var(--jn-border-soft);
+}
+details.adv summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--jn-text-mid);
+  padding: 12px 0 2px;
+}
+details.adv summary::-webkit-details-marker {
+  display: none;
+}
+details.adv summary::before {
+  content: '▸';
+  font-size: 10px;
+  color: var(--jn-text-faint);
+  transition: transform 0.15s ease;
+}
+details.adv[open] summary::before {
+  transform: rotate(90deg);
+}
+.adv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px 22px;
+  padding: 12px 0 2px;
+}
+.adv-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+}
+@media (max-width: 640px) {
+  .frow {
+    grid-template-columns: 1fr;
+  }
+  .days {
+    grid-template-columns: repeat(7, 1fr);
+  }
+}
+
+/* Keyboard focus, matching the mockup's single rule for every interactive element here. */
+.rpill:focus-visible,
+.fchip:focus-visible,
+.hrow:focus-visible,
+.pwr:focus-visible,
+.route-card:focus-visible,
+.chip:focus-visible,
+.swatch:focus-within,
+.day-btn:focus-visible,
+.seg-btn:focus-visible,
+.modal-x:focus-visible,
+.modal select:focus-visible,
+.modal input:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid var(--jn-accent);
+  outline-offset: 2px;
+}

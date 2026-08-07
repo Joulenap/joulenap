@@ -1,13 +1,12 @@
 # Joulenap frontend
 
-React + TypeScript + Vite SPA for Joulenap, recreated from the prototypes in
-`design/joulenap-remix/` and wired to the backend REST API.
+React + TypeScript + Vite SPA for Joulenap, wired to the backend REST API.
 
 ## Develop
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev        # Vite dev server on :5173, proxies /api -> http://localhost:8080
 ```
 
@@ -27,7 +26,8 @@ needs the built output present. `dist/` is git-ignored.
 
 - `src/api/` — typed client + response types for `/api/*`
 - `src/auth/`, `src/config/` — auth + config React contexts
-- `src/pages/` — `Login`, `Dashboard` (+ `dashboard/` panels), `Settings` (+ `settings/` panels incl. the setup wizard)
+- `src/pages/` — `Login`, `Dashboard` (+ `dashboard/` panels), `Settings` (+ `settings/` panels, incl. the device editor)
+- `src/wizard/` — the two device wizards (add a PVE, add a PBS) and the PBS steps they share
 - `src/shell/` — header + authenticated app shell
 - `src/components/`, `src/hooks/`, `src/utils/` — shared widgets/helpers
 - `src/i18n/` — `react-i18next` setup; `en.json` is the base language, `it.json` the translation

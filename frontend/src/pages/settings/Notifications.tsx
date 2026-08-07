@@ -1,20 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, ApiError } from '../../api/client'
-import type { ChannelOutcome, NotificationsConfig } from '../../api/types'
+import { ApiError, api } from '../../api/client'
+import { REDACTED, type ChannelOutcome, type NotificationsConfig } from '../../api/types'
 import { Toggle } from '../../components/Toggle'
 import { useConfig } from '../../config/ConfigContext'
 import { useRegisterDirty } from '../../shell/UnsavedGuard'
-import { c, ghostBtn, inputStyle, labelStyle, panelStyle, primaryBtn } from '../../theme'
 import { channelLabel } from '../../utils/notifyChannels'
 
-// M7: Apprise-backed notification channels. The friendly forms here are turned into
-// Apprise URLs server-side (backend/app/notify); secrets arrive redacted and are sent
-// back untouched to keep the stored value (see config restore_secrets).
+// M7: Apprise-backed notification channels. The friendly forms here are turned into Apprise
+// URLs server-side (backend/app/notify); secrets arrive redacted and are sent back untouched
+// to keep the stored value (see config restore_secrets).
 
 type ChannelKey = 'telegram' | 'ntfy' | 'email' | 'discord'
 
-const REDACTED = '***REDACTED***'
+const ns = 'settings.notifications'
 
 export function Notifications() {
   const { t } = useTranslation()
@@ -22,10 +21,11 @@ export function Notifications() {
 
   const [draft, setDraft] = useState<NotificationsConfig | null>(null)
   const [busy, setBusy] = useState(false)
-  const [savedNote, setSavedNote] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [saveErr, setSaveErr] = useState<string | null>(null)
   const [testState, setTestState] = useState<{ channels: ChannelOutcome[] } | { error: string } | null>(null)
   const [replacing, setReplacing] = useState(false)
+  const [newUrl, setNewUrl] = useState('')
 
   // (Re)seed the editable draft whenever the loaded config changes.
   useEffect(() => {
@@ -45,14 +45,14 @@ export function Notifications() {
 
   function patch(next: Partial<NotificationsConfig>) {
     setDraft((d) => (d ? { ...d, ...next } : d))
-    setSavedNote(false)
+    setSaved(false)
     setSaveErr(null)
     setTestState(null)
   }
 
   function patchChannel<K extends ChannelKey>(key: K, next: Partial<NotificationsConfig[K]>) {
     setDraft((d) => (d ? { ...d, [key]: { ...d[key], ...next } } : d))
-    setSavedNote(false)
+    setSaved(false)
     setSaveErr(null)
     setTestState(null)
   }
@@ -63,7 +63,7 @@ export function Notifications() {
     setSaveErr(null)
     try {
       await save({ ...config, notifications: draft! })
-      setSavedNote(true)
+      setSaved(true)
     } catch (e) {
       setSaveErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
     } finally {
@@ -75,213 +75,277 @@ export function Notifications() {
     setBusy(true)
     setTestState(null)
     try {
-      const r = await api.notifyTest()
-      setTestState({ channels: r.channels })
+      setTestState({ channels: (await api.notifyTest()).channels })
     } catch (e) {
-      // Only transport/auth failures land here now — delivery outcomes come back as 200.
-      setTestState({ error: e instanceof ApiError ? e.message : t('settings.notifications.testFailed') })
+      // Only transport/auth failures land here — delivery outcomes come back as 200.
+      setTestState({ error: e instanceof ApiError ? e.message : t(`${ns}.testFailed`) })
     } finally {
       setBusy(false)
     }
   }
 
-  const field = (label: string, value: string, onChange: (v: string) => void, opts?: { type?: string; placeholder?: string }) => (
-    <label style={{ display: 'block' }}>
-      <span style={labelStyle}>{label}</span>
+  const field = (
+    id: string,
+    label: string,
+    value: string,
+    onChange: (v: string) => void,
+    opts: { type?: string; placeholder?: string; mono?: boolean } = {},
+  ) => (
+    <div className="field" key={id}>
+      <label htmlFor={`ntf-${id}`}>{label}</label>
       <input
+        id={`ntf-${id}`}
+        type={opts.type ?? 'text'}
+        className={opts.mono ? 'in-mono' : undefined}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        type={opts?.type ?? 'text'}
-        placeholder={opts?.placeholder}
+        placeholder={opts.placeholder}
         autoComplete="off"
         spellCheck={false}
-        style={inputStyle}
+        onChange={(e) => onChange(e.target.value)}
       />
-    </label>
+    </div>
   )
 
-  const channelCard = (key: ChannelKey, title: string, body: React.ReactNode) => {
+  /** A channel card: the toggle in the header is what reveals its fields, per the mockup. */
+  const channel = (key: ChannelKey, title: string, hint: string, body: React.ReactNode, wide = false) => {
     const ch = draft[key]
     return (
-      <div
-        style={{
-          background: c.panelAlt,
-          border: `1px solid ${c.borderSoft}`,
-          borderRadius: 10,
-          padding: '16px 18px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: ch.enabled ? 16 : 0 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: c.textMid }}>{title}</span>
-          <Toggle on={ch.enabled} onClick={() => patchChannel(key, { enabled: !ch.enabled } as never)} />
-        </div>
-        {ch.enabled && <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>{body}</div>}
+      <div className="chan">
+        <label className="chan-hd">
+          <Toggle on={ch.enabled} onClick={() => patchChannel(key, { enabled: !ch.enabled } as never)} size="sm" />
+          <span className="chan-name">{title}</span>
+          <span className="chan-hint">{hint}</span>
+        </label>
+        {ch.enabled && <div className={`chan-fields${wide ? '' : ' frow'}`}>{body}</div>}
       </div>
     )
   }
 
-  const ns = 'settings.notifications'
+  // The stored list arrives fully redacted and is write-only: the backend rejects a mixed
+  // list, so it is either kept untouched or replaced whole (config.py::_unmask).
+  const storedRedacted =
+    draft.custom_urls.length > 0 && draft.custom_urls.every((u) => u === REDACTED) && !replacing
+
+  const setUrls = (urls: string[]) => patch({ custom_urls: urls })
 
   return (
-    <div style={{ ...panelStyle, padding: '24px 26px', maxWidth: 640 }}>
-      <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
-        {t(`${ns}.title`)}
-      </span>
-      <span style={{ display: 'block', fontSize: 13, color: c.textDim, lineHeight: 1.5, marginBottom: 22 }}>
-        {t(`${ns}.subtitle`)}
-      </span>
-
-      {/* events */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 22 }}>
-        {(['on_success', 'on_failure'] as const).map((k) => (
-          <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: c.textMid }}>
-                {t(`${ns}.${k === 'on_success' ? 'onSuccess' : 'onFailure'}`)}
-              </span>
-              <span style={{ display: 'block', fontSize: 12, color: c.textFaint, marginTop: 2 }}>
-                {t(`${ns}.${k === 'on_success' ? 'onSuccessDesc' : 'onFailureDesc'}`)}
-              </span>
-            </div>
-            <Toggle on={draft[k]} onClick={() => patch({ [k]: !draft[k] } as Partial<NotificationsConfig>)} />
-          </div>
-        ))}
-      </div>
-
-      {/* channels */}
-      <span style={{ ...labelStyle, marginBottom: 12 }}>{t(`${ns}.channels`)}</span>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {channelCard(
-          'telegram',
-          t(`${ns}.telegramTitle`),
-          <>
-            {field(t(`${ns}.botToken`), draft.telegram.bot_token, (v) => patchChannel('telegram', { bot_token: v }), { type: 'password' })}
-            {field(t(`${ns}.chatId`), draft.telegram.chat_id, (v) => patchChannel('telegram', { chat_id: v }))}
-          </>,
-        )}
-
-        {channelCard(
-          'ntfy',
-          t(`${ns}.ntfyTitle`),
-          <>
-            {field(t(`${ns}.ntfyUrl`), draft.ntfy.url, (v) => patchChannel('ntfy', { url: v }), { placeholder: 'https://ntfy.sh' })}
-            {field(t(`${ns}.ntfyTopic`), draft.ntfy.topic, (v) => patchChannel('ntfy', { topic: v }))}
-          </>,
-        )}
-
-        {channelCard(
-          'email',
-          t(`${ns}.emailTitle`),
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-              {field(t(`${ns}.smtpHost`), draft.email.smtp_host, (v) => patchChannel('email', { smtp_host: v }))}
-              {field(t(`${ns}.smtpPort`), String(draft.email.smtp_port), (v) =>
-                patchChannel('email', { smtp_port: Number(v) || 0 }), { type: 'number' })}
-            </div>
-            {field(t(`${ns}.smtpUser`), draft.email.smtp_user, (v) => patchChannel('email', { smtp_user: v }))}
-            {field(t(`${ns}.smtpPassword`), draft.email.smtp_password, (v) => patchChannel('email', { smtp_password: v }), { type: 'password' })}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              {field(t(`${ns}.fromAddr`), draft.email.from_addr, (v) => patchChannel('email', { from_addr: v }))}
-              {field(t(`${ns}.toAddr`), draft.email.to_addr, (v) => patchChannel('email', { to_addr: v }))}
-            </div>
-          </>,
-        )}
-
-        {channelCard(
-          'discord',
-          t(`${ns}.discordTitle`),
-          field(t(`${ns}.webhookUrl`), draft.discord.webhook_url, (v) => patchChannel('discord', { webhook_url: v }), { type: 'password' }),
-        )}
-
-        {/* custom Apprise URLs — write-only: existing entries arrive redacted, so we either
-            keep them untouched or replace the whole list (a mixed list is rejected server-side). */}
-        <div style={{ background: c.panelAlt, border: `1px solid ${c.borderSoft}`, borderRadius: 10, padding: '16px 18px' }}>
-          <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: c.textMid, marginBottom: 4 }}>
-            {t(`${ns}.customTitle`)}
-          </span>
-          <span style={{ display: 'block', fontSize: 12, color: c.textFaint, marginBottom: 12 }}>
-            {t(`${ns}.customDesc`)}
-          </span>
-          {draft.custom_urls.length > 0 && draft.custom_urls.every((u) => u === REDACTED) && !replacing ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <span style={{ fontSize: 13, color: c.textMuted }}>
-                {t(`${ns}.customConfigured`, { n: draft.custom_urls.length })}
-              </span>
-              <button
-                type="button"
-                onClick={() => { setReplacing(true); patch({ custom_urls: [] }) }}
-                style={{ ...ghostBtn, padding: '6px 14px' }}
-              >
-                {t(`${ns}.customReplace`)}
-              </button>
-            </div>
-          ) : (
-            <>
-              <textarea
-                value={draft.custom_urls.join('\n')}
-                onChange={(e) =>
-                  patch({ custom_urls: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean) })
-                }
-                rows={3}
-                spellCheck={false}
-                placeholder={'tgram://token/chatid\nntfy://host/topic\ngotify://host/token'}
-                style={{ ...inputStyle, resize: 'vertical', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}
-              />
-              {/* Only reachable after "Replace all" cleared a stored (redacted) list: let the
-                  user back out and keep the existing URLs instead of wiping them on save. */}
-              {replacing && config.notifications.custom_urls.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => { setReplacing(false); patch({ custom_urls: config.notifications.custom_urls }) }}
-                  style={{ ...ghostBtn, padding: '6px 14px', marginTop: 8, alignSelf: 'flex-start' }}
-                >
-                  {t(`${ns}.customCancel`)}
-                </button>
-              )}
-            </>
-          )}
+    <div>
+      <section className="panel">
+        <div className="panel-hd">
+          <h2>{t(`${ns}.events`)}</h2>
+          <span className="panel-hint">{t(`${ns}.eventsHint`)}</span>
         </div>
-      </div>
-
-      {/* actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 22, flexWrap: 'wrap' }}>
-        <button onClick={onSave} disabled={!dirty || busy} style={{
-          ...primaryBtn,
-          padding: '10px 24px',
-          background: dirty ? c.accent : c.btnBg,
-          color: dirty ? c.accentInk : c.textMuted,
-          border: dirty ? 'none' : `1px solid ${c.btnBorder}`,
-          cursor: dirty ? 'pointer' : 'not-allowed',
-        }}>
-          {t(`${ns}.apply`)}
-        </button>
-        <button onClick={onTest} disabled={busy || dirty} style={{
-          ...ghostBtn,
-          padding: '10px 20px',
-          opacity: dirty ? 0.5 : 1,
-          cursor: dirty ? 'not-allowed' : 'pointer',
-        }} title={dirty ? t(`${ns}.saveFirst`) : undefined}>
-          {t(`${ns}.sendTest`)}
-        </button>
-        {savedNote && !dirty && <span style={{ fontSize: 12, color: c.green }}>{t(`${ns}.saved`)}</span>}
-        {saveErr && <span style={{ fontSize: 12, color: c.red }}>{saveErr}</span>}
-        {testState && 'error' in testState && (
-          <span style={{ fontSize: 12, color: c.red }}>{testState.error}</span>
-        )}
-        {testState && 'channels' in testState && testState.channels.length === 0 && (
-          <span style={{ fontSize: 12, color: c.textMuted }}>{t(`${ns}.testNoChannels`)}</span>
-        )}
-        {testState && 'channels' in testState && testState.channels.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
-            {testState.channels.map((ch) => (
-              <span key={ch.channel} style={{ fontSize: 12, color: ch.ok ? c.green : c.red }}>
-                {ch.ok ? '✓' : '✗'} {channelLabel(ch.channel, t)}
-                {!ch.ok && ` — ${ch.error ?? t(`${ns}.testChannelFailed`)}`}
+        <div className="panel-bd stack tight">
+          {(['on_success', 'on_failure'] as const).map((k) => (
+            <label className="tglrow" key={k}>
+              <Toggle
+                on={draft[k]}
+                onClick={() => patch({ [k]: !draft[k] } as Partial<NotificationsConfig>)}
+                size="sm"
+              />
+              <span>{t(`${ns}.${k === 'on_success' ? 'onSuccess' : 'onFailure'}`)}</span>
+            </label>
+          ))}
+          <div className="save-row" style={{ justifyContent: 'flex-start' }}>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || dirty}
+              title={dirty ? t(`${ns}.saveFirst`) : undefined}
+              onClick={() => void onTest()}
+            >
+              {t(`${ns}.sendTest`)}
+            </button>
+            {testState && 'error' in testState && <span className="err-note">{testState.error}</span>}
+            {testState && 'channels' in testState && testState.channels.length === 0 && (
+              <span className="help">{t(`${ns}.testNoChannels`)}</span>
+            )}
+            {testState && 'channels' in testState && testState.channels.length > 0 && (
+              <span className="help">
+                {testState.channels.map((ch, i) => (
+                  <span key={ch.channel}>
+                    {i > 0 && ' · '}
+                    <span className={ch.ok ? 'state-on' : 'err-note'}>
+                      {channelLabel(ch.channel, t)} {ch.ok ? '✓' : `✗ ${ch.error ?? t(`${ns}.testChannelFailed`)}`}
+                    </span>
+                  </span>
+                ))}
               </span>
-            ))}
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-hd">
+          <h2>{t(`${ns}.channels`)}</h2>
+        </div>
+        <div className="panel-bd stack tight">
+          {channel(
+            'telegram',
+            t(`${ns}.telegramTitle`),
+            t(`${ns}.telegramHint`),
+            <>
+              {field('tg-token', t(`${ns}.botToken`), draft.telegram.bot_token, (v) =>
+                patchChannel('telegram', { bot_token: v }), { type: 'password' })}
+              {field('tg-chat', t(`${ns}.chatId`), draft.telegram.chat_id, (v) =>
+                patchChannel('telegram', { chat_id: v }), { mono: true })}
+            </>,
+          )}
+
+          {channel(
+            'ntfy',
+            t(`${ns}.ntfyTitle`),
+            t(`${ns}.ntfyHint`),
+            <>
+              {field('ntfy-url', t(`${ns}.ntfyUrl`), draft.ntfy.url, (v) => patchChannel('ntfy', { url: v }), {
+                placeholder: 'https://ntfy.sh',
+                mono: true,
+              })}
+              {field('ntfy-topic', t(`${ns}.ntfyTopic`), draft.ntfy.topic, (v) =>
+                patchChannel('ntfy', { topic: v }), { placeholder: 'homelab', mono: true })}
+            </>,
+          )}
+
+          {channel(
+            'email',
+            t(`${ns}.emailTitle`),
+            t(`${ns}.emailHint`),
+            <>
+              {field('smtp-host', t(`${ns}.smtpHost`), draft.email.smtp_host, (v) =>
+                patchChannel('email', { smtp_host: v }), { placeholder: 'smtp.example.com', mono: true })}
+              {field('smtp-port', t(`${ns}.smtpPort`), String(draft.email.smtp_port), (v) =>
+                patchChannel('email', { smtp_port: Number(v) || 0 }), { type: 'number', mono: true })}
+              {field('smtp-user', t(`${ns}.smtpUser`), draft.email.smtp_user, (v) =>
+                patchChannel('email', { smtp_user: v }))}
+              {field('smtp-pass', t(`${ns}.smtpPassword`), draft.email.smtp_password, (v) =>
+                patchChannel('email', { smtp_password: v }), { type: 'password' })}
+              {field('smtp-from', t(`${ns}.fromAddr`), draft.email.from_addr, (v) =>
+                patchChannel('email', { from_addr: v }))}
+              {field('smtp-to', t(`${ns}.toAddr`), draft.email.to_addr, (v) =>
+                patchChannel('email', { to_addr: v }))}
+            </>,
+          )}
+
+          {channel(
+            'discord',
+            t(`${ns}.discordTitle`),
+            t(`${ns}.discordHint`),
+            field('discord-url', t(`${ns}.webhookUrl`), draft.discord.webhook_url, (v) =>
+              patchChannel('discord', { webhook_url: v }), {
+              type: 'password',
+              placeholder: 'https://discord.com/api/webhooks/…',
+            }),
+            true,
+          )}
+
+          <div className="chan">
+            <div className="chan-hd static">
+              <span className="chan-name">{t(`${ns}.customTitle`)}</span>
+              <span className="chan-hint">{t(`${ns}.customDesc`)}</span>
+            </div>
+            <div className="chan-fields stack tight">
+              {storedRedacted ? (
+                <div className="url-row">
+                  <span className="help spacer">
+                    {t(`${ns}.customConfigured`, { count: draft.custom_urls.length })}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setReplacing(true)
+                      setUrls([])
+                    }}
+                  >
+                    {t(`${ns}.customReplace`)}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {draft.custom_urls.map((url, i) => (
+                    <div className="url-row" key={i}>
+                      <input
+                        type="text"
+                        className="in-mono"
+                        value={url}
+                        spellCheck={false}
+                        onChange={(e) =>
+                          setUrls(draft.custom_urls.map((u, j) => (j === i ? e.target.value : u)))
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger-ghost"
+                        aria-label={t('common.remove')}
+                        onClick={() => setUrls(draft.custom_urls.filter((_, j) => j !== i))}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <div className="url-row">
+                    <input
+                      type="text"
+                      className="in-mono"
+                      value={newUrl}
+                      spellCheck={false}
+                      placeholder="pover://user@token · slack://… · json://…"
+                      onChange={(e) => setNewUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' || !newUrl.trim()) return
+                        e.preventDefault()
+                        setUrls([...draft.custom_urls, newUrl.trim()])
+                        setNewUrl('')
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={!newUrl.trim()}
+                      onClick={() => {
+                        setUrls([...draft.custom_urls, newUrl.trim()])
+                        setNewUrl('')
+                      }}
+                    >
+                      {t(`${ns}.customAdd`)}
+                    </button>
+                  </div>
+                  {/* Only reachable after "Replace all" cleared a stored (redacted) list: let
+                      the user back out and keep the existing URLs instead of wiping them. */}
+                  {replacing && config.notifications.custom_urls.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      style={{ alignSelf: 'flex-start' }}
+                      onClick={() => {
+                        setReplacing(false)
+                        setUrls(config.notifications.custom_urls)
+                      }}
+                    >
+                      {t(`${ns}.customCancel`)}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="save-row">
+            {saveErr && <span className="err-note">{saveErr}</span>}
+            {saved && !dirty && <span className="ok-note">{t(`${ns}.saved`)}</span>}
+            {dirty && !saveErr && <span className="help">{t('common.unsavedChanges')}</span>}
+            <button
+              type="button"
+              className="btn btn-accent"
+              disabled={!dirty || busy}
+              onClick={() => void onSave()}
+            >
+              {t('common.save')}
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }

@@ -1,12 +1,12 @@
 {
   "name": "joulenap-frontend",
   "private": true,
-  "version": "0.9.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:demo": "vite build --mode demo --base ./ --outDir dist-demo",
+    "build:demo": "tsc --noEmit && vite build --mode demo --base ./ --outDir dist-demo",
     "preview": "vite preview",
     "test": "node --test"
   },

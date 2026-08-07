@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from app.connectors.errors import ConnectorError, TaskCancelled, TaskError
 from app.connectors.pbs import DatastoreStatus, NodeLoad
 from app.connectors.pve import Guest
 from app.jobs.deps import CycleDeps
+from app.jobs.lease import LeaseDeps
 
 
 class UnreachablePve:
@@ -22,6 +21,12 @@ class UnreachablePve:
     def list_guests(self):
         raise ConnectorError("connection refused")
 
+    def list_cluster_guests(self):
+        raise ConnectorError("connection refused")
+
+    def list_pbs_storages(self):
+        raise ConnectorError("connection refused")
+
 
 class FakePve:
     def __init__(
@@ -29,11 +34,15 @@ class FakePve:
         guests: list[Guest] | None = None,
         fail_task: bool = False,
         log_lines: list[str] | None = None,
+        pbs_storages: list[dict] | None = None,
     ):
         self.guests = guests or []
         self.fail_task = fail_task
         self.log_lines = log_lines or []
-        self.vzdump_args: dict | None = None
+        # Raw PVE `type=pbs` storage rows, as /storage?type=pbs returns them.
+        self.pbs_storages = pbs_storages if pbs_storages is not None else []
+        self.vzdump_args: dict | None = None  # the last call (0.9 single-vzdump cycle)
+        self.vzdump_calls: list[dict] = []  # every call, in order (a route backs up per node)
         self.stopped: list[str] = []  # upids passed to stop_task
 
     def __enter__(self) -> FakePve:
@@ -45,6 +54,12 @@ class FakePve:
     def list_guests(self) -> list[Guest]:
         return self.guests
 
+    def list_cluster_guests(self) -> list[Guest]:
+        return self.guests
+
+    def list_pbs_storages(self) -> list[dict]:
+        return self.pbs_storages
+
     def vzdump(
         self,
         storage,
@@ -54,6 +69,7 @@ class FakePve:
         mode="snapshot",
         prune_backups=None,
         bwlimit=0,
+        node="",
     ) -> str:
         self.vzdump_args = {
             "storage": storage,
@@ -62,8 +78,12 @@ class FakePve:
             "mode": mode,
             "prune_backups": prune_backups,
             "bwlimit": bwlimit,
+            "node": node,
         }
-        return "UPID:pve:backup"
+        self.vzdump_calls.append(self.vzdump_args)
+        # A real UPID names the node the task runs on, which is how the client routes its
+        # task calls — and how a per-node test tells the tasks apart.
+        return f"UPID:{node or 'pve'}:backup"
 
     def wait_task(
         self, upid: str, poll_interval=None, on_log=None, should_cancel=None, **_
@@ -95,12 +115,25 @@ class FakePbs:
         gc_log_lines: list[str] | None = None,
         verify_log_lines: list[str] | None = None,
         active_tasks_seq: list[list[dict]] | None = None,
+        fail_exit_status: str = "error",
     ):
         self.fail_task = fail_task
+        self.fail_exit_status = fail_exit_status
         self.gc_started = False
         self.verify_started = False
         self.stopped: list[str] = []  # upids passed to stop_task
         self.verify_args: dict | None = None
+        # Sync route bookkeeping: what a route asked this box to set up and run.
+        self.remotes: dict[str, dict] = {}
+        # What ensure_remote was *asked* for, kept even after the run tears the remote down
+        # again — the payload is the proof the right peer and credentials were used.
+        self.remotes_created: dict[str, dict] = {}
+        self.sync_jobs: dict[str, dict] = {}
+        self.sync_jobs_created: dict[str, dict] = {}
+        self.sync_runs: list[dict] = []
+        # Ordered method names: PBS refuses to delete a remote a sync job still references,
+        # so the sequence is load-bearing and a test pins it.
+        self.sync_calls: list[str] = []
         self.log_lines = log_lines or []
         self.fail_datastore = fail_datastore
         self.gc_log_lines = gc_log_lines
@@ -129,6 +162,28 @@ class FakePbs:
         self.verify_args = {"ignore_verified": ignore_verified, "outdated_after": outdated_after}
         return "UPID:pbs:verify"
 
+    def ensure_remote(self, name: str, **kwargs) -> None:
+        self.sync_calls.append("ensure_remote")
+        self.remotes[name] = kwargs
+        self.remotes_created[name] = kwargs
+
+    def delete_sync_job(self, job_id: str) -> None:
+        self.sync_calls.append("delete_sync_job")
+        self.sync_jobs.pop(job_id, None)
+
+    def delete_remote(self, name: str) -> None:
+        self.sync_calls.append("delete_remote")
+        self.remotes.pop(name, None)
+
+    def ensure_sync_job(self, job_id: str, **kwargs) -> None:
+        self.sync_calls.append("ensure_sync_job")
+        self.sync_jobs[job_id] = kwargs
+        self.sync_jobs_created[job_id] = kwargs
+
+    def run_sync_job(self, job_id: str) -> str:
+        self.sync_runs.append({"id": job_id})
+        return "UPID:pbs:sync"
+
     def wait_task(
         self, upid: str, poll_interval=None, on_log=None, should_cancel=None, **_
     ) -> dict:
@@ -142,8 +197,12 @@ class FakePbs:
         if should_cancel is not None and should_cancel():
             raise TaskCancelled(f"Wait for task {upid} cancelled")
         if self.fail_task:
-            raise TaskError("gc failed", exit_status="error")
+            raise TaskError("gc failed", exit_status=self.fail_exit_status)
         return {"status": "stopped", "exitstatus": "OK"}
+
+    def task_log(self, upid: str, start: int = 0, limit: int = 5000) -> list[tuple[int, str]]:
+        """Re-read of a finished task's log — what the sync step uses to name a failure."""
+        return list(enumerate(self.log_lines[start:], start=start + 1))
 
     def stop_task(self, upid: str) -> None:
         self.stopped.append(upid)
@@ -174,32 +233,84 @@ class FakePower:
         self.powered_off = True
 
 
+class FakeBox:
+    """A fake PBS box for the power lease: does it answer, and what did the lease do to it.
+
+    ``reachable`` is either a constant or a list of answers consumed one probe at a time
+    (the last one repeats), so a test can say "down, then up after the first wake".
+    ``unreachable`` names specific pbs ids that never answer, whatever ``reachable`` says —
+    for a multi-box run where one wakes and the other does not.
+    """
+
+    def __init__(
+        self,
+        reachable: bool | list[bool] = True,
+        idle: bool = True,
+        idle_error: Exception | None = None,
+        poweroff_error: Exception | None = None,
+        unreachable: set[str] | None = None,
+    ):
+        self._reachable = reachable
+        self._unreachable = unreachable or set()
+        self.idle = idle
+        self.idle_error = idle_error
+        self.poweroff_error = poweroff_error
+        self.wol: list[str] = []  # pbs ids a magic packet was sent to, in order
+        self.waits: list[float] = []  # the timeout of every reachability probe
+        self.poweroffs: list[str] = []  # pbs ids actually powered off
+
+    def _answer(self) -> bool:
+        if isinstance(self._reachable, list):
+            return self._reachable.pop(0) if len(self._reachable) > 1 else self._reachable[0]
+        return self._reachable
+
+    def deps(self) -> LeaseDeps:
+        def wait_reachable(pbs, timeout, _should_cancel=None) -> bool:
+            self.waits.append(timeout)
+            if pbs.id in self._unreachable:
+                return False
+            return self._answer()
+
+        def send_wol(pbs) -> None:
+            self.wol.append(pbs.id)
+
+        def wait_idle(_pbs) -> bool:
+            if self.idle_error is not None:
+                raise self.idle_error
+            return self.idle
+
+        def poweroff(pbs) -> None:
+            if self.poweroff_error is not None:
+                raise self.poweroff_error
+            self.poweroffs.append(pbs.id)
+
+        return LeaseDeps(
+            send_wol=send_wol,
+            wait_reachable=wait_reachable,
+            wait_idle=wait_idle,
+            poweroff=poweroff,
+        )
+
+
 def make_deps(
     *,
     pve: FakePve | None = None,
     pbs: FakePbs | None = None,
-    power: FakePower | None = None,
-    reachable: bool | Callable[[], bool] = True,
-    pbs_idle: bool | Callable[[], bool] = True,
-    wol=None,
     notify=None,
-) -> tuple[CycleDeps, FakePve, FakePbs, FakePower]:
+    pves: dict[str, object] | None = None,
+    pbss: dict[str, object] | None = None,
+) -> tuple[CycleDeps, FakePve, FakePbs]:
+    """Build a :class:`CycleDeps` wired to in-memory fakes.
+
+    ``pves``/``pbss`` map a *device id* to its fake, so a route test with several sources
+    gives one entry per device; ``pve``/``pbs`` are the fallback every unlisted device
+    resolves to, which is all a single-source route needs.
+    """
     pve = pve or FakePve()
     pbs = pbs or FakePbs()
-    power = power or FakePower()
-    # ``reachable`` / ``pbs_idle`` may each be a constant or a zero-arg callable, so a test
-    # can simulate the box coming up only after a retry (e.g. iter([False, True])) or an
-    # exception from the idle check.
-    wait = reachable if callable(reachable) else (lambda: reachable)
-    idle = pbs_idle if callable(pbs_idle) else (lambda: pbs_idle)
     deps = CycleDeps(
-        build_pve=lambda _c: pve,
-        build_pbs=lambda _c: pbs,
-        build_power=lambda _c: power,
-        send_wol=wol or (lambda _c: None),
-        # Second arg is the cancel probe the real _wait_reachable takes; fakes ignore it.
-        wait_reachable=lambda _c, _cancel=None: wait(),
-        wait_pbs_idle=lambda _c: idle(),
-        notify=notify or (lambda *_a: None),
+        connect_pve=lambda device: (pves or {}).get(device.id, pve),
+        connect_pbs=lambda device: (pbss or {}).get(device.id, pbs),
+        notify=notify or (lambda _ctx: None),
     )
-    return deps, pve, pbs, power
+    return deps, pve, pbs

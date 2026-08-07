@@ -1,0 +1,361 @@
+"""The v1.0 route cycles for everything that isn't a backup: Sync, External and Verify.
+
+One entry point, :func:`run_route`, dispatches on ``route.kind``; the backup kind lives in
+``backup_cycle.run_route_backup`` (it has its own per-source failure policy) and everything
+these three need is imported from there rather than reimplemented.
+
+Like the backup route cycle, none of this touches power: ``JobService._execute`` holds a
+:class:`~.lease.PowerLease` on every PBS the route needs — both boxes, for a sync — around
+the call, so a cycle starts with the box awake and ends without putting it to sleep.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from ..config import Config, PbsDevice, Route
+from ..connectors.errors import TaskError
+from ..connectors.pbs import DatastoreStatus, PbsClient
+from ..db.models import LogLevel, RunKind, RunStatus, StepName
+from ..notify.messages import LocalizedError, RunContext, render_detail
+from .backup_cycle import (
+    CycleAbort,
+    CycleCancelled,
+    _find_device,
+    _refresh_route_backup_cache,
+    _route_gc_step,
+    _route_read_datastore,
+    _route_verify_step,
+    _wait_or_stop,
+    run_route_backup,
+    watch_external_tasks,
+)
+from .deps import CycleDeps
+from .recorder import RunRecorder, set_detail
+
+# ``(config, route, target, recorder, deps) -> datastore status for the notification``.
+RouteBody = Callable[[Config, Route, PbsDevice, RunRecorder, CycleDeps], "DatastoreStatus | None"]
+
+#: What kind of run each route kind records. The queue needs this to open the run row
+#: before the cycle picks its branch, and history/metrics group on it.
+RUN_KINDS: dict[str, RunKind] = {
+    "backup": RunKind.CYCLE,
+    "sync": RunKind.SYNC,
+    "external": RunKind.MONITOR,
+    "verify": RunKind.VERIFY,
+}
+
+
+def _require_pbs(config: Config, pbs_id: str, route: Route) -> PbsDevice:
+    device = _find_device(config.pbss, pbs_id)
+    if device is None:
+        raise CycleAbort("pbs_missing", route=route.id, pbs=pbs_id)
+    return device
+
+
+# --- sync --------------------------------------------------------------------
+
+
+def _task_reason(pbs, upid: str) -> str:
+    """The first warning/error line of a finished task's log, or "" if it can't be read.
+
+    PBS reports a sync that partially failed as ``exitstatus: "WARNINGS: 1"``, which on its
+    own says nothing — the two causes seen on real hardware ("group … not owned by remote
+    user … on target" for a push, "snapshot … older than the newest on the sync target" for a
+    pull) are only in the task log. Best-effort by design: this runs on a path that is already
+    failing, so a second failure here must not replace the original one.
+    """
+    try:
+        lines = pbs.task_log(upid)
+    except Exception:  # noqa: BLE001 - the real error is the caller's, not this lookup's
+        return ""
+    for _n, text in lines:
+        upper = text.upper()
+        if "WARN" in upper or "ERROR" in upper:
+            return text.strip()
+    return ""
+
+
+def _drop_sync_config(pbs: PbsClient, name: str, recorder: RunRecorder) -> None:
+    """Remove the remote and its sync job from the executing PBS once the sync is over.
+
+    A PBS remote stores the **peer's API token, id and secret**, in the executing box's
+    ``/etc/proxmox-backup/remote.cfg``. Joulenap rebuilds the pair on every run anyway, so
+    leaving them behind buys nothing and parks a working credential for one backup server on
+    another — one that survives changing the token in Joulenap, and that anyone with root on
+    that box, or a copy of its ``/etc``, can read.
+
+    Job before remote: PBS refuses to delete a remote a job still references. Best-effort and
+    never fatal — it runs in a ``finally``, so raising here would mask the run's real failure.
+    """
+    try:
+        pbs.delete_sync_job(name)
+        pbs.delete_remote(name)
+    except Exception as exc:  # noqa: BLE001 - cleanup must never replace the real outcome
+        recorder.log(LogLevel.WARN, f"could not remove sync config '{name}': {exc}")
+
+
+def _sync_body(
+    config: Config, route: Route, target: PbsDevice, recorder: RunRecorder, deps: CycleDeps
+) -> DatastoreStatus | None:
+    """PBS -> PBS: (re)create the remote + sync job on the executing side, run it, wait.
+
+    Which box executes is what ``sync_direction`` really decides: on ``pull`` the target
+    fetches from the source, on ``push`` the source sends to the target. The job always lives
+    on the side doing the work and its remote points at the *other* box, so the two
+    directions are one code path with the pair swapped.
+    """
+    source = _require_pbs(config, route.source_pbs, route)
+    push = route.sync_direction == "push"
+    executor, peer = (source, target) if push else (target, source)
+    name = f"joulenap-{route.id}"
+
+    with recorder.step(StepName.SYNC) as step:
+        recorder.log(
+            LogLevel.INFO,
+            f"sync {route.sync_direction}: {source.id} -> {target.id} "
+            f"(job on {executor.id} as '{name}')",
+        )
+        with deps.connect_pbs(executor) as pbs:
+            # Order matters: the job has to go before the remote it references, or PBS
+            # refuses the remote's delete and the route breaks on its second run.
+            pbs.delete_sync_job(name)
+            pbs.ensure_remote(
+                name,
+                host=peer.host,
+                port=peer.port,
+                auth_id=peer.api_token_id,
+                password=peer.api_token_secret,
+                fingerprint=peer.fingerprint,
+            )
+            pbs.ensure_sync_job(
+                name,
+                remote=name,
+                remote_store=peer.datastore,
+                store=executor.datastore,
+                direction=route.sync_direction,
+            )
+            try:
+                upid = pbs.run_sync_job(name)
+                step.detail = upid
+                try:
+                    _wait_or_stop(pbs, upid, recorder, deps, StepName.SYNC.value, "pbs")
+                except TaskError as exc:
+                    # The bare "Task UPID:… finished with status 'WARNINGS: 1'" is unreadable
+                    # and is what the run row, the history and the notification all show.
+                    reason = _task_reason(pbs, upid)
+                    raise LocalizedError(
+                        "sync_failed",
+                        direction=route.sync_direction,
+                        source=source.id,
+                        target=target.id,
+                        status=exc.exit_status or "unknown status",
+                        reason=f": {reason}" if reason else "",
+                    ) from exc
+            finally:
+                _drop_sync_config(pbs, name, recorder)
+
+    # Maintenance runs on the target: it is the box that just gained snapshots, whichever
+    # side pushed or pulled them.
+    if route.options.gc:
+        _route_gc_step(target, recorder, deps)
+    else:
+        recorder.skip_step(StepName.GC, "gc_disabled")
+
+    if route.options.verify_after:
+        _route_verify_step(target, recorder, deps, outdated_after=None)
+    else:
+        recorder.skip_step(StepName.VERIFY, "verify_disabled")
+
+    # No last-backup cache refresh: a synced snapshot carries no hint of which PVE created
+    # it, and guessing would attribute another PBS's guests to a local one.
+    return _route_read_datastore(target, recorder, deps)
+
+
+# --- external ----------------------------------------------------------------
+
+
+def monitor_key(observed: int | None) -> str:
+    """The MONITOR step's key in ``notify.messages._DETAILS``."""
+    return "no_tasks_observed" if observed is None else "tasks_observed"
+
+
+def monitor_detail(observed: int | None) -> str:
+    """The MONITOR step's **English** ``detail``, in the one place that defines its shape.
+
+    ``notify.messages.build_run_message`` reads the count back out of this string
+    (``int(detail.split()[0])``, falling through to the "no PBS job ran" warning on
+    ``ValueError``), so the format is a contract between two modules rather than free text.
+    A test pins the round-trip; reword it here and that test fails instead of the
+    notification quietly reporting the wrong thing.
+
+    The notifier reads the *stored* English detail, not the translated one, so this contract
+    is unaffected by which language the UI renders the step in.
+    """
+    return render_detail("en", monitor_key(observed), {"count": observed}) or ""
+
+
+def _external_source_pve(config: Config, target: PbsDevice, recorder: RunRecorder) -> str | None:
+    """Which PVE's guests an external route's snapshots belong to, if that is knowable.
+
+    Joulenap started none of these backups, so the only evidence is the storage mapping: if
+    exactly one PVE backs up to this PBS, its guests are the ones in the datastore. With
+    none or several, the attribution would be a guess and the cache is left alone.
+    """
+    candidates = [pve.id for pve in config.pves if target.id in pve.storages]
+    if len(candidates) == 1:
+        return candidates[0]
+    recorder.log(
+        LogLevel.WARN,
+        f"{len(candidates)} PVE(s) back up to '{target.id}', so a snapshot cannot be "
+        "attributed to one — skipping the last-backup cache refresh",
+    )
+    return None
+
+
+def _external_body(
+    config: Config, route: Route, target: PbsDevice, recorder: RunRecorder, deps: CycleDeps
+) -> DatastoreStatus | None:
+    """Wake and watch: the schedules live on PVE/PBS, Joulenap only holds the box awake.
+
+    It starts no task of its own here — no vzdump, no GC, no verify — which is the whole
+    point of the kind (issue #27, v0.9's external-schedules mode re-homed onto a route).
+    """
+    with recorder.step(StepName.MONITOR) as step:
+        with deps.connect_pbs(target) as pbs:
+            observed = watch_external_tasks(pbs, target.external, cancelled=deps.cancelled)
+        if observed is None:
+            set_detail(step, monitor_key(None))
+            recorder.log(
+                LogLevel.WARN,
+                f"no PBS task appeared within {target.external.first_task_wait}s "
+                "— check the schedules on PVE/PBS; powering off",
+            )
+        else:
+            set_detail(step, monitor_key(observed), count=observed)
+
+    # Someone else's jobs (hopefully) wrote new snapshots — refresh the caches the dashboard
+    # serves while the PBS sleeps, exactly like a managed route does.
+    datastore = _route_read_datastore(target, recorder, deps)
+    pve_id = _external_source_pve(config, target, recorder)
+    if pve_id:
+        _refresh_route_backup_cache(target, {pve_id: None}, recorder, deps)
+    return datastore
+
+
+# --- verify ------------------------------------------------------------------
+
+
+def _verify_body(
+    config: Config, route: Route, target: PbsDevice, recorder: RunRecorder, deps: CycleDeps
+) -> DatastoreStatus | None:
+    """Wake -> verify the target datastore -> done. ``reverify_days`` keeps it incremental
+    (0 = re-verify everything); the windowing is PBS's own, Joulenap adds no knobs."""
+    _route_verify_step(target, recorder, deps, outdated_after=route.options.reverify_days)
+    return _route_read_datastore(target, recorder, deps)
+
+
+# --- dispatch ----------------------------------------------------------------
+
+
+_BODIES: dict[str, RouteBody] = {
+    "sync": _sync_body,
+    "external": _external_body,
+    "verify": _verify_body,
+}
+
+
+def _run_body(
+    config: Config,
+    route: Route | None,
+    recorder: RunRecorder,
+    body: Callable[[], DatastoreStatus | None],
+    *,
+    pbs_id: str | None = None,
+) -> RunContext | None:
+    """Run a single-target body under the shared failure policy.
+
+    Every kind here has one target, one outcome and no partial success, so they share the
+    whole envelope: a cancel is the user's own click (recorded, not notified), an abort is a
+    run that couldn't start, anything else is a failure — and the lease reads the recorded
+    status to decide whether the box stays on for inspection.
+
+    Returns the context to notify with, or ``None`` when the user cancelled.
+    """
+    datastore: DatastoreStatus | None = None
+    try:
+        datastore = body()
+        recorder.finish(RunStatus.SUCCESS)
+    except CycleCancelled:
+        # No notification: the user pressed Stop and is standing at the UI.
+        recorder.finish(RunStatus.ABORTED, error=LocalizedError("cancelled"))
+        return None
+    except CycleAbort as exc:
+        recorder.finish(RunStatus.ABORTED, error=exc)
+    except Exception as exc:  # connector/task failures: the lease leaves the PBS on
+        recorder.finish(RunStatus.FAILURE, error=exc)
+
+    return RunContext(
+        config=config, run=recorder.run, route=route, datastore=datastore, pbs_id=pbs_id
+    )
+
+
+def _simple_body(
+    config: Config, route: Route, recorder: RunRecorder, deps: CycleDeps
+) -> DatastoreStatus | None:
+    body = _BODIES.get(route.kind)
+    if body is None:
+        raise CycleAbort("unsupported_kind", route=route.id, kind=route.kind)
+    target = _require_pbs(config, route.target, route)
+    return body(config, route, target, recorder, deps)
+
+
+def run_route(
+    config: Config, route: Route, recorder: RunRecorder, deps: CycleDeps
+) -> RunContext | None:
+    """Execute one route of any kind. Sets the final run status itself.
+
+    The single entry point the queue worker runs: everything that wakes a PBS is a route, so
+    nothing else needs to know which flavour it is.
+    """
+    if route.kind == "backup":
+        return run_route_backup(config, route, recorder, deps)
+    return _run_body(
+        config, route, recorder, lambda: _simple_body(config, route, recorder, deps)
+    )
+
+
+# --- ad-hoc maintenance ------------------------------------------------------
+
+
+def run_pbs_maintenance(
+    config: Config,
+    pbs: PbsDevice,
+    recorder: RunRecorder,
+    deps: CycleDeps,
+    *,
+    action: str,
+) -> RunContext | None:
+    """Run a one-off GC or verify on a PBS, outside any route.
+
+    The homepage's "Run GC" / "Run verify" buttons pick a *box*, not a route — you reach for
+    them after a restore or a disk scare, and inventing a throwaway route for that would put
+    a phantom entry in the topology. It reuses the route steps verbatim, so history reads
+    identically; only the route column is empty.
+    """
+
+    def body() -> DatastoreStatus | None:
+        if action == "gc":
+            _route_gc_step(pbs, recorder, deps)
+        elif action == "verify":
+            # 0 means "everything" — see _route_verify_step. An ad-hoc verify is a deliberate
+            # "check this box now" after a restore or a disk scare, so it must re-read the
+            # older snapshots too; None would mean "only never-verified", i.e. skip exactly
+            # the ones the user is worried about. reverify_days is the per-route pacing knob.
+            _route_verify_step(pbs, recorder, deps, outdated_after=0)
+        else:
+            raise CycleAbort("unsupported_action", action=action)
+        return _route_read_datastore(pbs, recorder, deps)
+
+    # No route to name the box, so the notification gets it from here.
+    return _run_body(config, None, recorder, body, pbs_id=pbs.id)

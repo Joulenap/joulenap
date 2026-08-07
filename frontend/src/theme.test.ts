@@ -24,7 +24,17 @@ test('both theme palettes exist and define the same token set', () => {
 
 test('every var(--jn-*) referenced in code is defined in the palette', () => {
   const dark = varsIn(darkBlock)
-  for (const file of ['theme.ts', 'utils/status.ts']) {
+  // The stylesheets are in here too: they are where most `var()` references live, and a
+  // token that exists in neither palette renders as the inherited value rather than failing,
+  // so nothing else would catch it.
+  for (const file of [
+    'theme.ts',
+    'utils/status.ts',
+    'dashboard.css',
+    'settings.css',
+    'wizard.css',
+    'responsive.css',
+  ]) {
     const src = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8')
     for (const m of src.matchAll(/var\((--jn-[\w-]+)\)/g)) {
       assert.ok(dark.has(m[1]), `${file} references ${m[1]} which index.css does not define`)

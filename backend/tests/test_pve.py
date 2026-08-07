@@ -62,6 +62,58 @@ def test_list_guests_merges_and_sorts():
     assert guests[1].type == "qemu" and not guests[1].is_ct
 
 
+def test_list_cluster_guests_tags_each_guest_with_its_node():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/cluster/resources")
+        assert parse_qs(request.url.query.decode())["type"] == ["vm"]
+        return json_data([
+            {"vmid": 200, "name": "mail", "type": "qemu", "status": "running", "node": "n2"},
+            {"vmid": 100, "name": "web", "type": "qemu", "status": "running", "node": "n1"},
+            {"vmid": 101, "name": "db", "type": "lxc", "status": "stopped", "node": "n1"},
+        ])
+
+    guests = make_client(handler).list_cluster_guests()
+    assert [(g.vmid, g.node) for g in guests] == [(100, "n1"), (101, "n1"), (200, "n2")]
+
+
+def test_list_cluster_guests_drops_templates():
+    """A template is never backed up: counting it would inflate the guest tally, and naming
+    it in an explicit vmid list would fail the vzdump task."""
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return json_data([
+            {"vmid": 100, "name": "web", "type": "qemu", "status": "running", "node": "n1"},
+            {"vmid": 900, "name": "tpl", "type": "qemu", "status": "stopped", "node": "n1",
+             "template": 1},
+        ])
+
+    assert [g.vmid for g in make_client(handler).list_cluster_guests()] == [100]
+
+
+def test_task_calls_follow_the_node_named_in_the_upid():
+    """One client drives tasks on several cluster nodes, so the node comes from the task."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return json_data({"status": "stopped", "exitstatus": "OK"})
+
+    client = make_client(handler)  # its own node is "pve"
+    client.task_status("UPID:n3:0001:vzdump::")
+    assert seen[-1].startswith("/api2/json/nodes/n3/tasks/")
+
+
+def test_vzdump_runs_on_the_named_node():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        return json_data("UPID:n2:0001:vzdump::")
+
+    make_client(handler).vzdump(storage="pbs", vmids=[100], node="n2")
+    assert seen["path"] == "/api2/json/nodes/n2/vzdump"
+
+
 def test_vzdump_builds_params_and_returns_upid():
     captured = {}
 

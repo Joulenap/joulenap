@@ -1,26 +1,24 @@
 """Wizard discovery helpers: derive the PBS connection and detect its MAC.
 
 These turn things the app can already see (the PVE storage config, the ARP table after a
-ping) into config values, so the user reviews rather than types them.
+connection) into config values, so the user reviews rather than types them.
 """
 
 from __future__ import annotations
 
 import re
 import socket
-import subprocess
-import sys
 from collections.abc import Callable
+
+from . import net
 
 # Default PBS API port; PVE storage config doesn't carry it.
 _DEFAULT_PBS_PORT = 8007
 _ARP_PATH = "/proc/net/arp"
-_IS_WINDOWS = sys.platform.startswith("win")
+# Short: this only has to get far enough to resolve the MAC, and a refused port answers at once.
+_PRIME_TIMEOUT = 2.0
 # MAC in /proc/net/arp (colon-separated only).
 _MAC_RE = re.compile(r"([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})")
-# MAC in `arp -a` output: colon- (Unix) or dash-separated (Windows).
-_MAC_TOKEN_RE = re.compile(r"([0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5})")
-_IP_TOKEN_RE = re.compile(r"(\d{1,3}(?:\.\d{1,3}){3})")
 # Incomplete ARP entries carry an all-zero HW address that still matches the MAC regex;
 # saving it would break WoL silently, so treat it as "no MAC found".
 _ZERO_MAC = "00:00:00:00:00:00"
@@ -40,16 +38,38 @@ def derive_pbs_from_storage(storage: dict) -> dict:
     }
 
 
-def _ping(host: str, timeout: float = 1.0) -> None:
-    """Best-effort single ping to populate the ARP cache (Windows vs Unix flags differ)."""
-    if _IS_WINDOWS:
-        cmd = ["ping", "-n", "1", "-w", str(int(max(timeout, 1) * 1000)), host]
-    else:
-        cmd = ["ping", "-c", "1", "-W", str(int(max(timeout, 1))), host]
-    try:
-        subprocess.run(cmd, capture_output=True, timeout=timeout + 2, check=False)
-    except (OSError, subprocess.SubprocessError):
-        pass  # a failed ping is fine — the neighbour may already be in the ARP table
+def match_storages_to_pbss(storages: list[dict], pbss: list) -> dict[str, str]:
+    """Build a PVE's ``{pbs_device_id: pve_storage_id}`` map from its storage config.
+
+    A storage belongs to a registered backup server when it points at the same host *and*
+    the same datastore: one box can serve several datastores, and each is a separate device
+    as far as routes are concerned, so the host alone is not enough. Hosts are compared
+    case-insensitively and trimmed because they are free text on both sides.
+
+    The frontend's ``matchStorage``/``linkedStorages`` do the same thing while the Add-PVE
+    wizard is open; this is the half that runs later, when a backup server is added *after*
+    the Proxmox host that backs up to it and the map needs filling in.
+    """
+    linked: dict[str, str] = {}
+    for storage in storages:
+        derived = derive_pbs_from_storage(storage)
+        host = derived["host"].strip().lower()
+        for pbs in pbss:
+            if pbs.host.strip().lower() == host and pbs.datastore == derived["datastore"]:
+                linked[pbs.id] = storage.get("storage", "")
+                break
+    return linked
+
+
+def _prime_arp(ip: str, port: int) -> None:
+    """Best-effort TCP connect, purely to make the kernel resolve the neighbour's MAC.
+
+    Whether the connection succeeds is irrelevant and the result is dropped: ARP happens
+    below TCP, so the kernel must learn the MAC before it can even send the SYN, and a
+    refused port answers immediately. This replaced a ``ping`` subprocess, which was dead
+    code in the shipped image — ``python:3.12-slim`` has no ``ping`` binary.
+    """
+    net.tcp_reachable(ip, port, _PRIME_TIMEOUT)
 
 
 def _read_proc_arp() -> dict[str, str]:
@@ -71,50 +91,25 @@ def _read_proc_arp() -> dict[str, str]:
     return table
 
 
-def _read_arp_command() -> dict[str, str]:
-    """Parse ``arp -a`` output into an ``{ip: mac}`` map. Portable (Windows + Unix); MACs
-    are normalised to lower-case colon form. Lines without both an IP and a MAC (e.g. the
-    Windows ``Interface:`` headers) are skipped."""
-    table: dict[str, str] = {}
-    try:
-        out = subprocess.run(
-            ["arp", "-a"], capture_output=True, text=True, timeout=5, check=False
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return table
-    for line in out.splitlines():
-        ip_match = _IP_TOKEN_RE.search(line)
-        mac_match = _MAC_TOKEN_RE.search(line)
-        if ip_match and mac_match:
-            mac = mac_match.group(1).replace("-", ":").lower()
-            if mac != _ZERO_MAC:
-                table[ip_match.group(1)] = mac
-    return table
-
-
-def _read_arp_table() -> dict[str, str]:
-    """Read the system ARP cache as ``{ip: mac}``, by the best route for the platform:
-    ``/proc/net/arp`` on Linux (with an ``arp -a`` fallback), ``arp -a`` on Windows."""
-    if _IS_WINDOWS:
-        return _read_arp_command()
-    return _read_proc_arp() or _read_arp_command()
-
-
 def detect_mac(
     host: str,
     *,
-    ping: Callable[[str], None] = _ping,
-    read_arp_table: Callable[[], dict[str, str]] = _read_arp_table,
+    port: int = _DEFAULT_PBS_PORT,
+    prime: Callable[[str, int], None] = _prime_arp,
+    read_arp_table: Callable[[], dict[str, str]] = _read_proc_arp,
     resolve: Callable[[str], str] = socket.gethostbyname,
 ) -> str | None:
-    """Return the MAC of ``host`` (must be powered on) by pinging then reading ARP.
+    """Return the MAC of ``host`` (must be powered on) by connecting to it, then reading ARP.
 
-    The PBS must be awake for this. Dependencies are injected so the lookup is testable
-    without touching the network. Returns ``None`` if the MAC can't be found.
+    The PBS must be awake for this. ``port`` only decides where the priming connection goes:
+    ARP is resolved below TCP, so a closed or wrong port works as well as the right one.
+    Dependencies are injected so the lookup is testable without touching the network.
+    Returns ``None`` if the MAC can't be found — which is always the case off Linux, since
+    the cache is read from ``/proc/net/arp``. Joulenap ships as a Linux container.
     """
     try:
         ip = resolve(host)
     except OSError:
         ip = host
-    ping(ip)
+    prime(ip, port)
     return read_arp_table().get(ip)

@@ -8,6 +8,8 @@ app:
   language: en              # UI language: en, it, ...
   theme: dark               # dark | light — also switchable from the header toggle
   port: 8080                # web UI port
+  scheduler_enabled: true   # global kill-switch: false arms no route at all (manual runs
+                            # still work). Pause one route with routes[].enabled: false.
   timezone: ""              # IANA tz for the scheduler, e.g. "Europe/Rome".
                             # Empty -> the TZ env var, then UTC. Set this (or TZ) or
                             # "backup at 02:00" runs at 02:00 UTC in a container.
@@ -18,7 +20,7 @@ app:
   api_key: ""
   # Ask GitHub once a day whether a newer Joulenap release exists, and show a footer
   # badge if so. Off by default: the app makes no outbound internet call unless you
-  # turn this on (Settings -> Integrations).
+  # turn this on (Settings -> Advanced).
   update_check: false
   session:
     https_only: false
@@ -32,79 +34,142 @@ app:
     # Quote the value — the hash contains '$' characters.
     password_hash: ""
 
-# --- Proxmox VE (where the guests live; used to list + trigger backups) ---
-# Leave these blank and let the setup wizard fill them in on first run, or set them here.
-pve:
-  host: ""                  # e.g. 192.168.1.10 or pve.lan
-  port: 8006
-  node: ""                  # node name, e.g. pve
-  verify_tls: false         # self-signed cert on most homelabs
-  # Token privileges: VM.Audit, VM.Backup, Datastore.Audit, Datastore.AllocateSpace and
-  # Datastore.Allocate on the PBS storage. The last one is required for vzdump's
-  # retention/prune (it deletes old backups) — without it, backups run but pruning fails.
-  api_token_id: ""          # e.g. "root@pam!joulenap"
-  api_token_secret: ""
-  storage_id: ""            # the PBS storage as named in PVE (Datacenter > Storage), e.g. pbs
+# =====================================================================
+# Devices and routes
+#
+# Devices are listed once and referenced by id. A *route* is "sources -> target +
+# schedule" and covers every reason Joulenap wakes a PBS:
+#
+#   backup    one or more PVE sources -> a PBS target        (vzdump)
+#   sync      one PBS source          -> another PBS target  (remote + sync job)
+#   external  no source               -> a PBS target        (PVE/PBS run their own
+#                                                             scheduled jobs; Joulenap
+#                                                             wakes, watches, powers off)
+#   verify    no source               -> a PBS target        (verify its snapshots)
+#
+# All three lists start empty: the wizards under Settings -> Devices -> + Add fill in the
+# devices, then you draw routes between them from the homepage. The commented blocks below
+# show the full shape of each entry.
+# =====================================================================
 
-# --- Proxmox Backup Server (the box that sleeps) ---
-# Leave blank for the wizard, or fill in. host/mac + a token are what mark PBS "configured".
-pbs:
-  host: ""                  # e.g. 192.168.1.20 or pbs.lan
-  port: 8007
-  datastore: ""             # e.g. backup
-  fingerprint: ""           # PBS dashboard > Show Fingerprint, e.g. "aa:bb:cc:..."
-  # Token privileges: DatastoreAdmin on the datastore (status + start GC) plus Audit on
-  # /system (read-only node CPU/RAM/network for the dashboard).
-  api_token_id: ""          # e.g. "root@pam!joulenap"
-  api_token_secret: ""
-  # Wake-on-LAN
-  mac: ""                             # PBS NIC MAC, e.g. "00:11:22:33:44:55"
-  wol_broadcast_iface: ""             # interface on the Joulenap host used to send the magic packet, e.g. eth0 (blank = auto-detect)
-  wait_timeout: 180                   # seconds to wait for PBS to become reachable (per wake attempt)
-  wol_retries: 2                      # extra Wake-on-LAN re-sends if PBS doesn't come up in time
-  # Power-off (no PBS API for this -> SSH)
-  poweroff_task_wait: 600             # wait up to N s for a running PBS task to finish before power-off (0 = no wait)
-  ssh_user: root
-  ssh_key_path: /app/data/id_ed25519  # dedicated key; ideally restricted to a poweroff command on PBS
+# --- Proxmox VE endpoints (where the guests live) ---
+pves: []
+# pves:
+#   - id: pve-01              # slug, unique; also the name shown in the UI
+#     host: 192.168.1.10      # or pve.lan. A cluster is ONE entry — it proxies its nodes,
+#                             # which Joulenap discovers at runtime.
+#     port: 8006
+#     verify_tls: false       # self-signed cert on most homelabs
+#     # Token privileges: VM.Audit, VM.Backup, Datastore.Audit, Datastore.AllocateSpace and
+#     # Datastore.Allocate on the PBS storage. The last one is required for vzdump's
+#     # retention/prune (it deletes old backups) — without it, backups run but pruning fails.
+#     api_token_id: "root@pam!joulenap"
+#     api_token_secret: ""
+#     # For each PBS this node backs up to: the storage as named here in PVE
+#     # (Datacenter > Storage). Different PVEs may name the same PBS differently.
+#     storages:
+#       pbs-01: pbs
 
-# --- Backup job ---
-backup:
-  enabled: true
-  schedule: "0 4 * * *"     # cron (here: every day at 04:00)
-  mode: snapshot            # snapshot | suspend | stop
-  bwlimit: 0                # KiB/s, 0 = unlimited
-  min_free_percent: 0       # abort backup if PBS datastore free space is below this % (0 = disabled)
-  guests:
-    mode: all               # all | include | exclude
-    # A newly created VM/CT is backed up automatically in "all" and "exclude" mode, but NOT
-    # in "include" mode — that list is explicit, so add new guests to it yourself.
-    # used when mode = include / exclude
-    list: []                # e.g. [104, 106, 202]
-  retention:
-    keep_last: 0
-    keep_daily: 7
-    keep_weekly: 4
-    keep_monthly: 6
-    keep_yearly: 0
-  # External schedules mode: PVE/PBS run their own scheduled jobs (backup, prune, GC,
-  # sync); at the scheduled time Joulenap only wakes the PBS, watches its tasks, and
-  # powers it off once they have finished. With this on, Joulenap starts no backup/GC of
-  # its own — guest selection, retention and the gc/verify after-backup options are not
-  # used. Both timers are worst-case timeouts, not fixed delays.
-  external:
-    enabled: false
-    first_task_wait: 900    # wait at most N s for the first task to appear after wake-up
-    idle_wait: 300          # power off after N s of continuous task silence
+# --- Proxmox Backup Servers (the boxes that sleep) ---
+pbss: []
+# pbss:
+#   - id: pbs-01
+#     host: 192.168.1.20      # or pbs.lan
+#     port: 8007
+#     datastore: backup
+#     # Joulenap reads the datastore's ROOT NAMESPACE. If the Proxmox storage entry writes
+#     # into a PBS namespace, backups, retention and GC all work normally, but "Last backup
+#     # per guest" reads "never" for those guests — Joulenap looks in the root and finds
+#     # nothing. One backup server can hold several datastores: add each as its own device.
+#     fingerprint: ""         # PBS dashboard > Show Fingerprint, e.g. "aa:bb:cc:..."
+#     # Leave this empty and the connection to this PBS is NOT pinned and NOT validated —
+#     # its API token then travels over TLS nothing has checked. The wizard fills it in.
+#     # Token privileges: DatastoreAdmin on the datastore (status, GC, verify) plus Audit on
+#     # /system (read-only node CPU/RAM/network for the dashboard). A PBS taking part in a
+#     # sync route also needs RemoteAdmin AND RemoteSyncPushOperator on /remote — PBS refuses
+#     # ACL writes from a token, so those must be granted on the box itself or by the wizard's
+#     # root mode (see docs/CONFIG-WIZARD.md).
+#     # The wizard names a backup server's token after its datastore, so a second datastore on
+#     # the same machine gets its own instead of replacing this one.
+#     api_token_id: "root@pam!joulenap-backup"
+#     api_token_secret: ""
+#     # Set to false for an always-on PBS (a VM, or a cloud-hosted one): Joulenap then only
+#     # schedules routes onto it and never touches its power, so everything below is unused.
+#     managed_power: true
+#     # Wake-on-LAN
+#     mac: "00:11:22:33:44:55"          # PBS NIC MAC
+#     wol_broadcast_iface: ""           # interface on the Joulenap host used to send the magic packet, e.g. eth0 (blank = auto-detect)
+#     wait_timeout: 180                 # seconds to wait for PBS to become reachable (per wake attempt)
+#     wol_retries: 2                    # EXTRA re-sends after the first: total attempts = wol_retries + 1,
+#                                       # each waiting up to wait_timeout
+#     # Power-off (no PBS API for this -> SSH)
+#     poweroff_task_wait: 600           # wait up to N s for a running PBS task to finish before power-off (0 = no wait)
+#     ssh_user: root
+#     ssh_key_path: /app/data/id_ed25519  # dedicated key; ideally restricted to a poweroff command on PBS
+#     # How long External routes onto this PBS wait — i.e. how slow this box is.
+#     # Both are worst-case timeouts, not fixed delays.
+#     external:
+#       first_task_wait: 900  # wait at most N s for the first task to appear after wake-up
+#       idle_wait: 300        # power off after N s of continuous task silence
 
-# --- Maintenance (run while PBS is awake, before power-off) ---
+# --- Routes ---
+routes: []
+# routes:
+#   - id: nightly
+#     name: Nightly backup
+#     color: "#f5a524"        # the route's colour in the backup map
+#     enabled: true
+#     notify: true            # send notifications for this route (channels are global, below)
+#     kind: backup            # backup | sync | external | verify
+#     # Guests are per source: vmids collide between PVEs, so each source picks its own.
+#     # A newly created VM/CT is backed up automatically in "all" mode but NOT in
+#     # "include" mode — that list is explicit, so add new guests to it yourself.
+#     sources:
+#       - pve: pve-01
+#         guests:
+#           mode: all         # all | include
+#           list: []          # used when mode = include, e.g. [104, 106, 202]
+#     target: pbs-01
+#     schedule:
+#       time: "04:00"
+#       days: [true, true, true, true, true, true, true]   # Mon..Sun; at least one must be
+#                                                          # true (pause with enabled: false)
+#       # Escape hatch for a schedule time+days cannot express (a day-of-month or month
+#       # pattern, a step value, a weekday range). A 5-field crontab string; when set it
+#       # wins over time/days, and the UI shows it read-only.
+#       # cron: "0 4 1 * *"
+#     retention:              # applied on the target
+#       keep_last: 0
+#       keep_daily: 7
+#       keep_weekly: 4
+#       keep_monthly: 6
+#       keep_yearly: 0
+#     options:
+#       mode: snapshot        # snapshot | suspend | stop
+#       bwlimit: 0            # KiB/s, 0 = unlimited
+#       min_free_percent: 0   # abort if the target datastore has less than this % free (0 = disabled)
+#       gc: true              # garbage-collect the target once this route is done. Two routes
+#                             # onto the same PBS with gc on both will each run one.
+#       verify_after: false   # quick verify of this run's new snapshots, before power-off
+#       reverify_days: 30     # verify routes only: skip snapshots verified in the last N
+#                             # days, so the route stays incremental (0 = verify everything)
+#
+#   # A sync route copies snapshots from one PBS to another (pull or push).
+#   - id: offsite
+#     name: Offsite copy
+#     color: "#3b82f6"
+#     kind: sync
+#     source_pbs: pbs-01
+#     target: pbs-02
+#     sync_direction: pull    # pull | push
+#     schedule:
+#       time: "05:00"
+#       days: [false, false, false, false, false, false, true]   # Sundays only
+
+# --- Maintenance ---
+# GC and post-backup verify are per-route (routes[].options.gc / .verify_after), and a
+# periodic full verification is a route of kind "verify". Only history retention is global.
 maintenance:
-  gc:
-    enabled: true           # on: run GC after each backup, before power-off. no schedule of its own.
-  verify:
-    after_backup: false     # quick verify of new snapshots after each backup (PBS already awake)
-    enabled: false          # scheduled full verification on its own wake/verify/power-off cycle
-    schedule: "0 3 1 * *"   # cron for the scheduled verify (here: 03:00 on the 1st of each month)
-    reverify_days: 30       # re-verify snapshots older than N days; 0 = re-verify everything each run
   history:
     retention_days: 14      # auto-delete run history + activity-log entries older than N days (0 = keep forever)
 

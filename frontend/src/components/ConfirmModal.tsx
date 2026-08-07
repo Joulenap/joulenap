@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef } from 'react'
+import { useId, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { c } from '../theme'
 import { Toggle } from './Toggle'
+import { useDialogKeys } from './useDialogKeys'
 
 export interface ConfirmState {
   title: string
@@ -19,53 +20,10 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
   const titleId = useId()
   const msgId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
+  // Focus the non-destructive Cancel button so a stray Enter/Space can't fire a danger action.
   const cancelRef = useRef<HTMLButtonElement>(null)
-  // Read onCancel through a ref so the effect (keyed only on open/closed) never captures a stale
-  // closure and never re-runs when Dashboard rebuilds `state` on a keep-PBS-on toggle flip.
-  const onCancelRef = useRef(onCancel)
-  onCancelRef.current = onCancel
 
-  const open = state !== null
-  useEffect(() => {
-    if (!open) return
-    const previouslyFocused = document.activeElement as HTMLElement | null
-    // Focus the non-destructive Cancel button so a stray Enter/Space can't fire a danger action.
-    cancelRef.current?.focus()
-
-    const focusables = () =>
-      dialogRef.current
-        ? Array.from(
-            dialogRef.current.querySelectorAll<HTMLElement>(
-              'button, [href], input, [tabindex]:not([tabindex="-1"])',
-            ),
-          ).filter((el) => !el.hasAttribute('disabled'))
-        : []
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onCancelRef.current()
-      } else if (e.key === 'Tab') {
-        const f = focusables()
-        if (!f.length) return
-        const first = f[0]
-        const last = f[f.length - 1]
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      // Return focus to whatever opened the dialog (e.g. the "Run backup now" button).
-      previouslyFocused?.focus?.()
-    }
-  }, [open])
+  useDialogKeys(state !== null, dialogRef, onCancel, cancelRef)
 
   if (!state) return null
   return (
@@ -119,7 +77,17 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
           </div>
           <span id={titleId} style={{ fontSize: 17, fontWeight: 700 }}>{state.title}</span>
         </div>
-        <p id={msgId} style={{ margin: '0 0 20px', fontSize: 14, lineHeight: 1.55, color: c.textMid }}>
+        {/* pre-line so a message can list what it is warning about, one item per line. */}
+        <p
+          id={msgId}
+          style={{
+            margin: '0 0 20px',
+            fontSize: 14,
+            lineHeight: 1.55,
+            color: c.textMid,
+            whiteSpace: 'pre-line',
+          }}
+        >
           {state.message}
         </p>
         {state.toggle && (

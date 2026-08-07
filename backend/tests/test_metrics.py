@@ -1,4 +1,8 @@
-"""GET /metrics — Prometheus exposition (11.11): auth, format, and value mapping."""
+"""GET /metrics — Prometheus exposition (11.11): auth, format, and value mapping.
+
+Every per-device / per-route series carries a ``pbs=`` or ``route=`` label now; the
+scrape still never wakes anything, so a sleeping PBS reports its cached datastore figures.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ from fakes import make_deps
 from fastapi.testclient import TestClient
 
 from app.db import session_scope
+from app.db.datastore_stats import upsert_datastore_stat
 from app.db.guest_backups import upsert_last_backups
 from app.db.models import Run, RunKind, RunStatus, RunTrigger
 from app.jobs import JobService
@@ -26,7 +31,7 @@ def client(temp_config, temp_db, monkeypatch):
     monkeypatch.setattr("app.connectors.net.tcp_reachable", lambda *a, **k: False)
     app = create_app()
     app.state.config_store.update(lambda c: setattr(c.app, "api_key", KEY))
-    deps, _pve, _pbs, _power = make_deps()
+    deps, *_ = make_deps()
     app.state.job_service = JobService(app.state.config_store, deps=deps)
     with TestClient(app) as c:
         yield c
@@ -49,7 +54,7 @@ def _value(text: str, name: str) -> float | None:
     return None
 
 
-def _add_run(**kw) -> int:
+def _add_run(route_id: str = "nightly", **kw) -> int:
     with session_scope() as session:
         run = Run(
             kind=kw.get("kind", RunKind.CYCLE),
@@ -58,10 +63,19 @@ def _add_run(**kw) -> int:
             started_at=kw.get("started_at", datetime(2026, 6, 28, 4, 0, tzinfo=UTC)),
             finished_at=kw.get("finished_at", datetime(2026, 6, 28, 4, 1, 23, tzinfo=UTC)),
             guests_ok=kw.get("guests_ok", 4),
+            route_id=route_id,
+            route_name=route_id,
         )
         session.add(run)
         session.flush()
         return run.id
+
+
+def _cache_backups(pve_id: str, pbs_id: str, latest: dict[int, datetime]) -> None:
+    with session_scope() as session:
+        upsert_last_backups(
+            session, pve_id, pbs_id, {v: int(ts.timestamp()) for v, ts in latest.items()}
+        )
 
 
 # --- auth --------------------------------------------------------------------
@@ -98,7 +112,7 @@ def test_content_type_is_the_prometheus_text_format(client):
 
 def test_every_line_is_a_valid_help_type_or_sample(client):
     _add_run()
-    upsert_last_backups_now({101: datetime(2026, 6, 28, 4, 1, tzinfo=UTC)})
+    _cache_backups("pve-alpha", "pbs-01", {101: datetime(2026, 6, 28, 4, 1, tzinfo=UTC)})
     text = _scrape(client)
 
     families = set()
@@ -127,28 +141,33 @@ def test_every_sample_family_is_declared(client):
 # --- values ------------------------------------------------------------------
 
 
-def upsert_last_backups_now(latest: dict[int, datetime]) -> None:
-    with session_scope() as session:
-        upsert_last_backups(session, {v: int(ts.timestamp()) for v, ts in latest.items()})
-
-
-def test_reports_build_info_and_state(client):
+def test_reports_build_info_and_global_state(client):
     text = _scrape(client)
     assert "joulenap_build_info{version=" in text
-    assert _value(text, "joulenap_pbs_online") == 0  # stubbed unreachable
     assert _value(text, "joulenap_scheduler_enabled") == 1
     assert _value(text, "joulenap_job_running") == 0
+    assert _value(text, "joulenap_queued_runs") == 0
 
 
-def test_last_run_series_track_the_run_history(client):
-    _add_run()
+def test_pbs_online_is_labelled_per_device(client):
     text = _scrape(client)
-    assert _value(text, "joulenap_last_run_success") == 1
-    assert _value(text, "joulenap_last_run_duration_seconds") == 83
-    assert _value(text, "joulenap_last_run_guests") == 4
-    assert _value(text, "joulenap_last_run_timestamp_seconds") == datetime(
-        2026, 6, 28, 4, 0, tzinfo=UTC
-    ).timestamp()
+    # Both fixture boxes are stubbed unreachable, and each gets its own series — a single
+    # unlabelled joulenap_pbs_online could only ever describe one of them.
+    assert 'joulenap_pbs_online{pbs="pbs-01"} 0' in text
+    assert 'joulenap_pbs_online{pbs="pbs-02"} 0' in text
+
+
+def test_route_last_run_series_are_labelled_by_route(client):
+    _add_run("nightly")
+    _add_run("offsite", kind=RunKind.SYNC, status=RunStatus.FAILURE, guests_ok=None)
+    text = _scrape(client)
+
+    assert 'joulenap_route_last_run_success{route="nightly"} 1' in text
+    assert 'joulenap_route_last_run_success{route="offsite"} 0' in text
+    assert 'joulenap_route_last_run_duration_seconds{route="nightly"} 83' in text
+    assert 'joulenap_route_last_run_guests{route="nightly"} 4' in text
+    # guests_ok is null on a sync run -> the series is omitted rather than reported as 0.
+    assert 'joulenap_route_last_run_guests{route="offsite"}' not in text
 
 
 def test_timestamps_keep_full_precision(client):
@@ -157,40 +176,46 @@ def test_timestamps_keep_full_precision(client):
     started = datetime(2026, 6, 28, 4, 0, 43, tzinfo=UTC)
     _add_run(started_at=started, finished_at=started + timedelta(seconds=83))
     text = _scrape(client)
-    assert _value(text, "joulenap_last_run_timestamp_seconds") == started.timestamp()
-    assert f"joulenap_last_run_timestamp_seconds {int(started.timestamp())}" in text
+    assert _value(text, "joulenap_route_last_run_timestamp_seconds") == started.timestamp()
+    assert f'{{route="nightly"}} {int(started.timestamp())}' in text
 
 
-def test_a_failed_last_run_reports_zero_not_absent(client):
-    _add_run(status=RunStatus.FAILURE, guests_ok=None)
+def test_datastore_series_come_from_the_cache_while_the_box_sleeps(client):
+    with session_scope() as session:
+        upsert_datastore_stat(session, "pbs-01", "backup", 8_000_000_000, 2_000_000_000)
     text = _scrape(client)
-    assert _value(text, "joulenap_last_run_success") == 0
-    # guests_ok is null on a failed run -> the series is omitted rather than reported as 0.
-    assert _value(text, "joulenap_last_run_guests") is None
+    assert 'joulenap_datastore_used_bytes{pbs="pbs-01",datastore="backup"} 2000000000' in text
+    assert 'joulenap_datastore_total_bytes{pbs="pbs-01",datastore="backup"} 8000000000' in text
+    # pbs-02 has no cached row yet: absent, not zero.
+    assert 'joulenap_datastore_used_bytes{pbs="pbs-02"' not in text
 
 
 def test_absent_values_are_omitted_not_zeroed(client):
     # With no history at all, publishing 0 would graph the last backup as January 1970.
     text = _scrape(client)
     for name in (
-        "joulenap_last_run_timestamp_seconds",
-        "joulenap_last_run_success",
-        "joulenap_last_run_duration_seconds",
+        "joulenap_route_last_run_timestamp_seconds",
+        "joulenap_route_last_run_success",
+        "joulenap_route_last_run_duration_seconds",
         "joulenap_datastore_used_bytes",
         "joulenap_guest_last_backup_timestamp_seconds",
     ):
         assert _value(text, name) is None, f"{name} should be absent, not zero"
 
 
-def test_per_guest_series_come_from_the_backup_cache(client):
+def test_per_guest_series_name_the_pve_and_the_pbs(client):
+    # A vmid alone stopped being unique the moment a second PVE could exist, and the same
+    # guest can have a snapshot on two boxes.
     stamp = datetime(2026, 6, 28, 2, 30, tzinfo=UTC)
-    upsert_last_backups_now({101: stamp, 102: stamp - timedelta(days=3)})
+    _cache_backups("pve-alpha", "pbs-01", {101: stamp})
+    _cache_backups("pve-beta", "pbs-01", {101: stamp - timedelta(days=3)})
     text = _scrape(client)
+
     assert (
-        f'joulenap_guest_last_backup_timestamp_seconds{{vmid="101"}} {int(stamp.timestamp())}'
-        in text
+        'joulenap_guest_last_backup_timestamp_seconds{vmid="101",pve="pve-alpha",pbs="pbs-01"} '
+        f"{int(stamp.timestamp())}" in text
     )
-    assert 'joulenap_guest_last_backup_timestamp_seconds{vmid="102"}' in text
+    assert 'vmid="101",pve="pve-beta",pbs="pbs-01"' in text
 
 
 def test_run_counts_are_grouped_by_kind_and_status(client):
@@ -206,4 +231,4 @@ def test_in_flight_runs_are_not_counted_as_history(client):
     # A RUNNING row has no outcome yet; counting it would show a phantom status bucket.
     _add_run(status=RunStatus.RUNNING, finished_at=None)
     text = _scrape(client)
-    assert "status=\"running\"" not in text
+    assert 'status="running"' not in text

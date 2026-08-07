@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.config_store import ConfigStore
 from ..db import get_session
 from ..db.models import LogEvent, Run, TaskLogLine
-from .deps import require_auth
+from .deps import get_config_store, require_auth
 from .schemas import LogLine, RunDetail, RunSummary, TaskLogLineSchema, TaskLogResponse
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["logs"])
@@ -30,45 +31,68 @@ def get_logs(
 def get_task_log(
     after: int = Query(default=0, ge=0),
     limit: int = Query(default=2000, ge=1, le=10000),
+    run: int | None = Query(
+        default=None, description="Read this run's lines instead of the newest run's"
+    ),
     session: Session = Depends(get_session),
 ) -> TaskLogResponse:
-    """Live task-log lines for the most recent run that has any (backup/GC/verify output).
+    """Task-log lines (backup/GC/verify/sync output) for one run.
 
-    Feeds the dashboard's Task-log panel. The client polls with ``after`` = the highest
-    line id it has seen; line ids increase globally, so a newer run's lines naturally
-    supersede an older run's and the panel resets when ``run_id`` changes.
+    Without ``run`` this follows the most recent run that has any, which is what the live
+    tail wants: the client polls with ``after`` = the highest line id it has seen, line ids
+    increase globally, so a newer run's lines naturally supersede an older run's and the
+    panel resets when ``run_id`` changes.
+
+    With ``run`` it reads that run instead — the homepage's expandable history rows, where
+    the run in question is finished and is *not* the newest. A run with no lines answers
+    ``{run_id: <id>, lines: []}``: the row asked about a specific run, so echoing its id
+    (rather than null) keeps the client's buffer keyed correctly.
     """
-    latest_run_id = session.scalar(
-        select(TaskLogLine.run_id).order_by(TaskLogLine.id.desc()).limit(1)
-    )
-    if latest_run_id is None:
+    if run is not None:
+        target_run_id: int | None = run
+    else:
+        target_run_id = session.scalar(
+            select(TaskLogLine.run_id).order_by(TaskLogLine.id.desc()).limit(1)
+        )
+    if target_run_id is None:
         return TaskLogResponse(run_id=None, lines=[])
     lines = session.scalars(
         select(TaskLogLine)
-        .where(TaskLogLine.run_id == latest_run_id, TaskLogLine.id > after)
+        .where(TaskLogLine.run_id == target_run_id, TaskLogLine.id > after)
         .order_by(TaskLogLine.id)
         .limit(limit)
     ).all()
     return TaskLogResponse(
-        run_id=latest_run_id, lines=[TaskLogLineSchema.of(line) for line in lines]
+        run_id=target_run_id, lines=[TaskLogLineSchema.of(line) for line in lines]
     )
 
 
 @router.get("/runs", response_model=list[RunSummary])
 def get_runs(
     limit: int = Query(default=50, ge=1, le=500),
+    route: str | None = Query(default=None, description="Only runs of this route id"),
     session: Session = Depends(get_session),
+    store: ConfigStore = Depends(get_config_store),
 ) -> list[RunSummary]:
-    """Run history (summaries), newest first."""
-    runs = session.scalars(
-        select(Run).order_by(Run.started_at.desc(), Run.id.desc()).limit(limit)
-    ).all()
-    return [RunSummary.of(r) for r in runs]
+    """Run history (summaries), newest first, optionally filtered to one route.
+
+    The filter matches on the recorded ``route_id``, so history stays readable after a route
+    is deleted (the chip disappears, the rows don't).
+    """
+    stmt = select(Run).order_by(Run.started_at.desc(), Run.id.desc()).limit(limit)
+    if route is not None:
+        stmt = stmt.where(Run.route_id == route)
+    lang = store.config.app.language
+    return [RunSummary.of(r, lang) for r in session.scalars(stmt).all()]
 
 
 @router.get("/runs/{run_id}", response_model=RunDetail)
-def get_run(run_id: int, session: Session = Depends(get_session)) -> RunDetail:
+def get_run(
+    run_id: int,
+    session: Session = Depends(get_session),
+    store: ConfigStore = Depends(get_config_store),
+) -> RunDetail:
     run = session.get(Run, run_id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
-    return RunDetail.of(run)
+    return RunDetail.of(run, store.config.app.language)

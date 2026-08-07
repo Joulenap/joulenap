@@ -1,195 +1,298 @@
-import { useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
-import type { RunDetail, RunSummary } from '../../api/types'
-import { useConfig } from '../../config/ConfigContext'
-import { c, mono } from '../../theme'
-import { fmtClock, fmtDuration, fmtShort } from '../../utils/format'
-import { runDurationMs, runKindLabelKey, runStatusStyle } from '../../utils/status'
-import { LEVELS, colHead } from './ActivityLog'
+import type { Route, RunDetail, RunSummary, TaskLogLine } from '../../api/types'
+import { fmtDT, fmtDuration } from '../../utils/format'
+import { runKindLabelKey, runStatusStyle, runDurationMs } from '../../utils/status'
 
-const badge: React.CSSProperties = {
-  display: 'inline-block',
-  fontFamily: mono,
-  fontSize: 10,
-  fontWeight: 600,
-  padding: '2px 7px',
-  borderRadius: 5,
-  textTransform: 'uppercase',
+interface RunHistoryProps {
+  runs: RunSummary[]
+  routes: Route[]
+  error: boolean
+  /** Live task-log lines for the run in flight, from the shared useTaskLog poll. */
+  liveLines: TaskLogLine[]
+  liveRunId: number | null
+  onStop: (run: RunSummary) => void
 }
 
-const cell: React.CSSProperties = { fontFamily: mono, fontSize: 12, color: c.textDim }
-
-function StatusBadge({ status }: { status: string }) {
+export function RunHistory({
+  runs,
+  routes,
+  error,
+  liveLines,
+  liveRunId,
+  onStop,
+}: RunHistoryProps) {
   const { t } = useTranslation()
-  const s = runStatusStyle(status)
-  return <span style={{ ...badge, color: s.color, background: s.bg }}>{t(s.labelKey)}</span>
-}
+  const [filter, setFilter] = useState<string>('all')
+  const [open, setOpen] = useState<number | null>(null)
 
-// One run's steps + its own log lines, fetched on expand. Rendered inside the expanded row.
-function RunDetailPanel({ detail }: { detail: RunDetail | null }) {
-  const { t } = useTranslation()
-  if (!detail) {
-    return (
-      <div style={{ padding: '10px 18px 12px 34px', fontSize: 12, color: c.textFaint }}>
-        {t('common.loading')}
-      </div>
-    )
-  }
+  // Open the run in flight on its own: someone landing on this page wants to see what is
+  // happening now, and the live task log is otherwise a click away. The ref means each run is
+  // auto-opened once, so collapsing it is not fought until the next run starts.
+  const autoOpened = useRef<number | null>(null)
+  useEffect(() => {
+    const running = runs.find((r) => r.status === 'running')
+    if (running && autoOpened.current !== running.id) {
+      autoOpened.current = running.id
+      setOpen(running.id)
+    }
+  }, [runs])
+
+  // Filtered client-side over the 50 rows already polled: switching chips is instant and
+  // costs no request, and the backend's ?route= filter would only matter past that window.
+  const shown = filter === 'all' ? runs : runs.filter((r) => r.route_id === filter)
+
   return (
-    <div style={{ padding: '4px 18px 12px 34px', borderLeft: `2px solid ${c.border}`, marginLeft: 16 }}>
-      <div style={{ ...colHead, margin: '8px 0 5px' }}>{t('dashboard.runSteps')}</div>
-      {detail.steps.length === 0 && (
-        <div style={{ fontSize: 12, color: c.textFaint }}>{t('dashboard.noSteps')}</div>
-      )}
-      {detail.steps.map((s) => {
-        const ms = runDurationMs(s)
-        return (
-          <div
-            key={`${s.name}-${s.started_at}`}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '3px 0', flexWrap: 'wrap' }}
+    <section className="panel">
+      <div className="panel-hd">
+        <h2>{t('dashboard.runHistory')}</h2>
+        <div className="fchips">
+          <button
+            type="button"
+            className={`fchip${filter === 'all' ? ' on' : ''}`}
+            onClick={() => setFilter('all')}
           >
-            <span style={{ ...cell, minWidth: 74, color: c.textMid }}>{s.name}</span>
-            <StatusBadge status={s.status} />
-            <span style={{ ...cell, minWidth: 44 }}>{ms === null ? '—' : fmtDuration(ms)}</span>
-            {s.detail && (
-              <span style={{ fontSize: 12, color: c.textFaint, overflowWrap: 'anywhere' }}>{s.detail}</span>
-            )}
-          </div>
-        )
-      })}
+            {t('dashboard.filterAll')}
+          </button>
+          {routes.map((r) => (
+            <button
+              type="button"
+              key={r.id}
+              className={`fchip${filter === r.id ? ' on' : ''}`}
+              onClick={() => setFilter(r.id)}
+            >
+              <span className="rdot" style={{ background: r.color }} />
+              {r.name || r.id}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      <div style={{ ...colHead, margin: '12px 0 5px' }}>{t('dashboard.runLog')}</div>
-      {detail.logs.length === 0 && (
-        <div style={{ fontSize: 12, color: c.textFaint }}>{t('dashboard.noLogs')}</div>
-      )}
-      {detail.logs.map((l) => {
-        const lvl = LEVELS[l.level] ?? LEVELS.INFO
-        return (
-          <div key={l.id} style={{ display: 'flex', gap: 10, padding: '2px 0', alignItems: 'baseline' }}>
-            <span style={{ ...cell, flex: '0 0 auto' }}>{fmtClock(new Date(l.ts))}</span>
-            <span style={{ ...badge, color: lvl.color, background: lvl.bg, flex: '0 0 auto' }}>
-              {l.level}
-            </span>
-            <span style={{ fontSize: 12, color: c.textMid, minWidth: 0, overflowWrap: 'anywhere' }}>
-              {l.message}
-            </span>
-          </div>
-        )
-      })}
-    </div>
+      {error && <div className="panel-empty">{t('dashboard.runsError')}</div>}
+      {/* The empty state lives *inside* .table-scroll so the box keeps its fixed height:
+          the bottom grid takes its row height from this panel, and a collapsed one leaves
+          "Last backup per guest" one row tall. */}
+      <div className={`table-scroll${open !== null ? ' uncapped' : ''}`}>
+        {shown.length === 0 ? (
+          <div className="panel-empty">{t('dashboard.noRuns')}</div>
+        ) : (
+          <table className="htable">
+            <thead>
+              <tr>
+                <th>{t('dashboard.colRoute')}</th>
+                <th>{t('dashboard.colKind')}</th>
+                <th>{t('dashboard.colStarted')}</th>
+                <th>{t('dashboard.colDuration')}</th>
+                <th>{t('dashboard.colStatus')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((run) => (
+                <Fragment key={run.id}>
+                  <HistoryRow
+                    run={run}
+                    routes={routes}
+                    open={open === run.id}
+                    onToggle={() => setOpen(open === run.id ? null : run.id)}
+                  />
+                  {open === run.id && (
+                    <tr className="drow">
+                      <td colSpan={5}>
+                        <RunDetailBody
+                          run={run}
+                          liveLines={liveRunId === run.id ? liveLines : []}
+                          onStop={onStop}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
   )
 }
 
-export function RunHistory({ runs, error }: { runs: RunSummary[]; error: boolean }) {
+function HistoryRow({
+  run,
+  routes,
+  open,
+  onToggle,
+}: {
+  run: RunSummary
+  routes: Route[]
+  open: boolean
+  onToggle: () => void
+}) {
   const { t } = useTranslation()
-  const { config } = useConfig()
-  const [openId, setOpenId] = useState<number | null>(null)
-  const [details, setDetails] = useState<Record<number, RunDetail>>({})
+  const route = routes.find((r) => r.id === run.route_id)
+  const style = runStatusStyle(run.status)
+  const ms = runDurationMs(run)
 
-  const toggle = async (run: RunSummary) => {
-    if (openId === run.id) {
-      setOpenId(null)
-      return
-    }
-    setOpenId(run.id)
-    // Cached detail is reused, except for a run still in flight — its steps are still being
-    // written, so a cached copy would freeze mid-cycle.
-    if (details[run.id] && run.status !== 'running') return
-    try {
-      const detail = await api.run(run.id)
-      setDetails((d) => ({ ...d, [run.id]: detail }))
-    } catch {
-      // Leave it in the loading state; the next expand retries.
-    }
-  }
+  return (
+    <tr
+      className={`hrow x${open ? ' open' : ''}`}
+      tabIndex={0}
+      aria-expanded={open}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onToggle()
+        }
+      }}
+    >
+      <td>
+        <span className="xbtn">▶</span>
+        {/* A deleted route leaves its name denormalised on the row, but no colour — the dot
+            falls back to a neutral one rather than disappearing and shifting the column. */}
+        <span className="rdot" style={{ background: route?.color ?? 'var(--jn-text-muted)' }} />
+        {run.route_name || t('dashboard.adhocRun')}
+      </td>
+      <td className="kind">{t(runKindLabelKey(run.kind))}</td>
+      <td className="when">{fmtDT(new Date(run.started_at))}</td>
+      <td className="dur">{run.finished_at && ms !== null ? fmtDuration(ms) : '—'}</td>
+      <td>
+        <span className="res" style={{ color: style.color, background: style.bg }}>
+          {t(style.labelKey)}
+          {run.guests_ok !== null ? ` · ${t('dashboard.guestsOk', { count: run.guests_ok })}` : ''}
+        </span>
+      </td>
+    </tr>
+  )
+}
 
-  const retentionDays = config?.maintenance.history.retention_days ?? 0
+/**
+ * The expanded body: the run's step timeline, then its task-log tail.
+ *
+ * The steps are not in the mockup, but they are the only place the UI can show *why* a
+ * power-off was skipped ("left on: still needed by another run") or which source of a
+ * multi-PVE route failed — and the run detail view they used to live in is gone.
+ */
+function RunDetailBody({
+  run,
+  liveLines,
+  onStop,
+}: {
+  run: RunSummary
+  liveLines: TaskLogLine[]
+  onStop: (run: RunSummary) => void
+}) {
+  const { t } = useTranslation()
+  const [detail, setDetail] = useState<RunDetail | null>(null)
+  const [lines, setLines] = useState<TaskLogLine[] | null>(null)
+  const live = run.status === 'running'
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .run(run.id)
+      .then((d) => !cancelled && setDetail(d))
+      .catch(() => {})
+    // A finished run's output is fetched once, on expand: it never changes again. The
+    // running row reads the shared live poll instead.
+    if (!live) {
+      api
+        .taskLog(0, run.id)
+        .then((r) => !cancelled && setLines(r.lines))
+        .catch(() => !cancelled && setLines([]))
+    }
+    return () => {
+      cancelled = true
+    }
+    // A run in flight grows a step at a time, so the timeline has to be re-read or it freezes
+    // at whatever it looked like when the row was expanded. `liveLines` is already narrowed to
+    // this run by the caller, so its length only moves while this row is the live one — which
+    // makes it a free tick at the task-log poll's own cadence, with no second timer.
+  }, [run.id, live, live ? liveLines.length : 0])
+
+  // A run reports its final status *before* its timeline is complete: the power-off steps are
+  // recorded by JobService after the cycle returns (it owns the lease, so it owns those
+  // steps), which means the fetch above — the one triggered by `live` flipping to false —
+  // usually lands while `poweroff` is still `running`. Nothing re-read it after that, so the
+  // row the history auto-opened sat on a blue "Running · —" power-off forever while the
+  // topology showed the box already asleep. Collapsing and re-expanding was the only cure.
+  const stepPending = detail?.steps.some((s) => s.status === 'running') ?? false
+  useEffect(() => {
+    if (live || !stepPending) return
+    let cancelled = false
+    const id = setInterval(() => {
+      api
+        .run(run.id)
+        .then((d) => !cancelled && setDetail(d))
+        .catch(() => {})
+    }, 2000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [run.id, live, stepPending])
+
+  const shown = live ? liveLines : (lines ?? [])
 
   return (
     <>
-      <div
-        className="jn-run-head"
-        style={{ padding: '0 18px 7px', borderBottom: `1px solid ${c.border}` }}
-      >
-        <span style={colHead}>{t('dashboard.colId')}</span>
-        <span style={colHead}>{t('dashboard.colStarted')}</span>
-        <span style={colHead}>{t('dashboard.colKind')}</span>
-        <span style={colHead}>{t('dashboard.colTrigger')}</span>
-        <span style={colHead}>{t('dashboard.colStatus')}</span>
-        <span style={colHead}>{t('dashboard.colDuration')}</span>
-        <span style={colHead}>{t('dashboard.colGuests')}</span>
-      </div>
-
-      <div>
-        {runs.length === 0 && (
-          <div style={{ padding: '14px 18px', fontSize: 13, color: c.textFaint }}>
-            {error ? t('dashboard.runsError') : t('dashboard.noRuns')}
-          </div>
-        )}
-
-        {runs.map((run) => {
-          const open = openId === run.id
-          const ms = runDurationMs(run)
-          return (
-            <div key={run.id} style={{ borderBottom: `1px solid ${c.divider}` }}>
-              <button
-                type="button"
-                onClick={() => void toggle(run)}
-                aria-expanded={open}
-                className="jn-run-row"
-                style={{
-                  width: '100%',
-                  alignItems: 'center',
-                  padding: '7px 18px',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  color: c.text,
-                }}
-              >
-                {/* The run number the notifications quote — this is where you come to look
-                    it up, so it leads the row. */}
-                <span style={{ ...cell, color: c.textMuted }}>#{run.id}</span>
-                <span style={{ ...cell, color: c.textFaint }}>
-                  <span style={{ color: c.textFaint, marginRight: 6 }}>{open ? '▾' : '▸'}</span>
-                  {fmtShort(new Date(run.started_at))}
+      {detail && detail.steps.length > 0 && (
+        <div className="steps">
+          {detail.steps.map((step, i) => {
+            const style = runStatusStyle(step.status)
+            const ms = runDurationMs(step)
+            return (
+              <div className="step" key={`${step.name}-${i}`}>
+                <span className="sname">{step.name}</span>
+                <span style={{ color: style.color }}>{t(style.labelKey)}</span>
+                <span className="sdur">
+                  {step.finished_at && ms !== null ? fmtDuration(ms) : '—'}
                 </span>
-                <span style={{ ...cell, color: c.textMid }}>{t(runKindLabelKey(run.kind))}</span>
-                <span style={cell}>{t(`dashboard.trigger_${run.trigger}`)}</span>
-                <span>
-                  <StatusBadge status={run.status} />
-                </span>
-                <span style={cell}>{ms === null ? '—' : fmtDuration(ms)}</span>
-                <span style={cell}>{run.guests_ok ?? '—'}</span>
-              </button>
-
-              {/* An error is worth seeing without expanding — it's why you opened this view. */}
-              {!open && run.error && (
-                <div
-                  style={{
-                    padding: '0 18px 8px 34px',
-                    fontSize: 12,
-                    color: c.red,
-                    overflowWrap: 'anywhere',
-                  }}
-                >
-                  {run.error}
-                </div>
-              )}
-
-              {open && <RunDetailPanel detail={details[run.id] ?? null} />}
-            </div>
-          )
-        })}
-      </div>
-
-      {retentionDays > 0 && runs.length > 0 && (
-        <div style={{ padding: '9px 18px 2px', fontSize: 11, color: c.textMuted }}>
-          {t('dashboard.historyRetention', { n: retentionDays })}
+                {step.detail && <span className="sdetail">{step.detail}</span>}
+              </div>
+            )
+          })}
         </div>
+      )}
+
+      {run.error && <div className="tasklog tl-err">{run.error}</div>}
+
+      {shown.length > 0 ? (
+        <pre className="tasklog">
+          {shown.map((line) => (
+            <div key={line.id} className={lineClass(line.text)}>
+              {line.text}
+            </div>
+          ))}
+        </pre>
+      ) : (
+        !live && lines !== null && <div className="tasklog-empty">{t('dashboard.noTaskLog')}</div>
+      )}
+
+      {live && (
+        <>
+          <div className="runbar" aria-hidden="true" />
+          <div className="drow-actions">
+            <button
+              type="button"
+              className="btn btn-outline-danger"
+              onClick={(e) => {
+                e.stopPropagation()
+                onStop(run)
+              }}
+            >
+              ■ {t('dashboard.stopRun')}
+            </button>
+          </div>
+        </>
       )}
     </>
   )
+}
+
+/** Colour a task-log line by what the task itself said, not by guessing at severity. */
+function lineClass(text: string): string {
+  if (/^\s*(ERROR|TASK ERROR)\b/i.test(text)) return 'tl-err'
+  if (/^\s*WARN/i.test(text) || /\bWARNINGS?:\s*\d+/.test(text)) return 'tl-warn'
+  return ''
 }

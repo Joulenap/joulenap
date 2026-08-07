@@ -5,6 +5,11 @@ import type { RunSummary } from '../api/types'
 // Polls GET /api/runs for the Run history view. Only runs while the view is showing, so the
 // default (activity log) view costs no extra requests; the same 8s cadence as the activity
 // log keeps a finished run from lingering as "running" for long.
+/** How many runs the shared buffer holds — the newest N across *all* routes, not per route.
+ *  Exported because a consumer has to know whether a route's absence means "never ran" or
+ *  just "not in this window". */
+export const RUNS_LIMIT = 50
+
 export function useRuns(active: boolean) {
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [error, setError] = useState(false)
@@ -15,7 +20,7 @@ export function useRuns(active: boolean) {
     if (inFlightRef.current) return
     inFlightRef.current = true
     try {
-      setRuns(await api.runs(50))
+      setRuns(await api.runs(RUNS_LIMIT))
       setError(false)
     } catch {
       // Transient failure: keep the list we have (blanking it reads as "no runs ever", which

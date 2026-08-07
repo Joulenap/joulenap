@@ -11,12 +11,14 @@ privileges differ, so the shared logic sits in a base class.
 
 from __future__ import annotations
 
+import re
+import ssl
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-from .errors import ApiError
+from .errors import ApiError, TokenExistsError
 
 # PVE role: least privilege for the backup cycle. Datastore.Allocate (not just
 # AllocateSpace) is required because vzdump with prune-backups (retention) deletes old
@@ -30,6 +32,41 @@ ROLE_PRIVS = "VM.Audit,VM.Backup,Datastore.Audit,Datastore.AllocateSpace,Datasto
 #   - Audit on /system: read-only node status (CPU / RAM / network for the dashboard).
 PBS_DATASTORE_ROLE = "DatastoreAdmin"
 PBS_SYSTEM_ROLE = "Audit"
+# ...and what a Sync route needs on /remote, where Joulenap creates the remote entry and the
+# sync job itself. RemoteAdmin is Remote.Audit+Modify+Read — enough for the remote and a PULL
+# job; a PUSH job additionally needs Remote.DatastoreBackup, which RemoteSyncPushOperator
+# carries (found on real hardware at GATE1: without it POST /config/sync is refused).
+#
+# This has to happen here, in the one-time root step: PBS answers *400 Unprivileged API tokens
+# can't set ACL items* to `PUT /access/acl` from any token, no matter which roles it holds. So
+# it can never be added later from the stored token — a PBS provisioned without these grants
+# has to be re-provisioned with root, or granted by hand on its console.
+PBS_REMOTE_ROLES = ("RemoteAdmin", "RemoteSyncPushOperator")
+
+#: Default token name. A PVE device is one host, so it can never collide with itself.
+TOKEN_NAME = "joulenap"
+
+#: PBS token ids accept letters, digits, ``-``, ``_`` and ``.``; anything else is replaced.
+_TOKEN_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def pbs_token_name(datastore: str, prefix: str = TOKEN_NAME) -> str:
+    """The token name for a backup-server device, qualified by its datastore.
+
+    A PBS device is a *(host, datastore)* pair, so one machine can legitimately hold two
+    devices — which the duplicate guard deliberately allows. Naming both tokens ``joulenap``
+    made the second one's setup delete and recreate the first one's token: the first device
+    was left with a dead secret *and*, because deleting a token drops its ACL entries while
+    provisioning only re-grants ``/datastore/<its own datastore>``, no way back in short of a
+    root session. Qualifying the name means the two never meet.
+
+    Sanitised rather than interpolated raw: PBS restricts the character set for token ids, and
+    a datastore whose name survives none of it falls back to the bare prefix rather than
+    producing something the server will reject.
+    """
+    slug = _TOKEN_UNSAFE.sub("-", datastore.strip()).strip("-._")
+    return f"{prefix}-{slug}" if slug else prefix
+
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "DELETE"})
 
@@ -50,7 +87,7 @@ class _Provisioner:
         self,
         host: str,
         port: int,
-        verify: bool = False,
+        verify: bool | ssl.SSLContext = False,
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
     ):
@@ -92,22 +129,50 @@ class _Provisioner:
     # concept and rejects unknown params, so it leaves this empty.
     _token_create_params: dict[str, Any] = {}
 
-    def create_token(self, userid: str, token_name: str) -> CreatedToken:
+    def _token_exists(self, path: str) -> bool:
+        """Whether the token at ``path`` is already there.
+
+        Both products answer ``GET /access/users/{userid}/token/{name}`` with the token's
+        settings when it exists and an error when it does not, so this turns the create's
+        ambiguous 400/500 into a fact before anything destructive happens.
+        """
+        try:
+            self._request("GET", path)
+        except ApiError:
+            return False
+        return True
+
+    def create_token(
+        self, userid: str, token_name: str, *, replace_existing: bool = False
+    ) -> CreatedToken:
         """Create an API token for ``userid``; returns its full id + one-time secret.
 
-        Idempotent for quick setup: if a token of this name already exists (the server
-        rejects the create with 400/500), delete it and recreate so we get a usable secret
-        — the secret is only revealed at creation time, so reusing the old token isn't
-        possible. If the delete then fails the token never existed, so the create failed
-        for some other reason; re-raise that original error rather than the delete's.
+        A token's secret is revealed **only** when it is created, so a name that is already
+        taken cannot be reused — it can only be deleted and recreated, which invalidates the
+        secret every other consumer of that token id still holds. That is not ours to decide
+        silently: a Proxmox host's PBS storage entry typically uses the same ``joulenap``
+        token, and rotating it under them turns every backup into a 401 whose message
+        mentions neither the token nor the rotation. So ``replace_existing`` has to say so,
+        and the wizard asks before it passes it.
+
+        The create's 400/500 is only a hint — ``ensure_role`` uses the same pair for its own
+        "already exists" — so confirm with a GET before deleting anything. A 400 for any
+        other reason (a name the server rejects, a user that does not exist) then surfaces as
+        itself instead of taking a live token down with it.
         """
         path = f"/access/users/{userid}/token/{token_name}"
         payload = self._token_create_params or None
         try:
             data = self._request("POST", path, data=payload)
         except ApiError as exc:
-            if exc.status not in (400, 500):
+            if exc.status not in (400, 500) or not self._token_exists(path):
                 raise
+            if not replace_existing:
+                raise TokenExistsError(
+                    f"An API token named '{token_name}' already exists for {userid}. Its "
+                    "secret can only be read when it is created, so Joulenap would have to "
+                    "replace it — anything else still using that token would stop working."
+                ) from exc
             try:
                 self._request("DELETE", path)
             except ApiError:
@@ -159,7 +224,9 @@ class PveProvisioner(_Provisioner):
     _cookie_name = "PVEAuthCookie"
     _token_create_params = {"privsep": 1}  # privilege-separated token (own ACLs)
 
-    def __init__(self, host: str, port: int = 8006, verify: bool = False, **kwargs: Any):
+    def __init__(
+        self, host: str, port: int = 8006, verify: bool | ssl.SSLContext = False, **kwargs: Any
+    ):
         super().__init__(host, port, verify, **kwargs)
 
     def grant_token_role(self, token_id: str, role_id: str = ROLE_ID, path: str = "/") -> None:
@@ -167,12 +234,17 @@ class PveProvisioner(_Provisioner):
         self._grant_acl({"path": path, "roles": role_id, "tokens": token_id, "propagate": 1})
 
     def provision_token(
-        self, username: str, password: str, token_name: str = "joulenap"
+        self,
+        username: str,
+        password: str,
+        token_name: str = "joulenap",
+        *,
+        replace_existing: bool = False,
     ) -> CreatedToken:
         """Full quick-setup flow: log in, ensure the role, create the token, grant it."""
         self.login(username, password)
         self.ensure_role(ROLE_ID, ROLE_PRIVS)
-        token = self.create_token(username, token_name)
+        token = self.create_token(username, token_name, replace_existing=replace_existing)
         self.grant_token_role(token.token_id)
         return token
 
@@ -182,7 +254,9 @@ class PbsProvisioner(_Provisioner):
 
     _cookie_name = "PBSAuthCookie"
 
-    def __init__(self, host: str, port: int = 8007, verify: bool = False, **kwargs: Any):
+    def __init__(
+        self, host: str, port: int = 8007, verify: bool | ssl.SSLContext = False, **kwargs: Any
+    ):
         super().__init__(host, port, verify, **kwargs)
 
     def grant_acl(self, token_id: str, path: str, role: str) -> None:
@@ -191,13 +265,22 @@ class PbsProvisioner(_Provisioner):
         self._grant_acl({"path": path, "role": role, "auth-id": token_id, "propagate": 1})
 
     def provision_token(
-        self, username: str, password: str, datastore: str, token_name: str = "joulenap"
+        self,
+        username: str,
+        password: str,
+        datastore: str,
+        token_name: str = "joulenap",
+        *,
+        replace_existing: bool = False,
     ) -> CreatedToken:
         """Full quick-setup flow: log in, create the token, grant it built-in roles —
-        DatastoreAdmin on the datastore (GC + status) and Audit on /system (node load).
-        No role creation — PBS doesn't expose role management via the API."""
+        DatastoreAdmin on the datastore (GC + status), Audit on /system (node load) and both
+        /remote roles Sync routes need. No role creation — PBS doesn't expose role management
+        via the API."""
         self.login(username, password)
-        token = self.create_token(username, token_name)
+        token = self.create_token(username, token_name, replace_existing=replace_existing)
         self.grant_acl(token.token_id, f"/datastore/{datastore}", PBS_DATASTORE_ROLE)
         self.grant_acl(token.token_id, "/system", PBS_SYSTEM_ROLE)
+        for role in PBS_REMOTE_ROLES:
+            self.grant_acl(token.token_id, "/remote", role)
         return token
