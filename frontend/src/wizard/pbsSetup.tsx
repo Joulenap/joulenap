@@ -2,8 +2,9 @@ import { useCallback, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../api/client'
 import { Toggle } from '../components/Toggle'
+import { useWolInterfaces } from '../hooks/useWolInterfaces'
 import type { PbsDraft } from '../utils/wizardFlow'
-import { type ErrorFor, TextField } from './fields'
+import { Field, type ErrorFor, TextField } from './fields'
 
 /**
  * The PBS half of the wizard, shared by both flows.
@@ -172,6 +173,7 @@ export function usePbsSetup(
 export function WakeFields({ setup, errorFor }: { setup: PbsSetup; errorFor: ErrorFor }) {
   const { t } = useTranslation()
   const { draft, patch, busy, note } = setup
+  const ifaces = useWolInterfaces(draft.wolIface)
   return (
     <>
       <div className="frow">
@@ -206,14 +208,27 @@ export function WakeFields({ setup, errorFor }: { setup: PbsSetup; errorFor: Err
             </>
           }
         />
-        <TextField
+        {/* A list, not free text: a mistyped NIC name was accepted and then silently fell
+            back to auto-detection, with nothing on screen to say so. */}
+        <Field
           id="wiz-wol-iface"
           label={t('wizard.field.wolIface')}
-          value={draft.wolIface}
-          onChange={(v) => patch({ wolIface: v })}
-          placeholder={t('settings.devices.auto')}
           help={t('wizard.wake.ifaceHint')}
-        />
+        >
+          <select
+            id="wiz-wol-iface"
+            className="in-mono"
+            value={draft.wolIface}
+            onChange={(e) => patch({ wolIface: e.target.value })}
+          >
+            <option value="">{t('settings.devices.auto')}</option>
+            {ifaces.map((i) => (
+              <option key={i.value} value={i.value}>
+                {i.label}
+              </option>
+            ))}
+          </select>
+        </Field>
       </div>
       <div className="warn">
         <span className="wi">⚠</span>

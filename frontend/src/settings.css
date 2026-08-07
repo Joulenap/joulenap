@@ -310,8 +310,10 @@
   width: 100%;
 }
 /* Must follow the block: its `font-family: inherit` matches at the same specificity, so an
-   opt-in `.in-mono` only wins on source order. */
-.jn-settings input.in-mono {
+   opt-in `.in-mono` only wins on source order. Selects opt in too — the WoL interface picker
+   sits in a row of mono fields and a lone proportional one reads as a different control. */
+.jn-settings input.in-mono,
+.jn-settings select.in-mono {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
 }
 .jn-settings textarea {

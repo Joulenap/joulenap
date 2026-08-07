@@ -58,7 +58,9 @@ consecutive routes across them can sleep and wake that machine once more than st
   at 04:00 that Wake-on-LAN was never armed) and power-off. Both work from pasted API tokens, or
   provision everything themselves from a root login used once and never stored. **Detect MAC** now
   works in the container: it used to shell out to `ping`, which the image does not contain, so it
-  only ever found a machine something else had recently talked to.
+  only ever found a machine something else had recently talked to. The **Wake-on-LAN interface** is
+  a list of the host's own NICs instead of a text box in which a typo silently fell back to
+  auto-detection.
 - **A backup server's API token is named after its datastore** — `joulenap-backup`,
   `joulenap-offsite` — so one machine serving several datastores gets one token per device instead
   of the setups fighting over a single name. Deleting an API token also drops the permissions

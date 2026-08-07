@@ -4,6 +4,7 @@ import { ApiError, api } from '../../api/client'
 import type { PbsDevice, PveDevice } from '../../api/types'
 import { Modal } from '../../components/Modal'
 import { Toggle } from '../../components/Toggle'
+import { useWolInterfaces } from '../../hooks/useWolInterfaces'
 import {
   type DeviceError,
   type DeviceKind,
@@ -40,6 +41,7 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
   const pbs = draft as PbsDevice
   const pve = draft as PveDevice
   const ns = 'settings.devices'
+  const ifaces = useWolInterfaces(isPbs ? pbs.wol_broadcast_iface : '')
 
   // Sync grants: root credentials that are used once and never stored, so they live outside
   // the draft entirely (see the section's own comment below).
@@ -140,6 +142,39 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
           spellCheck={false}
           onChange={(e) => onChange(e.target.value)}
         />
+        {err && <span className="err-note">{err.message ?? t(err.key!, err.params)}</span>}
+        {!err && opts.help && <span className="help">{opts.help}</span>}
+      </div>
+    )
+  }
+
+  /** Same markup as {@link text}, with a fixed list instead of free typing. `options` are
+   *  rendered under a blank first entry, which is what the empty value means. */
+  const select = (
+    field: string,
+    label: string,
+    value: string,
+    onChange: (v: string) => void,
+    options: { value: string; label: string }[],
+    opts: { blank?: string; help?: string } = {},
+  ) => {
+    const err = errorFor(field)
+    return (
+      <div className={`field${err ? ' err' : ''}`} key={field}>
+        <label htmlFor={`dev-${field}`}>{label}</label>
+        <select
+          id={`dev-${field}`}
+          className="in-mono"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">{opts.blank ?? ''}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         {err && <span className="err-note">{err.message ?? t(err.key!, err.params)}</span>}
         {!err && opts.help && <span className="help">{opts.help}</span>}
       </div>
@@ -339,12 +374,13 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
                   {text('mac', t(`${ns}.mac`), pbs.mac, (v) => patch({ mac: v }), {
                     placeholder: '00:11:22:33:44:55',
                   })}
-                  {text(
+                  {select(
                     'wol_broadcast_iface',
                     t(`${ns}.wolIface`),
                     pbs.wol_broadcast_iface,
                     (v) => patch({ wol_broadcast_iface: v }),
-                    { placeholder: t(`${ns}.auto`) },
+                    ifaces,
+                    { blank: t(`${ns}.auto`) },
                   )}
                   {num('wait_timeout', t(`${ns}.waitTimeout`), pbs.wait_timeout, (n) =>
                     patch({ wait_timeout: n }),
