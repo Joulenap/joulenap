@@ -40,7 +40,7 @@ For each field: **auto** = discovered/derived, **manual** = entered.
 | PBS host/IP, port | auto | read from the PVE storage config (manual in flow B) |
 | PBS datastore | auto | from the storage config |
 | PBS fingerprint | auto | from the storage config, or read from the PBS certificate on connect |
-| WoL broadcast interface | auto | the NIC with the route to the PBS subnet; override allowed |
+| WoL broadcast interface | auto | the NIC with the route to the PBS subnet; a dropdown lists the host's own NICs if you want to pin one |
 | PBS MAC | auto | connect + read ARP, with the PBS powered on ("Detect MAC") |
 | PBS API token | manual, or auto in root mode | see the privileges below |
 | PBS SSH host key | auto | scanned, shown, saved to `data/known_hosts` on your confirmation |

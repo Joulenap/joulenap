@@ -39,9 +39,10 @@ Integrations**; enabling the integration enables both.
 
 1. Open Joulenap → **Settings → Integrations**.
 2. Click **Generate API key**. The key is shown once — copy it somewhere
-   safe (a password manager, your dashboard's secret store, etc.). Joulenap
-   only stores a copy needed to verify requests; it won't show you the key
-   again.
+   safe (a password manager, your dashboard's secret store, etc.). The
+   interface will not show it again: like every other secret it lives in
+   `config.yaml` and is redacted from every API response, so recovering it
+   means reading that file on the host — or generating a new one.
 3. Pick your dashboard in the picker on that page to get a ready-to-paste
    config snippet with the key and endpoint URL already filled in.
 4. Disabling the integration (the **Disable** button) clears the key, and

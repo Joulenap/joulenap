@@ -13,7 +13,8 @@
 
 - **Web UI** (frontend): single-page app. Talks to the backend over the REST API below.
 - **Backend / API**: serves the UI, exposes the REST API, holds the scheduler, runs the route cycles, manages config.
-- **Scheduler**: in-process (APScheduler). **One cron trigger per enabled route**, plus a daily history-prune job (armed independently, so history is trimmed even while every route is paused). Re-armed whenever config changes. GC and verify have no triggers of their own — they are options of a route, or a manual action on a box.
+- **Scheduler**: in-process (APScheduler). **One cron trigger per enabled route**, plus a daily history-prune job and a one-minute liveness heartbeat (both armed independently, so history is trimmed and liveness recorded even while every route is paused). Re-armed whenever config changes. GC and verify have no triggers of their own — they are options of a route, or a manual action on a box.
+- **Startup catch-up**: the jobstore is in memory, so a fire due while the container was stopped is simply lost. At startup each armed route is checked for a slot that came due *while the process was not running*, and one is reported as a missed run (logged, and notified under `on_failure` — never auto-run: a restart must not kick off a heavy PBS-waking backup). "Not running" is a fact, not an inference: the heartbeat touches `data/.heartbeat` every minute and its mtime bounds the window, so a schedule edited to earlier in the day — or a route disabled and re-enabled, or the kill-switch — cannot be mistaken for downtime. No heartbeat on record (first boot, unwritable data dir) reports nothing.
 - **Run queue + power lease**: one run is ever in flight; the rest wait in a FIFO queue. Each PBS a run needs is held under a refcounted lease that wakes it on first acquire and powers it off on last release. See below.
 - **Connectors**:
   - `pve` — PVE API client (list guests, trigger `vzdump`, read task status).
@@ -72,7 +73,7 @@ Only the last of those is worth a warning; the other three are the correct outco
 
 `managed_power: false` describes an always-on PBS. The lease is the single place that knows: acquiring degrades to a reachability check and releasing does nothing.
 
-**The lease is keyed per device, not per machine.** A backup server serving two datastores is two devices, so each holds its own lease and neither knows about the other: a run that finishes with the first can power the machine off while a queued run on the second still wants it, and that run then wakes it again. Runs are serialised by the single-run lock, so this costs one extra sleep/wake cycle rather than correctness — but on one physical box, prefer a single datastore, or expect the extra cycle.
+Because the key is the machine, a run holding one datastore of a box reports every device on that box as busy — which is what disables the ⏻ button on its siblings, since an SSH power-off would take the running server down with them.
 
 
 ## What each kind does
