@@ -102,8 +102,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         timezone=store.config.app.timezone,
     )
     scheduler.start()
-    scheduler.rearm(store.config)
-    scheduler.arm_prune()
+    scheduler.rearm(store.config)  # arms the prune job too, so it needs no second call here
     # Late-bound so a finished run can put its route's next fire in the notification: the
     # Scheduler doesn't exist yet when JobService builds its deps (same reason
     # cancelled/cancel_power_off are wired this way).
