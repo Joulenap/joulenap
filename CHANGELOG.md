@@ -20,11 +20,10 @@ guest* reads "never" for every guest and the converted routes read "never run" â
 runs still listed underneath. Nothing has been lost: the caches fill in again per guest as runs
 happen, and the first run of each route restores its badge.
 
-**Two limitations worth knowing before you configure.** Joulenap reads the **root namespace** of a
+**One limitation worth knowing before you configure.** Joulenap reads the **root namespace** of a
 backup datastore, so if your Proxmox storage entry writes into a PBS namespace the backups, the
 retention and the garbage collection all work, but *Last backup per guest* reads "never" for those
-guests. And two datastores on one backup server are two devices with independent power leases, so
-consecutive routes across them can sleep and wake that machine once more than strictly necessary.
+guests.
 
 ### Added
 

@@ -67,11 +67,9 @@ and Prometheus, persistent datastore usage shown even while a server is powered 
 per-channel notification test report, and a responsive UI that works on a phone.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and API.
 
-**Known limitations.** Joulenap reads the **root namespace** of a PBS datastore: if your Proxmox
+**Known limitation.** Joulenap reads the **root namespace** of a PBS datastore: if your Proxmox
 storage entry writes into a namespace, backups, retention and garbage collection all work, but
-*Last backup per guest* reads "never" for those guests. And two datastores on one backup server are
-two devices, each with its own power lease, so consecutive routes across them can sleep and wake the
-machine once more than strictly needed.
+*Last backup per guest* reads "never" for those guests.
 
 **Upgrading from 0.9?** Your `config.yaml` is converted automatically on the first start — see
 [Upgrading](#upgrading-from-09) below before you pull.

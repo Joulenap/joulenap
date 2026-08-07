@@ -53,11 +53,11 @@ Cross-references are validated at load: ids are unique, every referenced device 
 
 **One run at a time.** A route firing while another run is in flight joins a FIFO queue rather than being dropped; the same route already queued or running is refused (`AlreadyQueued`). The queue key is the route id, or `pbs:<id>:gc` / `pbs:<id>:verify` for an ad-hoc maintenance run.
 
-**Each PBS a run needs is leased.** The lease is refcounted:
+**Each machine a run needs is leased.** The lease is refcounted, and keyed on the device's **host** rather than its id — power is physical, and an SSH poweroff takes down every PBS instance on the box, so two datastores on one machine share one lease and one power decision:
 
 - the first holder wakes the box (WoL, then poll until it answers) or finds it already awake — `wol_retries + 1` attempts, each waiting up to `wait_timeout`;
 - every holder releases when its run is done, and only the **last** release powers the box off;
-- a **sync** route takes two leases (source and target) and releases them independently.
+- a **sync** route between two machines takes two leases and releases them independently; between two datastores of one machine it takes one, so the timeline shows a single wake and a single power-off.
 
 The release records a `poweroff` step whose detail says what actually happened:
 
