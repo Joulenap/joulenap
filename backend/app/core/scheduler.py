@@ -16,10 +16,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from ..config import Config, Route
 from ..db.models import RunTrigger
 from ..jobs import AlreadyRunningError
+from . import heartbeat
 
 log = logging.getLogger("joulenap.scheduler")
 
@@ -49,6 +51,7 @@ def resolve_timezone(name: str | None = None) -> tzinfo:
 #: touching the prune job (which is not config-driven).
 ROUTE_JOB_PREFIX = "route:"
 PRUNE_JOB_ID = "history-prune"
+HEARTBEAT_JOB_ID = "heartbeat"
 # History pruning is cheap and time-insensitive; run it once a day, off the hour, so it
 # doesn't pile onto the typical early-morning backup window.
 PRUNE_HOUR, PRUNE_MINUTE = 3, 30
@@ -213,6 +216,20 @@ class Scheduler:
             max_instances=1,
         )
         log.info("Armed history-prune job (daily at %02d:%02d)", PRUNE_HOUR, PRUNE_MINUTE)
+
+    def arm_heartbeat(self) -> None:
+        """Arm the liveness stamp. Not config-driven and not re-armed by ``rearm``: it carries
+        no timezone (a plain interval), and it must keep running with the kill-switch off —
+        the app being up is exactly what it records."""
+        self._scheduler.add_job(
+            heartbeat.touch,
+            IntervalTrigger(seconds=heartbeat.INTERVAL_SECONDS),
+            id=HEARTBEAT_JOB_ID,
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
+        log.info("Armed liveness heartbeat (every %ds)", heartbeat.INTERVAL_SECONDS)
 
     # --- firing --------------------------------------------------------------
 

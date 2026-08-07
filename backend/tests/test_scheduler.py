@@ -10,6 +10,7 @@ from conftest import with_devices
 
 from app.config import Config
 from app.core.scheduler import (
+    HEARTBEAT_JOB_ID,
     PRUNE_JOB_ID,
     Scheduler,
     _build_trigger,
@@ -361,3 +362,22 @@ def test_missed_run_since_none_when_the_route_is_not_armed():
     anchor = datetime(2026, 7, 8, 2, 0, 0, tzinfo=UTC)
     now = datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
     assert sched.missed_run_since("nightly", anchor, now) is None
+
+
+# --- liveness heartbeat (G3-6) ------------------------------------------------
+
+
+def test_arm_heartbeat_adds_an_interval_job():
+    sched = Scheduler(lambda _id, _t: None)
+    sched.arm_heartbeat()
+    job = sched._scheduler.get_job(HEARTBEAT_JOB_ID)
+    assert job is not None
+
+
+def test_the_heartbeat_survives_the_kill_switch():
+    # It records that the *app* is up, which is exactly as true with every route disabled —
+    # and a heartbeat that stopped there would make the next restart invent downtime.
+    sched = Scheduler(lambda _id, _t: None)
+    sched.arm_heartbeat()
+    sched.rearm(_config(scheduler_enabled=False))
+    assert sched._scheduler.get_job(HEARTBEAT_JOB_ID) is not None

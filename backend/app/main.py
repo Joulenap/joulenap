@@ -11,6 +11,7 @@ import os
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -23,6 +24,7 @@ from . import config as config_mod
 from .api import api_router
 from .api import metrics as metrics_api
 from .config import Config
+from .core import heartbeat
 from .core.config_store import ConfigStore
 from .core.ratelimit import LoginRateLimiter
 from .core.scheduler import Scheduler
@@ -101,8 +103,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         service.run_prune,
         timezone=store.config.app.timezone,
     )
+    # Read the previous run's liveness stamp BEFORE the heartbeat starts overwriting it —
+    # that gap is the only window in which a scheduled run can honestly be called missed.
+    last_seen = heartbeat.last_seen()
     scheduler.start()
     scheduler.rearm(store.config)  # arms the prune job too, so it needs no second call here
+    scheduler.arm_heartbeat()
     # Late-bound so a finished run can put its route's next fire in the notification: the
     # Scheduler doesn't exist yet when JobService builds its deps (same reason
     # cancelled/cancel_power_off are wired this way).
@@ -116,7 +122,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     startup_threads = [
         threading.Thread(
             target=_startup_missed_run_check,
-            args=(store.config, scheduler, app.state.notifier),
+            args=(store.config, scheduler, app.state.notifier, last_seen),
             daemon=True,
             name="missed-backup-check",
         )
@@ -137,6 +143,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         scheduler.shutdown()
+        # Stamp the exact moment we stopped: without it a clean restart leaves up to one
+        # heartbeat interval looking like downtime nobody was there for.
+        heartbeat.touch()
         # Both read the DB and/or send notifications, so shutdown waits for them instead of
         # abandoning a half-sent alert — and, in tests, instead of leaving a thread that
         # outlives its app and touches the *next* test's database.
@@ -150,12 +159,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def _startup_missed_run_check(
-    config: Config, scheduler: Scheduler, notifier: NotificationService
+    config: Config,
+    scheduler: Scheduler,
+    notifier: NotificationService,
+    last_seen: datetime | None,
 ) -> None:
     from .core.catchup import check_missed_runs
 
     try:
-        check_missed_runs(config, scheduler, notifier)
+        check_missed_runs(config, scheduler, notifier, last_seen=last_seen)
     except Exception:  # noqa: BLE001 - a startup safety net must never take the app down
         log.exception("missed-run startup check failed")
 

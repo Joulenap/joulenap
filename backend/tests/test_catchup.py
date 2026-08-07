@@ -50,6 +50,12 @@ def _add_run(
         session.add(run)
 
 
+#: Every case below is a genuine-downtime scenario, so the app is "last seen" before any of
+#: their runs — which makes the heartbeat clamp a no-op and leaves each assertion about the
+#: run history alone. The clamp itself has its own tests at the bottom.
+_DOWN_SINCE = datetime(2026, 7, 1, tzinfo=UTC)
+
+
 def _sched(cfg: Config) -> Scheduler:
     sched = Scheduler(lambda _id, _t: None, timezone="UTC")
     sched.rearm(cfg)
@@ -63,7 +69,7 @@ def test_notifies_when_a_scheduled_run_was_missed(temp_db):
     notifier = _RecordingNotifier()
     now = datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
 
-    reported = check_missed_runs(cfg, _sched(cfg), notifier, now=now)
+    reported = check_missed_runs(cfg, _sched(cfg), notifier, now=now, last_seen=_DOWN_SINCE)
 
     assert [(r.id, at) for r, at in reported] == [
         ("nightly", datetime(2026, 7, 9, 2, 0, 0, tzinfo=UTC))
@@ -84,7 +90,7 @@ def test_each_route_is_anchored_on_its_own_history(temp_db):
     notifier = _RecordingNotifier()
     now = datetime(2026, 7, 11, 3, 0, 0, tzinfo=UTC)
 
-    check_missed_runs(cfg, _sched(cfg), notifier, now=now)
+    check_missed_runs(cfg, _sched(cfg), notifier, now=now, last_seen=_DOWN_SINCE)
 
     assert [c[0] for c in notifier.calls] == ["nightly"]
 
@@ -95,7 +101,7 @@ def test_no_notification_when_no_slot_elapsed(temp_db):
     notifier = _RecordingNotifier()
     now = datetime(2026, 7, 11, 2, 0, 30, tzinfo=UTC)
 
-    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now) == []
+    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now, last_seen=_DOWN_SINCE) == []
     assert notifier.calls == []
 
 
@@ -105,7 +111,7 @@ def test_no_notification_for_a_route_that_never_ran(temp_db):
     notifier = _RecordingNotifier()
     now = datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
 
-    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now) == []
+    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now, last_seen=_DOWN_SINCE) == []
     assert notifier.calls == []
 
 
@@ -117,7 +123,7 @@ def test_an_aborted_last_run_anchors_and_is_not_reflagged(temp_db):
     notifier = _RecordingNotifier()
     now = datetime(2026, 7, 11, 6, 0, 0, tzinfo=UTC)
 
-    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now) == []
+    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now, last_seen=_DOWN_SINCE) == []
     assert notifier.calls == []
 
 
@@ -127,7 +133,7 @@ def test_nothing_is_reported_with_the_kill_switch_off(temp_db):
     notifier = _RecordingNotifier()
     now = datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
 
-    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now) == []
+    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now, last_seen=_DOWN_SINCE) == []
     assert notifier.calls == []
 
 
@@ -138,5 +144,72 @@ def test_a_disabled_route_is_never_reported(temp_db):
     notifier = _RecordingNotifier()
     now = datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
 
-    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now) == []
+    assert check_missed_runs(cfg, _sched(cfg), notifier, now=now, last_seen=_DOWN_SINCE) == []
+    assert notifier.calls == []
+
+
+# --- the downtime window (G3-6) ----------------------------------------------
+#
+# "A fire was due and no run happened" is not the same fact as "we were down". The check used
+# to treat them as one, and asserted "Joulenap was offline" about a process that had been
+# running the whole time.
+
+
+def test_a_fire_the_app_was_up_for_is_not_reported(temp_db):
+    """The reported bug: a schedule changed to a time-of-day earlier than now.
+
+    "nightly" last ran on the 8th and its 02:00 slot has come round three times since — but
+    the app was alive an hour ago, so it either ran them, or the schedule that says it should
+    have did not exist yet. Either way nobody was offline and there is nothing to report.
+    """
+    _add_run("nightly", datetime(2026, 7, 8, 2, 0, 0, tzinfo=UTC))
+    cfg = _config()
+    notifier = _RecordingNotifier()
+    now = datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
+
+    reported = check_missed_runs(
+        cfg,
+        _sched(cfg),
+        notifier,
+        now=now,
+        last_seen=datetime(2026, 7, 11, 9, 0, 0, tzinfo=UTC),
+    )
+
+    assert reported == []
+    assert notifier.calls == []
+
+
+def test_only_the_fires_inside_the_downtime_window_are_reported(temp_db):
+    # Down from the 10th at 03:00 to the 11th at 10:00: the 9th and the 10th's 02:00 slots
+    # were served by a running app, the 11th's was not.
+    _add_run("nightly", datetime(2026, 7, 8, 2, 0, 0, tzinfo=UTC))
+    cfg = _config()
+    notifier = _RecordingNotifier()
+
+    reported = check_missed_runs(
+        cfg,
+        _sched(cfg),
+        notifier,
+        now=datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC),
+        last_seen=datetime(2026, 7, 10, 3, 0, 0, tzinfo=UTC),
+    )
+
+    assert [at for _r, at in reported] == [datetime(2026, 7, 11, 2, 0, 0, tzinfo=UTC)]
+    # The message still shows the real last run, not the window's start.
+    assert notifier.calls[0][2] == datetime(2026, 7, 8, 2, 0, 0, tzinfo=UTC)
+
+
+def test_nothing_is_reported_when_liveness_is_unknown(temp_db, monkeypatch):
+    # First boot, or a data dir we cannot write: inventing downtime is exactly the failure
+    # this guard exists to prevent, so silence is the only honest answer.
+    _add_run("nightly", datetime(2026, 7, 8, 2, 0, 0, tzinfo=UTC))
+    monkeypatch.setattr("app.core.heartbeat.last_seen", lambda: None)
+    cfg = _config()
+    notifier = _RecordingNotifier()
+
+    reported = check_missed_runs(
+        cfg, _sched(cfg), notifier, now=datetime(2026, 7, 11, 10, 0, 0, tzinfo=UTC)
+    )
+
+    assert reported == []
     assert notifier.calls == []

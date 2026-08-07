@@ -56,6 +56,11 @@ def db_path() -> Path:
     return data_dir() / "joulenap.db"
 
 
+def heartbeat_path() -> Path:
+    """Path to the liveness stamp under the data dir — its mtime is the whole payload."""
+    return data_dir() / ".heartbeat"
+
+
 def known_hosts_path() -> Path:
     """Path to the SSH known_hosts file for the PBS power-off connection (under the data dir)."""
     return data_dir() / "known_hosts"

@@ -174,6 +174,12 @@ consecutive routes across them can sleep and wake that machine once more than st
 - **An interface translated into Italian had English gaps in it**, including a backup-mode dropdown
   under a translated label, a schedule that lost its preposition, and six counts that spelled their
   plural in English ("1 events").
+- **"A scheduled route did not run because Joulenap was offline" is now a fact rather than a
+  guess.** The startup check treated *a schedule slot that came round with no run in it* as proof of
+  downtime, so changing a route's schedule to earlier in the day — or disabling a route and
+  re-enabling it, or turning the kill-switch off and on — produced that alert about a slot the app
+  had been running for, and re-sent it on every restart until the route next ran. Joulenap now
+  records that it is alive, and only reports slots that fell while it demonstrably was not.
 - **A restart could throw away the alert it had just started sending.** The startup checks for a
   missed scheduled run and for a run an earlier restart interrupted send their notifications off the
   boot path, and shutting down did not wait for them — so stopping the container quickly after
