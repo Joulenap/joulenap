@@ -34,7 +34,9 @@ Pick the path that fits you:
   them), on a host that stays on. Wake-on-LAN is a layer-2 broadcast — it does **not** cross subnets
   or routers.
 - Keep the UI on your **LAN/VPN** and behind its login — it's not meant to face the internet.
-- It's tiny: **1 vCPU, 512 MB RAM, 1–2 GB disk** is plenty.
+- It's tiny: **1 vCPU, 512 MB RAM, 4 GB disk**. Joulenap itself needs almost nothing, but Docker and
+  the image take about 1.6 GB before it writes a byte, and an update pulls the new image before it
+  can drop the old one.
 
 You don't need to prepare API tokens or SSH keys by hand — the built-in **wizards** can create
 scoped tokens and install the poweroff SSH key for you (see [First run](#first-run)).
@@ -57,7 +59,7 @@ In the Proxmox VE web UI:
    - **Hostname**: e.g. `joulenap`
    - **Password / SSH key**: set a root password you'll use for the container console
    - **Template**: the debian-12-standard you just downloaded
-   - **Disk**: 2 GB · **Cores**: 1 · **Memory**: 512 MB
+   - **Disk**: 4 GB · **Cores**: 1 · **Memory**: 512 MB
    - **Network**: bridge the LXC onto the **same VLAN/subnet as your PBS**, with an IPv4 address
      (DHCP is fine). This is the most important setting — if Joulenap can't broadcast onto the PBS's
      network, it can never wake it.
