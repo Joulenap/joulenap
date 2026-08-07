@@ -129,13 +129,13 @@ schedule, guest selection and retention come across with them.
   Grafana alerts built on 0.9 need updating — the field-by-field mapping is at the top of
   [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
-### Going back to 0.9
+<details>
+<summary><b>Going back to 0.9</b> — the config rolls back on its own, the database needs one step</summary>
 
-The config rolls back on its own; the database needs one extra step. 1.0 widened the two *cache*
-tables (`guest_backups`, `datastore_stats`) with columns 0.9 never writes, so 0.9 left on a 1.0
-database logs a cache warning after every backup and, worse, returns a **500 from the dashboard
-whenever a backup server is awake**. Dropping the two caches fixes it and keeps your run history —
-both versions rebuild them from the backup server:
+1.0 widened the two *cache* tables (`guest_backups`, `datastore_stats`) with columns 0.9 never
+writes, so 0.9 left on a 1.0 database logs a cache warning after every backup and, worse, returns a
+**500 from the dashboard whenever a backup server is awake**. Dropping the two caches fixes it and
+keeps your run history — both versions rebuild them from the backup server:
 
 ```bash
 docker rm -f joulenap
@@ -155,6 +155,8 @@ than coming up empty.
 
 **0.9 gets no fixes, including security fixes** ([`SECURITY.md`](SECURITY.md)). This is a way to
 buy an evening, not a place to stay — please open an issue for whatever sent you back.
+
+</details>
 
 ## Security
 
