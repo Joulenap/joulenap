@@ -103,7 +103,8 @@ consecutive routes across them can sleep and wake that machine once more than st
   hold a snapshot of it. Collapsing newest-per-vmid across every host would have shown the wrong
   host's backup date once a second one existed.
 - **Notifications name the route** and no longer describe every missed run as a missed backup. A run
-  that fails reports its error translated, in the interface as well as in the notification.
+  that fails reports its error translated, in the interface as well as in the notification. A garbage
+  collection or verification started by hand has no route, so it names the backup server instead.
 
 ### Removed
 

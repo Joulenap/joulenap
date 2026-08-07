@@ -671,6 +671,19 @@ def test_the_interrupted_step_detail_matches_the_catalogue():
     assert _INTERRUPTED_STEP == _DETAILS["en"]["interrupted"]
 
 
+def test_ad_hoc_maintenance_names_the_pbs_it_ran_on():
+    """An ad-hoc GC/verify has no route, so nothing else in the body says *which* backup
+    server it touched — with several configured, the title alone is ambiguous."""
+    cfg = Config()
+    run = _run(RunStatus.SUCCESS, kind=RunKind.GC)
+    _, body = build_run_message(RunContext(config=cfg, run=run, pbs_id="pbs-02"))
+    assert "PBS: pbs-02" in body
+    # A route run keeps naming the route instead: its name already identifies the box.
+    _, body = build_run_message(RunContext(config=cfg, run=run, route=_route(), pbs_id="pbs-02"))
+    assert "PBS: pbs-02" not in body
+    assert "Route: Nightly" in body
+
+
 def test_error_keys_are_rendered_in_the_configured_language():
     cfg = Config()
     cfg.app.language = "it"

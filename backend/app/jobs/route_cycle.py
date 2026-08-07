@@ -270,6 +270,8 @@ def _run_body(
     route: Route | None,
     recorder: RunRecorder,
     body: Callable[[], DatastoreStatus | None],
+    *,
+    pbs_id: str | None = None,
 ) -> RunContext | None:
     """Run a single-target body under the shared failure policy.
 
@@ -293,7 +295,9 @@ def _run_body(
     except Exception as exc:  # connector/task failures: the lease leaves the PBS on
         recorder.finish(RunStatus.FAILURE, error=exc)
 
-    return RunContext(config=config, run=recorder.run, route=route, datastore=datastore)
+    return RunContext(
+        config=config, run=recorder.run, route=route, datastore=datastore, pbs_id=pbs_id
+    )
 
 
 def _simple_body(
@@ -353,4 +357,5 @@ def run_pbs_maintenance(
             raise CycleAbort("unsupported_action", action=action)
         return _route_read_datastore(pbs, recorder, deps)
 
-    return _run_body(config, None, recorder, body)
+    # No route to name the box, so the notification gets it from here.
+    return _run_body(config, None, recorder, body, pbs_id=pbs.id)

@@ -56,6 +56,10 @@ class RunContext:
     #: The route this run belongs to, if any — an ad-hoc PBS GC/verify has none. Carries
     #: the per-route ``notify`` filter and names the route in the body.
     route: Route | None = None
+    #: The PBS an ad-hoc GC/verify ran on, named in the body in the route line's place: with
+    #: several backup servers, "garbage collection succeeded" alone doesn't say on which one.
+    #: A route run leaves this unset — its name already identifies the box.
+    pbs_id: str | None = None
     datastore: DatastoreStatus | None = None
     guests: GuestSummary | None = None
     #: When this route next fires, for the "Next scheduled run" line.
@@ -115,6 +119,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
         },
         "_labels": {
             "route": "Route",
+            "pbs": "PBS",
             "trigger": "Trigger",
             "trigger_scheduled": "scheduled",
             "trigger_manual": "manual",
@@ -182,6 +187,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
         },
         "_labels": {
             "route": "Route",
+            "pbs": "PBS",
             "trigger": "Avvio",
             "trigger_scheduled": "pianificato",
             "trigger_manual": "manuale",
@@ -569,6 +575,8 @@ def build_run_message(ctx: RunContext) -> tuple[str, str]:
         # string in a push notification is noise on every channel that could render it.
         name = ctx.route.name or ctx.route.id
         lines.append(f"{labels['route']}: {name} ({_kind_label(config, ctx.route)})")
+    elif ctx.pbs_id:
+        lines.append(f"{labels['pbs']}: {ctx.pbs_id}")
     lines.append(f"{labels['trigger']}: {labels.get(f'trigger_{run.trigger}', run.trigger)}")
     datastore, guests, next_at = ctx.datastore, ctx.guests, ctx.next_at
     if run.started_at and run.finished_at:
