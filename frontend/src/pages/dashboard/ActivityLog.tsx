@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import type { LogLine } from '../../api/types'
 import { c, mono } from '../../theme'
-import { fmtClock } from '../../utils/format'
+import { fmtShort } from '../../utils/format'
 
 export const LEVELS: Record<string, { color: string; bg: string }> = {
   INFO: { color: c.info, bg: 'rgba(138,166,192,.13)' },
@@ -11,7 +11,7 @@ export const LEVELS: Record<string, { color: string; bg: string }> = {
 }
 
 export const colHead: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: 11,
   fontWeight: 600,
   letterSpacing: '.06em',
   textTransform: 'uppercase',
@@ -36,7 +36,7 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
       </div>
       <div className="jn-log-list">
         {logs.length === 0 && (
-          <div style={{ padding: '14px 18px', fontSize: 13, color: c.textFaint }}>{t('dashboard.noLogs')}</div>
+          <div style={{ padding: '14px 18px', fontSize: 13.5, color: c.textFaint }}>{t('dashboard.noLogs')}</div>
         )}
         {logs.map((l) => {
           const lvl = LEVELS[l.level] ?? LEVELS.INFO
@@ -50,13 +50,16 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
                 borderBottom: `1px solid ${c.divider}`,
               }}
             >
-              <span style={{ fontFamily: mono, fontSize: 12, color: c.textFaint }}>{fmtClock(new Date(l.ts))}</span>
+              {/* Date + time, not time-of-day alone: the log spans days, and "which night
+                  did GC fail" is the question it answers. Same format family as the
+                  history table. */}
+              <span style={{ fontFamily: mono, fontSize: 12.5, color: c.textFaint }}>{fmtShort(new Date(l.ts))}</span>
               <span>
                 <span
                   style={{
                     display: 'inline-block',
                     fontFamily: mono,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: 600,
                     padding: '2px 7px',
                     borderRadius: 5,
@@ -67,7 +70,7 @@ export function ActivityLog({ logs }: { logs: LogLine[] }) {
                   {l.level}
                 </span>
               </span>
-              <span style={{ fontSize: 13, color: c.textMid, minWidth: 0, overflowWrap: 'anywhere' }}>
+              <span style={{ fontSize: 13.5, color: c.textMid, minWidth: 0, overflowWrap: 'anywhere' }}>
                 {l.message}
               </span>
             </div>

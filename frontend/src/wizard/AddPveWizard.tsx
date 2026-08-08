@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../api/client'
 import { ConfirmModal, type ConfirmState } from '../components/ConfirmModal'
+import { useRevealBanner } from '../components/useRevealBanner'
 import type { PveConnectResult, WizardStorage } from '../api/types'
 import { useConfig } from '../config/ConfigContext'
 import type { DeviceError } from '../utils/deviceForm'
@@ -298,6 +299,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
   }
 
   const banners = (errors ?? []).filter((e) => !e.field)
+  useRevealBanner(Boolean(failed || setup.error || banners.length))
   const nodes = connected?.nodes ?? []
 
   return (

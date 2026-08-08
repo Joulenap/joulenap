@@ -69,6 +69,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
         >
           {p.busy ? (
             <div
+              className="jn-spin"
               style={{
                 width: 13,
                 height: 13,
@@ -83,7 +84,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
               style={{ width: 9, height: 9, borderRadius: '50%', background: color, boxShadow: `0 0 0 3px ${tint(color, 13)}` }}
             />
           )}
-          <span style={{ fontSize: 13, fontWeight: 600 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600 }}>
             {t(p.labelKey, {
               route: p.route,
               when: p.nextAt ? fmtDT(new Date(p.nextAt)) : '',
@@ -91,7 +92,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
           </span>
         </div>
 
-        <div style={{ fontFamily: mono, fontSize: 15, fontWeight: 500, color: c.textMid, minWidth: 78, textAlign: 'right' }}>
+        <div style={{ fontFamily: mono, fontSize: 16, fontWeight: 500, color: c.textMid, minWidth: 78, textAlign: 'right' }}>
           {fmtClock(now)}
         </div>
       </div>
@@ -99,7 +100,8 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
       <div className="jn-header-actions">
         <button
           onClick={onToggleView}
-          title={t('header.settings')}
+          title={view === 'settings' ? t('header.backToDashboard') : t('header.settings')}
+          aria-label={view === 'settings' ? t('header.backToDashboard') : t('header.settings')}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -109,7 +111,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
             borderRadius: 8,
             padding: '8px 12px',
             color: c.textMid,
-            fontSize: 15,
+            fontSize: 16,
             fontWeight: 600,
             cursor: 'pointer',
           }}
@@ -129,7 +131,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
             border: `1px solid ${c.inputBorder}`,
             borderRadius: 8,
             padding: '8px 12px',
-            fontSize: 15,
+            fontSize: 16,
             fontWeight: 600,
             cursor: 'pointer',
           }}
@@ -148,7 +150,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
             borderRadius: 8,
             color: c.textMid,
             cursor: 'pointer',
-            fontSize: 13,
+            fontSize: 13.5,
             padding: '8px 12px',
             fontWeight: 600,
           }}

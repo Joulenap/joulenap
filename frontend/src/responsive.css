@@ -57,11 +57,11 @@
 /* Activity log */
 .jn-log-head {
   display: grid;
-  grid-template-columns: 84px 96px 1fr;
+  grid-template-columns: 100px 96px 1fr;
 }
 .jn-log-row {
   display: grid;
-  grid-template-columns: 84px 96px 1fr;
+  grid-template-columns: 100px 96px 1fr;
 }
 /* 60 events is a tall page; scroll them. 12 rows of 34.5px (7+7 padding + 13px text at
    the shell's 1.5 line-height + 1px divider) — keep in step if the row padding changes. */
@@ -112,7 +112,7 @@
     display: none;
   }
   .jn-log-row {
-    grid-template-columns: 60px 1fr;
+    grid-template-columns: 84px 1fr;
     row-gap: 4px;
   }
   .jn-log-row > :nth-child(3) {

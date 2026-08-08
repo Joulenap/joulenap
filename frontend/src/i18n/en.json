@@ -45,7 +45,8 @@
     "settings": "Settings",
     "theme": "Theme",
     "logout": "Logout",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "backToDashboard": "Back to dashboard"
   },
   "status": {
     "running": "Backup running",
@@ -130,7 +131,6 @@
     "backupMap": "Backup map",
     "colPve": "Proxmox VE",
     "colPbs": "Proxmox Backup Server",
-    "routePaused": "paused",
     "pveCluster_one": "Cluster · {{nodes}} nodes · {{count}} guest",
     "pveCluster_other": "Cluster · {{nodes}} nodes · {{count}} guests",
     "pveStandalone_one": "Standalone · {{count}} guest",
@@ -257,7 +257,9 @@
       "keepYearly": "Keep yearly",
       "guestIncludeLabel": "Include {{name}} (VMID {{vmid}})"
     },
-    "routeEnabledLabel": "Route {{name}} enabled"
+    "routeEnabledLabel": "Route {{name}} enabled",
+    "title": "Dashboard",
+    "routeIdle": "no run scheduled"
   },
   "wizard": {
     "pve": {

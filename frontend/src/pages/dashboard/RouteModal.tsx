@@ -5,6 +5,7 @@ import type { PbsDevice, PveDevice, Route } from '../../api/types'
 import { ConfirmModal, type ConfirmState } from '../../components/ConfirmModal'
 import { Modal } from '../../components/Modal'
 import { Toggle } from '../../components/Toggle'
+import { useRevealBanner } from '../../components/useRevealBanner'
 import { useRegisterDirty, useUnsavedGuard } from '../../shell/UnsavedGuard'
 import { guestTypeLabel, type PveGuests } from '../../utils/guestPanel'
 import { deviceId, pbsNodeId, pveNodeId, routeKindBadge } from '../../utils/routes'
@@ -71,6 +72,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
   const { t } = useTranslation()
   const { guard } = useUnsavedGuard()
   const initial = useRef(draftFromRoute(route, pbss))
+  const nameRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState<RouteDraft>(initial.current)
   // Nothing is flagged until the first Save: complaining that a brand-new form has no name is
   // noise. After that the client-side rules re-run on every keystroke, so a fix clears its own
@@ -105,6 +107,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
 
   const errorsFor = (field: RouteField) => errors.filter((e) => e.field === field)
   const formErrors = errors.filter((e) => !e.field)
+  useRevealBanner(formErrors.length > 0)
   const text = (e: FieldError) => e.message ?? t(e.key ?? '', e.params ?? {})
 
   // Keyed `pve:<id>` / `pbs:<id>`: a PVE and a PBS may share an id, and a bare one made the
@@ -188,6 +191,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
         }
         onClose={close}
         footer={footer}
+        initialFocusRef={nameRef}
       >
         <div className="rm-bd">
           {formErrors.length > 0 && (
@@ -204,6 +208,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
               <label htmlFor="rm-name">{t('dashboard.routeModal.name')}</label>
               <input
                 id="rm-name"
+                ref={nameRef}
                 type="text"
                 autoComplete="off"
                 value={draft.name}

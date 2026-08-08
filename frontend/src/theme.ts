@@ -19,6 +19,7 @@ export const c = {
   textMuted: 'var(--jn-text-muted)',
   accent: 'var(--jn-accent)',
   accentHover: 'var(--jn-accent-hover)',
+  accentText: 'var(--jn-accent-text)',
   accentInk: 'var(--jn-accent-ink)',
   green: 'var(--jn-green)',
   red: 'var(--jn-red)',
@@ -71,7 +72,7 @@ export const mono = "'IBM Plex Mono', monospace"
 // Uppercase field-label style used throughout the design.
 export const labelStyle: React.CSSProperties = {
   display: 'block',
-  fontSize: 10,
+  fontSize: 11,
   fontWeight: 600,
   letterSpacing: '.08em',
   textTransform: 'uppercase',
@@ -87,7 +88,7 @@ export const inputStyle: React.CSSProperties = {
   color: c.text,
   padding: '10px 12px',
   fontFamily: "'IBM Plex Sans', sans-serif",
-  fontSize: 14,
+  fontSize: 13.5,
 }
 
 export const primaryBtn: React.CSSProperties = {
@@ -100,7 +101,7 @@ export const primaryBtn: React.CSSProperties = {
   border: 'none',
   borderRadius: 8,
   padding: '11px',
-  fontSize: 13,
+  fontSize: 13.5,
   fontWeight: 600,
   cursor: 'pointer',
 }
@@ -115,7 +116,7 @@ export const ghostBtn: React.CSSProperties = {
   border: `1px solid ${c.ghostBorder}`,
   borderRadius: 8,
   padding: '11px',
-  fontSize: 13,
+  fontSize: 13.5,
   fontWeight: 600,
   cursor: 'pointer',
 }

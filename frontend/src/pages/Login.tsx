@@ -89,13 +89,13 @@ export function Login() {
             padding: 26,
           }}
         >
-          <span style={{ display: 'block', fontSize: 17, fontWeight: 700, marginBottom: 5 }}>
+          <span style={{ display: 'block', fontSize: 16, fontWeight: 700, marginBottom: 5 }}>
             {register ? t('auth.registerTitle') : t('auth.signInTitle')}
           </span>
           <span
             style={{
               display: 'block',
-              fontSize: 13,
+              fontSize: 13.5,
               color: c.textDim,
               lineHeight: 1.5,
               marginBottom: 22,
@@ -116,7 +116,7 @@ export function Login() {
                   borderRadius: 7,
                   padding: '9px 12px',
                   marginBottom: 14,
-                  fontSize: 12,
+                  fontSize: 12.5,
                   color: c.textMid,
                 }}
               >
@@ -199,7 +199,7 @@ export function Login() {
                   borderRadius: 7,
                   padding: '9px 12px',
                   marginBottom: 14,
-                  fontSize: 12,
+                  fontSize: 12.5,
                   color: c.red,
                 }}
               >
@@ -210,7 +210,7 @@ export function Login() {
             <button
               type="submit"
               disabled={busy}
-              style={{ ...primaryBtn, width: '100%', padding: 12, marginTop: 6, fontSize: 14 }}
+              style={{ ...primaryBtn, width: '100%', padding: 12, marginTop: 6, fontSize: 13.5 }}
             >
               {busy
                 ? t('common.loading')

@@ -255,7 +255,7 @@ function LegendPill({
           ? t('dashboard.runRunning')
           : next
             ? fmtDT(new Date(next.at))
-            : t('dashboard.routePaused')}
+            : t('dashboard.routeIdle')}
       </span>
     </span>
   )

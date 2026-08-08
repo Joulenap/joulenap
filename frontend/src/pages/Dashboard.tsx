@@ -138,6 +138,7 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
 
   return (
     <div className="jn-home">
+      <h1 className="sr-only">{t('dashboard.title')}</h1>
       {actionError && (
         <div className="form-banner" role="alert">
           {actionError}

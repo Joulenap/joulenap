@@ -7,7 +7,7 @@ import { ConfigProvider, useConfig } from '../config/ConfigContext'
 import { Dashboard } from '../pages/Dashboard'
 import { Settings, type Tab } from '../pages/Settings'
 import { useStatus } from '../hooks/useStatus'
-import { c } from '../theme'
+import { c, tint } from '../theme'
 import { AddPveWizard } from '../wizard/AddPveWizard'
 import { Header } from './Header'
 import { UnsavedGuardProvider, useUnsavedGuard } from './UnsavedGuard'
@@ -20,13 +20,13 @@ function Banner({ tone, children }: { tone: 'red' | 'amber'; children: ReactNode
   const red = tone === 'red'
   return (
     <div
-      role="status"
+      role={red ? 'alert' : 'status'}
       style={{
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        background: red ? 'rgba(229,103,91,.12)' : 'rgba(232,131,15,.1)',
-        border: `1px solid ${red ? c.red : 'rgba(232,131,15,.4)'}`,
+        background: red ? tint(c.red, 12) : tint(c.accent, 10),
+        border: `1px solid ${red ? c.red : tint(c.accent, 40)}`,
         borderRadius: 8,
         padding: '10px 14px',
         marginBottom: 12,
@@ -103,25 +103,27 @@ function ShellInner() {
         {status?.state === 'paused' && (
           <Banner tone="amber">⏸ {t('common.schedulerPaused')}</Banner>
         )}
-        {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-            <Spinner size={26} />
-          </div>
-        ) : view === 'main' ? (
-          <Dashboard status={status} refreshStatus={refresh} />
-        ) : (
-          <Settings
-            onClose={() => setView('main')}
-            initialTab={settingsTab}
-            status={status}
-            refreshStatus={refresh}
-          />
-        )}
+        <main>
+          {loading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+              <Spinner size={26} />
+            </div>
+          ) : view === 'main' ? (
+            <Dashboard status={status} refreshStatus={refresh} />
+          ) : (
+            <Settings
+              onClose={() => setView('main')}
+              initialTab={settingsTab}
+              status={status}
+              refreshStatus={refresh}
+            />
+          )}
+        </main>
         <footer
           style={{
             textAlign: 'center',
             marginTop: 28,
-            fontSize: 12,
+            fontSize: 12.5,
             color: c.textFaint,
           }}
         >
