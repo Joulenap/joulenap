@@ -44,7 +44,7 @@ export function runKindLabelKey(kind: string): string {
   }
 }
 
-export type PillTone = 'blue' | 'amber' | 'neutral'
+export type PillTone = 'blue' | 'amber' | 'neutral' | 'red' | 'green'
 
 export interface HeaderPill {
   labelKey: string
@@ -55,14 +55,20 @@ export interface HeaderPill {
   /** Raw ISO of the next fire, interpolated as `{{when}}`. Formatting is the caller's job:
    *  this module stays free of the locale-dependent formatters so it can be unit-tested. */
   nextAt?: string
+  /** Raw ISO of the last run's failure, interpolated as `{{when}}` like `nextAt`. */
+  failedAt?: string
 }
 
 /**
- * The header pill: what *Joulenap* is doing, not what a PBS is.
+ * The header pill: Joulenap's *health*, not just its activity.
  *
- * With N backup servers "on/off" is no longer a single fact, so the three states are
- * "running a route", "the kill-switch is off" and "idle, next run at <when>". Per-device
- * state lives in the topology instead.
+ * With N backup servers "on/off" is no longer a single fact, so the pill answers the
+ * question a glance actually asks — "is everything OK?": a run in flight, the kill-switch,
+ * a failed last run (red, named, timestamped), all OK (green, with the next fire), or a
+ * bare idle when there is no history to vouch for. Per-device state lives in the topology.
+ *
+ * An aborted run was a deliberate stop, not a failure, so it reads as plain idle rather
+ * than either red or green.
  *
  * `null` (first poll, or the backend gone) reads as a bare "Idle": the stale banner is what
  * tells the user something is wrong, and claiming "paused" would be a lie about the config.
@@ -77,9 +83,26 @@ export function headerPill(status: StatusResponse | null): HeaderPill {
       : { labelKey: runningLabelKey(running?.kind), tone: 'blue', busy: true }
   }
   if (status?.state === 'paused') return { labelKey: 'status.paused', tone: 'amber', busy: false }
+  const last = status?.last_run
+  if (last?.status === 'failure') {
+    const route = last.route_name || last.route_id
+    // finished_at is null when the app died mid-run; the start is the only timestamp left.
+    const failedAt = last.finished_at || last.started_at
+    return route
+      ? { labelKey: 'status.lastRunFailed', tone: 'red', busy: false, route, failedAt }
+      : { labelKey: 'status.lastRunFailedRun', tone: 'red', busy: false, failedAt }
+  }
+  const ok = last?.status === 'success'
   // next_runs arrives soonest-first, so [0] is the next thing that will happen.
   const next = status?.next_runs?.[0]
-  if (next) return { labelKey: 'status.idleNext', tone: 'neutral', busy: false, nextAt: next.at }
+  if (next)
+    return {
+      labelKey: ok ? 'status.okNext' : 'status.idleNext',
+      tone: ok ? 'green' : 'neutral',
+      busy: false,
+      nextAt: next.at,
+    }
+  if (ok) return { labelKey: 'status.ok', tone: 'green', busy: false }
   return { labelKey: 'status.idle', tone: 'neutral', busy: false }
 }
 

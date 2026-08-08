@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { GuestInfo } from '../api/types.ts'
-import { groupGuests, guestTypeLabel, pbsChip } from './guestPanel.ts'
+import { countNeverBacked, groupGuests, guestTypeLabel, pbsChip } from './guestPanel.ts'
 
 const guest = (vmid: number, name: string, type = 'qemu'): GuestInfo => ({
   vmid,
@@ -76,4 +76,20 @@ test('one copy shows the bare id, several show an overflow count', () => {
 
 test('a guest that has never been backed up gets no chip', () => {
   assert.equal(pbsChip([]), null)
+})
+
+test('countNeverBacked counts unprotected guests, skipping unreachable PVEs', () => {
+  const groups = [
+    {
+      pve: 'pve-alpha',
+      guests: [
+        guest(100, 'web-proxy'),
+        { ...guest(101, 'db'), last_backup: '2026-08-07T02:00:00Z' },
+      ],
+    },
+    // Unknown is not unprotected: an unreachable PVE must not inflate the warning.
+    { pve: 'pve-beta', guests: [guest(200, 'ghost')], error: true },
+  ]
+  assert.equal(countNeverBacked(groups), 1)
+  assert.equal(countNeverBacked([]), 0)
 })

@@ -174,7 +174,9 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
       <button type="button" className="btn" onClick={close}>
         {t('common.cancel')}
       </button>
-      <button type="button" className="btn btn-accent" disabled={saving} onClick={save}>
+      {/* Lives in the modal footer, outside the form element — `form=` ties it back so
+          both a click here and Enter in any field run the same submit path. */}
+      <button type="submit" form="rm-form" className="btn btn-accent" disabled={saving}>
         {t('dashboard.routeModal.save')}
       </button>
     </>
@@ -193,7 +195,16 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
         footer={footer}
         initialFocusRef={nameRef}
       >
-        <div className="rm-bd">
+        <form
+          id="rm-form"
+          className="rm-bd"
+          // Every non-submit button in here is type="button", so Enter in a text or number
+          // field is the only implicit submitter — and it means Save.
+          onSubmit={(e) => {
+            e.preventDefault()
+            save()
+          }}
+        >
           {formErrors.length > 0 && (
             <div className="form-banner" role="alert">
               {formErrors.map((e, i) => (
@@ -353,7 +364,11 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                 <>
                   {draft.sourceIds.map((id, i) => (
                     <Fragment key={id}>
-                      {i > 0 && <span className="arrow">+</span>}
+                      {i > 0 && (
+                        <span className="arrow" aria-hidden="true">
+                          +
+                        </span>
+                      )}
                       {/* The draft holds kind-prefixed keys so a PVE and a PBS can share
                           an id; the preview shows the device, not the key. */}
                       <span className="chip-s">{deviceId(id)}</span>
@@ -672,7 +687,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
               )}
             </details>
           )}
-        </div>
+        </form>
       </Modal>
       <ConfirmModal state={confirm} onCancel={() => setConfirm(null)} />
     </>

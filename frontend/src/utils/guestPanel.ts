@@ -47,6 +47,22 @@ function matches(g: GuestInfo, q: string): boolean {
   )
 }
 
+/**
+ * Guests with no backup at all, across every reachable PVE.
+ *
+ * Counted over the *unfiltered* groups: an unprotected guest must not vanish from the
+ * warning because the search box currently hides it. Unreachable PVEs contribute nothing —
+ * their guests are unknown, not unprotected.
+ */
+export function countNeverBacked(groups: PveGuests[]): number {
+  let n = 0
+  for (const group of groups) {
+    if (group.error) continue
+    for (const g of group.guests) if (!g.last_backup) n++
+  }
+  return n
+}
+
 /** `qemu`/`lxc` as the badge reads them. Anything else is shown verbatim, uppercased. */
 export function guestTypeLabel(type: string): string {
   if (type === 'qemu') return 'VM'

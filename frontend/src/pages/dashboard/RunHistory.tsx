@@ -134,20 +134,26 @@ function HistoryRow({
   const ms = runDurationMs(run)
 
   return (
-    <tr
-      className={`hrow x${open ? ' open' : ''}`}
-      tabIndex={0}
-      aria-expanded={open}
-      onClick={onToggle}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onToggle()
-        }
-      }}
-    >
+    // The whole row stays clickable for pointer users, but the *widget* is the button in the
+    // first cell: `aria-expanded` on a bare <tr> is unreliable across screen readers, and a
+    // focusable non-widget row was an unlabeled tab stop.
+    <tr className={`hrow x${open ? ' open' : ''}`} onClick={onToggle}>
       <td>
-        <span className="xbtn">▶</span>
+        <button
+          type="button"
+          className="xbtn"
+          aria-expanded={open}
+          aria-label={t('dashboard.runDetails', {
+            name: run.route_name || t('dashboard.adhocRun'),
+          })}
+          onClick={(e) => {
+            // The row's own onClick would fire too and immediately toggle back.
+            e.stopPropagation()
+            onToggle()
+          }}
+        >
+          ▶
+        </button>
         {/* A deleted route leaves its name denormalised on the row, but no colour — the dot
             falls back to a neutral one rather than disappearing and shifting the column. */}
         <span className="rdot" style={{ background: route?.color ?? 'var(--jn-text-muted)' }} />

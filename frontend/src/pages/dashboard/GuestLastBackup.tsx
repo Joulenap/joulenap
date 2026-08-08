@@ -1,7 +1,13 @@
 import { Fragment, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fmtDT } from '../../utils/format'
-import { groupGuests, guestTypeLabel, pbsChip, type PveGuests } from '../../utils/guestPanel'
+import {
+  countNeverBacked,
+  groupGuests,
+  guestTypeLabel,
+  pbsChip,
+  type PveGuests,
+} from '../../utils/guestPanel'
 
 /**
  * "Last backup per guest" — read-only. Guest *selection* lives in the route modal now, so
@@ -15,11 +21,15 @@ export function GuestLastBackup({ groups, loaded }: { groups: PveGuests[]; loade
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const shown = groupGuests(groups, query)
+  const never = countNeverBacked(groups)
 
   return (
     <section className="panel">
       <div className="panel-hd">
         <h2>{t('dashboard.lastBackupTitle')}</h2>
+        {never > 0 && (
+          <span className="nwarn">{t('dashboard.neverBackedUp', { count: never })}</span>
+        )}
         <input
           className="gsearch"
           type="text"
@@ -55,7 +65,7 @@ export function GuestLastBackup({ groups, loaded }: { groups: PveGuests[]; loade
                       <span className="gname" title={g.name}>
                         {g.name}
                       </span>
-                      <span className="gwhen">
+                      <span className={`gwhen${g.last_backup ? '' : ' gnever'}`}>
                         {g.last_backup ? fmtDT(new Date(g.last_backup)) : t('dashboard.never')}
                       </span>
                       {chip && (

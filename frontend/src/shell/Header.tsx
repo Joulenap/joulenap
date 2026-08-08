@@ -16,7 +16,13 @@ interface HeaderProps {
 
 // The single-PBS host readout that used to sit beside the pill is gone for good: with N
 // backup servers it described nothing, and per-device state lives in the topology now.
-const TONE: Record<PillTone, string> = { blue: c.blue, amber: c.amber, neutral: c.textFaint }
+const TONE: Record<PillTone, string> = {
+  blue: c.blue,
+  amber: c.amber,
+  neutral: c.textFaint,
+  red: c.red,
+  green: c.green,
+}
 
 export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
   const { t } = useTranslation()
@@ -24,6 +30,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
   const now = useClock()
   const p = headerPill(status)
   const color = TONE[p.tone]
+  const whenIso = p.nextAt ?? p.failedAt
   const [theme, setTheme] = useState(currentTheme())
 
   const onToggleTheme = () => {
@@ -87,7 +94,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
           <span style={{ fontSize: 13.5, fontWeight: 600 }}>
             {t(p.labelKey, {
               route: p.route,
-              when: p.nextAt ? fmtDT(new Date(p.nextAt)) : '',
+              when: whenIso ? fmtDT(new Date(whenIso)) : '',
             })}
           </span>
         </div>

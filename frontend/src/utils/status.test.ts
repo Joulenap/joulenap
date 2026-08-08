@@ -91,6 +91,93 @@ test('headerPill shows the soonest next run when idle, and nothing to show witho
   assert.equal(headerPill(status({})).labelKey, 'status.idle')
 })
 
+const lastRun = (over: Partial<StatusResponse['last_run'] & object>) => ({
+  id: 41,
+  kind: 'cycle',
+  trigger: 'schedule',
+  status: 'success',
+  started_at: '2026-08-08T00:00:00Z',
+  finished_at: '2026-08-08T00:30:00Z',
+  route_id: 'nightly',
+  route_name: 'Nightly',
+  guests_ok: 5,
+  error: null,
+  ...over,
+})
+
+test('headerPill goes red when the last finished run failed, naming route and time', () => {
+  const p = headerPill(status({ last_run: lastRun({ status: 'failure' }) }))
+  assert.deepEqual(p, {
+    labelKey: 'status.lastRunFailed',
+    tone: 'red',
+    busy: false,
+    route: 'Nightly',
+    failedAt: '2026-08-08T00:30:00Z',
+  })
+})
+
+test('headerPill red state falls back to the start time and to the routeless key', () => {
+  // The app died mid-run: finished_at never landed, started_at is the only timestamp.
+  const crashed = headerPill(
+    status({ last_run: lastRun({ status: 'failure', finished_at: null }) }),
+  )
+  assert.equal(crashed.failedAt, '2026-08-08T00:00:00Z')
+  // An ad-hoc GC has no route to name.
+  const adhoc = headerPill(
+    status({ last_run: lastRun({ status: 'failure', route_id: null, route_name: null }) }),
+  )
+  assert.equal(adhoc.labelKey, 'status.lastRunFailedRun')
+  assert.equal(adhoc.route, undefined)
+})
+
+test('headerPill goes green when the last run succeeded', () => {
+  const p = headerPill(
+    status({
+      last_run: lastRun({}),
+      next_runs: [{ route_id: 'lab', route_name: 'Lab', at: '2026-08-09T04:00:00Z' }],
+    }),
+  )
+  assert.deepEqual(p, {
+    labelKey: 'status.okNext',
+    tone: 'green',
+    busy: false,
+    nextAt: '2026-08-09T04:00:00Z',
+  })
+  assert.deepEqual(headerPill(status({ last_run: lastRun({}) })), {
+    labelKey: 'status.ok',
+    tone: 'green',
+    busy: false,
+  })
+})
+
+test('headerPill treats an aborted run as plain idle — a deliberate stop is not a failure', () => {
+  assert.equal(
+    headerPill(status({ last_run: lastRun({ status: 'aborted' }) })).labelKey,
+    'status.idle',
+  )
+})
+
+test('headerPill lets running and paused win over a failed last run', () => {
+  const failed = lastRun({ status: 'failure' })
+  assert.equal(
+    headerPill(
+      status({
+        state: 'running',
+        last_run: failed,
+        running: {
+          run_id: 9,
+          kind: 'cycle',
+          started_at: '2026-08-08T02:00:00Z',
+          route_id: 'lab',
+          route_name: 'Lab',
+        },
+      }),
+    ).tone,
+    'blue',
+  )
+  assert.equal(headerPill(status({ state: 'paused', last_run: failed })).tone, 'amber')
+})
+
 test('headerPill reads a missing status as idle, never as paused', () => {
   // First poll, or the backend gone: the stale banner says so — the pill must not claim the
   // scheduler is off, which is a statement about the config.

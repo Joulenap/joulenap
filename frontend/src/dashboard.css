@@ -117,42 +117,6 @@
 }
 
 /* ---- Topology (hero) --------------------------------------------------------- */
-.rlegend {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.rpill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--jn-panel-alt);
-  border: 1px solid var(--jn-border);
-  border-radius: 999px;
-  padding: 4px 12px 4px 9px;
-  font-size: 12.5px;
-  cursor: default;
-  color: var(--jn-text-mid);
-  font-family: inherit;
-}
-.rpill:hover {
-  border-color: var(--jn-ghost-border);
-}
-.rpill .rdot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
-}
-.rpill .rwhen {
-  color: var(--jn-text-faint);
-  font-size: 12.5px;
-}
-.rpill .rwhen.run {
-  color: var(--jn-accent-text);
-  font-weight: 600;
-}
-
 .diagram-scroll {
   overflow-x: auto;
 }
@@ -259,6 +223,16 @@
   gap: 6px;
   font-size: 12.5px;
   margin-top: 6px;
+}
+/* GC/verify on the card they act on; compact so the card stays a card, not a toolbar. */
+.dev-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+}
+.dev-actions .btn {
+  padding: 3px 10px;
+  font-size: 12.5px;
 }
 .dot {
   width: 7px;
@@ -501,11 +475,6 @@
 }
 
 /* ---- Buttons (shared by the manual-run panel, the route strip and history) ---- */
-.man-btns {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
 .btn {
   background: var(--jn-btn-bg);
   border: 1px solid var(--jn-btn-border);
@@ -671,10 +640,15 @@
 .hrow.x:hover td {
   background: var(--jn-hover);
 }
+/* A real <button> since the a11y pass: the row's disclosure widget, not a glyph span. */
 .xbtn {
   display: inline-block;
   width: 14px;
   margin-right: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
   color: var(--jn-text-faint);
   font-size: 11px;
   transition: transform 0.15s ease;
@@ -836,6 +810,19 @@
   color: var(--jn-text-dim);
   flex: none;
   font-variant-numeric: tabular-nums;
+}
+/* A guest with no backup at all is the panel's alarm, not furniture. */
+.gwhen.gnever {
+  color: var(--jn-amber);
+  font-weight: 600;
+}
+.nwarn {
+  color: var(--jn-amber);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  /* Hug the title; the auto margin keeps the search box pinned to the right edge. */
+  margin-right: auto;
 }
 .pbschip {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
@@ -1435,14 +1422,38 @@ details.adv[open] summary::before {
   .wires {
     display: none;
   }
+
+  /* Touch targets. Two strategies: controls with room around them keep their size and grow
+     an invisible 44px hit area; controls in tight rows grow real padding instead, because
+     overlapping invisible areas next to each other would misfire. */
+  .pwr {
+    position: relative;
+  }
+  .pwr::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
+  }
+  .fchip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 14px;
+    min-height: 44px;
+  }
+  .fchips {
+    gap: 8px;
+  }
+  .route-right .btn,
+  .dev-actions .btn,
+  .drow-actions .btn {
+    padding: 11px 16px;
+  }
 }
 
 /* Keyboard focus, matching the mockup's single rule for every interactive element here. */
-.rpill:focus-visible,
 .fchip:focus-visible,
-.hrow:focus-visible,
+.xbtn:focus-visible,
 .pwr:focus-visible,
-.route-card:focus-visible,
 .chip:focus-visible,
 .swatch:focus-within,
 .day-btn:focus-visible,
