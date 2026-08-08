@@ -72,6 +72,16 @@ guests.
   column is empty.
 - **A route can be stopped and a `config.yaml` can be exported.** Stopping a run also stops the
   PVE/PBS task behind it and asks whether to power the server down.
+- **The header pill reports health, not just activity.** While nothing is running it answers the
+  morning-after question directly: green "All OK" with the next fire when the last run succeeded,
+  red with the route's name and the time when it failed. A run you stopped yourself reads as plain
+  idle — a deliberate stop is not a failure.
+- **Every action sits on the thing it acts on.** Each route card has its own Run button, and each
+  backup server card in the map has Run GC and Run verify; all three open a confirm dialog already
+  aimed at that route or box. The Manual run panel and its "which one?" dropdowns are gone, and
+  Upcoming runs uses the freed column to show about twice as much of the schedule.
+- **A guest that has never been backed up is called out** — highlighted in the guest list, with a
+  count in the panel header that a search filter cannot hide.
 
 ### Changed
 
@@ -108,6 +118,12 @@ guests.
 - **Notifications name the route** and no longer describe every missed run as a missed backup. A run
   that fails reports its error translated, in the interface as well as in the notification. A garbage
   collection or verification started by hand has no route, so it names the backup server instead.
+- **Contrast, focus and keyboard behavior were retuned across the interface.** Muted text meets
+  WCAG AA, input borders meet 3:1, keyboard focus is visible everywhere, dialogs start focused on
+  their first field, error banners scroll into view instead of appearing off-screen, Enter saves
+  the route editor, the language and timezone pickers are native selects, and a failed route
+  toggle reports why instead of silently snapping back. On phones the run history becomes cards,
+  the map stacks, and touch targets grow to 44px.
 
 ### Removed
 
