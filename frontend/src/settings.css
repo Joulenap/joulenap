@@ -44,7 +44,7 @@
   color: var(--jn-text);
 }
 .tab.on {
-  color: var(--jn-accent);
+  color: var(--jn-accent-text);
   border-bottom-color: var(--jn-accent);
 }
 .tab:focus-visible {
@@ -67,7 +67,7 @@
 /* dashboard.css scopes `.help` to `.field`, but Settings hangs explanatory lines directly off
    a panel body or a modal section too — same look, one rule less specific. */
 .help {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--jn-text-faint);
   line-height: 1.5;
 }
@@ -131,7 +131,7 @@
   white-space: nowrap;
 }
 .dev-badge {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -143,13 +143,13 @@
   flex: none;
 }
 .dev-host {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--jn-text-dim);
   margin-top: 3px;
   word-break: break-all;
 }
 .dev-meta {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--jn-text-faint);
   margin-top: 5px;
 }
@@ -157,7 +157,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 12.5px;
   margin: 8px 0 11px;
 }
 .dev-actions {
@@ -193,7 +193,7 @@
   flex: 1;
 }
 .chan-hint {
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--jn-text-faint);
 }
 .chan-fields {
@@ -221,7 +221,7 @@
   flex-wrap: wrap;
 }
 .save-row .help {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--jn-text-faint);
 }
 .save-row.bare {
@@ -229,11 +229,11 @@
   padding-top: 0;
 }
 .ok-note {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--jn-green);
 }
 .err-note {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--jn-red);
 }
 
@@ -244,7 +244,7 @@
   border-radius: 8px;
   padding: 12px 14px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.7;
   color: var(--jn-text-mid);
   overflow-x: auto;
@@ -319,7 +319,7 @@
 .jn-settings textarea {
   resize: vertical;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.6;
 }
 .jn-settings input:focus,

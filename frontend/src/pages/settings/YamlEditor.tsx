@@ -214,7 +214,7 @@ export function YamlEditor() {
         {err && (
           <pre
             role="alert"
-            style={{ fontSize: 12, color: c.red, fontFamily: mono, whiteSpace: 'pre-wrap', margin: 0 }}
+            style={{ fontSize: 12.5, color: c.red, fontFamily: mono, whiteSpace: 'pre-wrap', margin: 0 }}
           >
             {err}
           </pre>

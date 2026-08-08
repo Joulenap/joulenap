@@ -3,6 +3,7 @@ import { c, tint } from '../theme'
 export function Spinner({ size = 16, color = c.accent }: { size?: number; color?: string }) {
   return (
     <div
+      className="jn-spin"
       style={{
         width: size,
         height: size,

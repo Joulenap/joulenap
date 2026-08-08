@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PbsDevice, PveDevice, Route, StatusResponse } from '../../api/types'
-import { fmtBytesTB, fmtDT } from '../../utils/format'
+import { fmtBytesTB } from '../../utils/format'
 import type { PveGuests } from '../../utils/guestPanel'
 import {
   pbsNodeId,
@@ -49,8 +49,8 @@ interface TopologyProps {
   status: StatusResponse | null
   guests: PveGuests[]
   focus: string | null
-  onFocus: (routeId: string | null) => void
   onPower: (pbs: PbsDevice, online: boolean) => void
+  onMaintenance: (pbs: PbsDevice, kind: 'gc' | 'verify') => void
 }
 
 export function Topology({
@@ -60,8 +60,8 @@ export function Topology({
   status,
   guests,
   focus,
-  onFocus,
   onPower,
+  onMaintenance,
 }: TopologyProps) {
   const { t } = useTranslation()
   const diagramRef = useRef<HTMLDivElement | null>(null)
@@ -152,18 +152,10 @@ export function Topology({
 
   return (
     <section className="panel">
+      {/* No legend: the taller Upcoming runs rail carries every route's next fire, and the
+          route strip below carries the colors — repeating both here was noise. */}
       <div className="panel-hd">
         <h2>{t('dashboard.backupMap')}</h2>
-        <div className="rlegend">
-          {routes.map((route) => (
-            <LegendPill
-              key={route.id}
-              route={route}
-              status={status}
-              onFocus={onFocus}
-            />
-          ))}
-        </div>
       </div>
       <div className="panel-bd diagram-scroll">
         <div className="diagram" ref={diagramRef}>
@@ -218,46 +210,13 @@ export function Topology({
                 className={dimmed(pbsNodeId(pbs.id))}
                 setCard={setCard}
                 onPower={onPower}
+                onMaintenance={onMaintenance}
               />
             ))}
           </div>
         </div>
       </div>
     </section>
-  )
-}
-
-function LegendPill({
-  route,
-  status,
-  onFocus,
-}: {
-  route: Route
-  status: StatusResponse | null
-  onFocus: (id: string | null) => void
-}) {
-  const { t } = useTranslation()
-  const running = status?.running?.route_id === route.id
-  const next = status?.next_runs.find((n) => n.route_id === route.id)
-  return (
-    <span
-      className="rpill"
-      tabIndex={0}
-      onMouseEnter={() => onFocus(route.id)}
-      onMouseLeave={() => onFocus(null)}
-      onFocus={() => onFocus(route.id)}
-      onBlur={() => onFocus(null)}
-    >
-      <span className="rdot" style={{ background: route.color }} />
-      {route.name || route.id}
-      <span className={`rwhen${running ? ' run' : ''}`}>
-        {running
-          ? t('dashboard.runRunning')
-          : next
-            ? fmtDT(new Date(next.at))
-            : t('dashboard.routePaused')}
-      </span>
-    </span>
   )
 }
 
@@ -330,6 +289,7 @@ function PbsCard({
   className,
   setCard,
   onPower,
+  onMaintenance,
 }: {
   pbs: PbsDevice
   routes: Route[]
@@ -337,6 +297,7 @@ function PbsCard({
   className: string
   setCard: (key: string, el: HTMLElement | null) => void
   onPower: (pbs: PbsDevice, online: boolean) => void
+  onMaintenance: (pbs: PbsDevice, kind: 'gc' | 'verify') => void
 }) {
   const { t } = useTranslation()
   const state = status?.pbss.find((p) => p.id === pbs.id)
@@ -413,6 +374,16 @@ function PbsCard({
                 ? t('dashboard.deviceOnline')
                 : t('dashboard.pbsSleeping')}
         </span>
+      </div>
+      {/* Maintenance acts on this box, so it lives on this card — the old Manual run panel's
+          "which PBS?" select is gone. A sleeping box is fine: the run wakes it first. */}
+      <div className="dev-actions">
+        <button type="button" className="btn" onClick={() => onMaintenance(pbs, 'gc')}>
+          {t('dashboard.runGcShort')}
+        </button>
+        <button type="button" className="btn" onClick={() => onMaintenance(pbs, 'verify')}>
+          {t('dashboard.runVerifyShort')}
+        </button>
       </div>
     </div>
   )

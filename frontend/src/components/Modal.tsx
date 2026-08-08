@@ -10,6 +10,9 @@ interface ModalProps {
   footer: ReactNode
   /** `lg` is the 700px route editor; the default 420px is the small action dialogs. */
   size?: 'sm' | 'lg'
+  /** Where focus starts. Without it, useDialogKeys falls back to the first focusable —
+   *  which is the ✕, a poor introduction for a screen reader. Point it at the first field. */
+  initialFocusRef?: React.RefObject<HTMLElement | null>
   children: ReactNode
 }
 
@@ -23,12 +26,12 @@ interface ModalProps {
  * backdrop is the same `onClose`, so a guarded surface (the route editor's unsaved-changes
  * prompt) intercepts every exit at one point.
  */
-export function Modal({ title, onClose, footer, size = 'sm', children }: ModalProps) {
+export function Modal({ title, onClose, footer, size = 'sm', initialFocusRef, children }: ModalProps) {
   const { t } = useTranslation()
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
 
-  useDialogKeys(true, dialogRef, onClose)
+  useDialogKeys(true, dialogRef, onClose, initialFocusRef)
 
   // Stop the page behind the dialog from scrolling under it.
   useEffect(() => {

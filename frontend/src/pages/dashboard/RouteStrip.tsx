@@ -14,8 +14,11 @@ interface RouteStripProps {
   runs: RunSummary[]
   onFocus: (routeId: string | null) => void
   onEdit: (route: Route | null) => void
+  onRun: (route: Route) => void
   /** Re-read the config after a toggle, so the strip and the topology agree. */
   onChanged: () => void
+  /** Surface a failed toggle in the page's action banner instead of a silent snap-back. */
+  onError: (message: string) => void
 }
 
 export function RouteStrip({
@@ -24,7 +27,9 @@ export function RouteStrip({
   runs,
   onFocus,
   onEdit,
+  onRun,
   onChanged,
+  onError,
 }: RouteStripProps) {
   const { t } = useTranslation()
   return (
@@ -49,7 +54,9 @@ export function RouteStrip({
               runs={runs}
               onFocus={onFocus}
               onEdit={onEdit}
+              onRun={onRun}
               onChanged={onChanged}
+              onError={onError}
             />
           ))}
         </div>
@@ -64,14 +71,18 @@ function RouteCard({
   runs,
   onFocus,
   onEdit,
+  onRun,
   onChanged,
+  onError,
 }: {
   route: Route
   status: StatusResponse | null
   runs: RunSummary[]
   onFocus: (routeId: string | null) => void
   onEdit: (route: Route) => void
+  onRun: (route: Route) => void
   onChanged: () => void
+  onError: (message: string) => void
 }) {
   const { t } = useTranslation()
   const [saving, setSaving] = useState(false)
@@ -93,8 +104,15 @@ function RouteCard({
     try {
       await api.updateRoute(route.id, { ...route, enabled: !route.enabled })
       onChanged()
-    } catch {
-      // The next config reload re-renders the real state; a failed toggle simply snaps back.
+    } catch (e) {
+      // The config reload re-renders the real state (the toggle snaps back) — but the
+      // snap-back alone reads as a glitch, so say *why* it refused to stick.
+      onError(
+        t('dashboard.toggleFailed', {
+          name: route.name || route.id,
+          reason: e instanceof Error ? e.message : String(e),
+        }),
+      )
       onChanged()
     } finally {
       setSaving(false)
@@ -102,13 +120,12 @@ function RouteCard({
   }
 
   return (
+    // Hover-only highlight: the dimming is a visual affordance with no announced effect, so
+    // the card must not be a tab stop — its real controls (Run/toggle/Edit) already are.
     <div
       className={`route-card${route.enabled ? '' : ' off'}`}
-      tabIndex={0}
       onMouseEnter={() => onFocus(route.id)}
       onMouseLeave={() => onFocus(null)}
-      onFocus={() => onFocus(route.id)}
-      onBlur={() => onFocus(null)}
     >
       <div>
         <div className="route-name-row">
@@ -122,7 +139,9 @@ function RouteCard({
               {id}
             </span>
           ))}
-          <span className="arrow">→</span>
+          <span className="arrow" aria-hidden="true">
+            →
+          </span>
           <span className="chip-s">{route.target}</span>
         </div>
       </div>
@@ -177,6 +196,15 @@ function RouteCard({
           onClick={saving ? () => {} : toggle}
           label={t('dashboard.routeEnabledLabel', { name: route.name })}
         />
+        <button
+          type="button"
+          className="btn"
+          // Already in flight or queued: a second submit would only queue a duplicate.
+          disabled={running || queued}
+          onClick={() => onRun(route)}
+        >
+          {t('dashboard.runNow')}
+        </button>
         <button type="button" className="btn" onClick={() => onEdit(route)}>
           {t('common.edit')}
         </button>

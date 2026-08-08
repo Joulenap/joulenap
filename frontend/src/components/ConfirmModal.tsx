@@ -75,14 +75,14 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
           >
             {state.icon}
           </div>
-          <span id={titleId} style={{ fontSize: 17, fontWeight: 700 }}>{state.title}</span>
+          <span id={titleId} style={{ fontSize: 16, fontWeight: 700 }}>{state.title}</span>
         </div>
         {/* pre-line so a message can list what it is warning about, one item per line. */}
         <p
           id={msgId}
           style={{
             margin: '0 0 20px',
-            fontSize: 14,
+            fontSize: 13.5,
             lineHeight: 1.55,
             color: c.textMid,
             whiteSpace: 'pre-line',
@@ -97,7 +97,7 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
               alignItems: 'center',
               gap: 10,
               margin: '0 0 18px',
-              fontSize: 13,
+              fontSize: 13.5,
               color: c.textMid,
               cursor: 'pointer',
             }}
@@ -116,7 +116,7 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
               border: `1px solid ${c.ghostBorder}`,
               borderRadius: 8,
               padding: '9px 18px',
-              fontSize: 13,
+              fontSize: 13.5,
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -134,7 +134,7 @@ export function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; 
               border: 'none',
               borderRadius: 8,
               padding: '9px 18px',
-              fontSize: 13,
+              fontSize: 13.5,
               fontWeight: 600,
               cursor: 'pointer',
             }}

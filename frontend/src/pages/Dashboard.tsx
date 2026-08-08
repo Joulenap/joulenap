@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import type { LogLine, PbsDevice, Route, RunSummary, StatusResponse } from '../api/types'
+import { useRevealBanner } from '../components/useRevealBanner'
 import { useConfig } from '../config/ConfigContext'
 import { useGuestsAll } from '../hooks/useGuestsAll'
 import { useRuns } from '../hooks/useRuns'
@@ -10,7 +11,6 @@ import { runKindLabelKey } from '../utils/status'
 import { ActionDialog, type ActionSpec } from './dashboard/ActionDialog'
 import { ActivityLog } from './dashboard/ActivityLog'
 import { GuestLastBackup } from './dashboard/GuestLastBackup'
-import { ManualRunPanel, type ManualAction } from './dashboard/ManualRunPanel'
 import { RouteModal } from './dashboard/RouteModal'
 import { RouteStrip } from './dashboard/RouteStrip'
 import { RunHistory } from './dashboard/RunHistory'
@@ -60,6 +60,9 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
   const [action, setAction] = useState<ActionSpec | null>(null)
   // A dialog closes on confirm, so a rejected action has nowhere of its own to report from.
   const [actionError, setActionError] = useState<string | null>(null)
+  // The banner mounts at the top of the page, but the action that failed may have been
+  // confirmed from an expanded history row two screens down — bring the error to the user.
+  useRevealBanner(actionError, '.jn-home > .form-banner')
 
   const afterRouteChange = () => {
     reload().catch(() => {})
@@ -76,42 +79,35 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
       )
   }
 
-  const routeOptions = routes.map((r) => ({ value: r.id, label: r.name || r.id }))
-  const pbsOptions = (config?.pbss ?? []).map((p) => ({ value: p.id, label: p.id }))
   const powerOffLabel = t('dashboard.confirm.powerOffAfter')
 
   const openRouteEditor = (route: Route | null) => setEditing({ route })
 
-  const openManualRun = (kind: ManualAction) => {
-    if (kind === 'route') {
-      setAction({
-        title: t('dashboard.confirm.routeTitle'),
-        select: {
-          label: t('dashboard.confirm.routeLabel'),
-          options: routeOptions,
-          emptyNote: t('dashboard.confirm.noRoutes'),
-        },
-        toggle: powerOffLabel,
-        confirmLabel: t('dashboard.confirm.routeYes'),
-        // `keep_on` is the inverse of the toggle — see api/client.ts.
-        onConfirm: (id, powerOff) => run(api.runRoute(id, !powerOff)),
-      })
-      return
-    }
+  // GC/verify live on the PBS card they act on, so the dialog is pre-targeted — no
+  // "which one?" select anywhere anymore.
+  const openMaintenance = (pbs: PbsDevice, kind: 'gc' | 'verify') => {
     const gc = kind === 'gc'
     setAction({
-      title: t(gc ? 'dashboard.confirm.gcTitle' : 'dashboard.confirm.verifyTitle'),
+      title: t(gc ? 'dashboard.confirm.gcTitleNamed' : 'dashboard.confirm.verifyTitleNamed', {
+        pbs: pbs.id,
+      }),
       note: t(gc ? 'dashboard.confirm.gcNote' : 'dashboard.confirm.verifyNote'),
-      select: {
-        label: t('dashboard.confirm.gcLabel'),
-        options: pbsOptions,
-        emptyNote: t('dashboard.confirm.noPbs'),
-      },
       toggle: powerOffLabel,
       confirmLabel: t(gc ? 'dashboard.confirm.gcYes' : 'dashboard.confirm.verifyYes'),
-      onConfirm: (id, powerOff) => run(api.runMaintenance(id, kind, !powerOff)),
+      onConfirm: (powerOff) => run(api.runMaintenance(pbs.id, kind, !powerOff)),
     })
   }
+
+  // The card's own Run button: same dialog as Manual run, minus the "which one?" select —
+  // the user is already looking at the route they mean.
+  const openRunRoute = (route: Route) =>
+    setAction({
+      title: t('dashboard.confirm.runRouteTitle', { name: route.name || route.id }),
+      toggle: powerOffLabel,
+      confirmLabel: t('dashboard.confirm.routeYes'),
+      // `keep_on` is the inverse of the toggle — see api/client.ts.
+      onConfirm: (powerOff) => run(api.runRoute(route.id, !powerOff)),
+    })
 
   const openPower = (pbs: PbsDevice, online: boolean) =>
     setAction({
@@ -133,11 +129,12 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
       confirmLabel: t('dashboard.stopRun'),
       danger: true,
       // stopRun takes power_off directly, unlike runRoute's inverted keep_on.
-      onConfirm: (_choice, powerOff) => run(api.stopRun(run_.id, powerOff)),
+      onConfirm: (powerOff) => run(api.stopRun(run_.id, powerOff)),
     })
 
   return (
     <div className="jn-home">
+      <h1 className="sr-only">{t('dashboard.title')}</h1>
       {actionError && (
         <div className="form-banner" role="alert">
           {actionError}
@@ -151,11 +148,10 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
           status={status}
           guests={groups}
           focus={focus}
-          onFocus={setFocus}
           onPower={openPower}
+          onMaintenance={openMaintenance}
         />
         <div className="rail">
-          <ManualRunPanel onRun={openManualRun} />
           <UpcomingRuns routes={routes} status={status} />
         </div>
       </div>
@@ -166,7 +162,9 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
         runs={runs}
         onFocus={setFocus}
         onEdit={openRouteEditor}
+        onRun={openRunRoute}
         onChanged={afterRouteChange}
+        onError={setActionError}
       />
 
       <div className="grid-bottom">

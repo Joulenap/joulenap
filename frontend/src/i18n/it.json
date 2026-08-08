@@ -45,7 +45,8 @@
     "settings": "Impostazioni",
     "theme": "Tema",
     "logout": "Esci",
-    "signOut": "Disconnetti"
+    "signOut": "Disconnetti",
+    "backToDashboard": "Torna alla dashboard"
   },
   "status": {
     "running": "Backup in corso",
@@ -56,7 +57,11 @@
     "runningRoute": "In esecuzione · {{route}}",
     "idleNext": "A riposo · prossima {{when}}",
     "paused": "Scheduler in pausa",
-    "syncRunning": "Sync in corso"
+    "syncRunning": "Sync in corso",
+    "ok": "Tutto OK",
+    "okNext": "Tutto OK · prossima {{when}}",
+    "lastRunFailed": "{{route}} fallita · {{when}}",
+    "lastRunFailedRun": "Ultima esecuzione fallita · {{when}}"
   },
   "dashboard": {
     "powerOn": "Accendi PBS",
@@ -65,6 +70,10 @@
     "noRecentRuns": "Nessuna esecuzione recente",
     "lastBackupTitle": "Ultimo backup per guest",
     "never": "mai",
+    "neverBackedUp_one": "{{count}} guest senza backup",
+    "neverBackedUp_other": "{{count}} guest senza backup",
+    "runNow": "Esegui",
+    "runDetails": "Dettagli esecuzione · {{name}}",
     "scheduleTitle": "Pianificazione",
     "scheduleCustom": "Pianificazione personalizzata impostata in config.yaml ({{cron}}) — modificala lì per cambiarla.",
     "guestsError": "Impossibile aggiornare l'elenco dei guest — mostro gli ultimi guest noti.",
@@ -103,34 +112,29 @@
       "sun": "DOM"
     },
     "confirm": {
-      "gcTitle": "Eseguire la Garbage Collection?",
+      "gcTitleNamed": "Esegui GC · {{pbs}}",
       "gcYes": "Esegui GC",
       "onTitle": "Accendere il PBS?",
       "onYes": "Accendi PBS",
       "offTitle": "Spegnere il PBS?",
       "offMsg": "Il PBS verrà spento ora. Lo scheduler lo riattiverà automaticamente per il prossimo backup pianificato.",
       "offYes": "Spegni PBS",
-      "routeTitle": "Esegui route",
-      "routeLabel": "Route",
       "routeYes": "Esegui",
-      "gcLabel": "PBS",
+      "runRouteTitle": "Esegui route · {{name}}",
       "gcNote": "Se il PBS è spento viene acceso prima della GC.",
-      "verifyTitle": "Esegui verifica",
+      "verifyTitleNamed": "Esegui verifica · {{pbs}}",
       "verifyNote": "Verifica gli snapshot del datastore. Se il PBS è spento viene prima acceso.",
       "verifyYes": "Esegui verifica",
       "powerOffAfter": "Spegni il PBS al termine",
       "onNote": "{{pbs}} è spento. Joulenap invia il pacchetto Wake-on-LAN e lo mostra acceso nella mappa dei backup. Senza job attivi resta acceso finché non lo spegni da qui.",
       "stopRouteTitle": "Interrompi esecuzione · {{name}}",
       "stopRouteMsg": "L'operazione in esecuzione sul server viene fermata insieme all'esecuzione, e ciò che è ancora in coda non parte. I dati già scritti vengono mantenuti; l'esecuzione viene registrata come interrotta.",
-      "noRoutes": "Nessuna route da eseguire.",
-      "noPbs": "Nessun PBS configurato.",
       "failed": "Impossibile avviare — {{reason}}"
     },
     "kindSync": "Sync",
     "backupMap": "Mappa dei backup",
     "colPve": "Proxmox VE",
     "colPbs": "Proxmox Backup Server",
-    "routePaused": "in pausa",
     "pveCluster_one": "Cluster · {{nodes}} nodi · {{count}} guest",
     "pveCluster_other": "Cluster · {{nodes}} nodi · {{count}} guest",
     "pveStandalone_one": "Standalone · {{count}} guest",
@@ -161,8 +165,6 @@
     "kind_verify_detail": "Verifica il datastore",
     "withGc": "GC al termine",
     "noGc": "nessun GC",
-    "manualRun": "Esecuzione manuale",
-    "runRoute": "Esegui route",
     "runGcShort": "Esegui GC",
     "runVerifyShort": "Esegui verify",
     "upcomingRuns": "Prossime run",
@@ -257,7 +259,9 @@
       "keepYearly": "Conserva gli annuali",
       "guestIncludeLabel": "Includi {{name}} (VMID {{vmid}})"
     },
-    "routeEnabledLabel": "Route {{name}} attiva"
+    "routeEnabledLabel": "Route {{name}} attiva",
+    "toggleFailed": "Impossibile modificare {{name}} — {{reason}}",
+    "title": "Dashboard"
   },
   "wizard": {
     "pve": {
