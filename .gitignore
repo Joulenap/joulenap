@@ -31,6 +31,8 @@ dist/
 venv/
 .env/
 .pytest_cache/
+.coverage
+coverage.lcov
 .mypy_cache/
 .ruff_cache/
 

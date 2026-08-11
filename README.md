@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/Joulenap/joulenap/actions/workflows/ci.yml"><img src="https://github.com/Joulenap/joulenap/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://coveralls.io/github/Joulenap/joulenap?branch=main"><img src="https://coveralls.io/repos/github/Joulenap/joulenap/badge.svg?branch=main" alt="Coverage"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
   <a href="https://hub.docker.com/r/catubba/joulenap"><img src="https://img.shields.io/badge/docker-catubba%2Fjoulenap-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
 </p>
