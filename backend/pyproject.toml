@@ -2,7 +2,6 @@
 name = "joulenap"
 version = "1.0.0"
 description = "Self-hosted web UI + scheduler for energy-saving Proxmox backups to a normally-off PBS."
-readme = "../README.md"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "Joulenap contributors" }]
