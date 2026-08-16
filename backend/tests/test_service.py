@@ -307,3 +307,31 @@ def test_a_stale_cancel_does_not_kill_the_next_run(temp_config, temp_db):
     with session_scope() as session:
         statuses = {r.route_id: r.status for r in session.scalars(select(Run))}
     assert statuses["offsite"] == RunStatus.SUCCESS
+
+
+def test_a_run_that_cannot_write_its_row_is_still_notified(temp_config, temp_db, monkeypatch):
+    # A locked database past the busy timeout at run start used to make the run vanish:
+    # no history row, no notification. It still cannot have a row, but it must be reported.
+    from app.jobs import service as service_mod
+
+    sent = []
+    box = FakeBox()
+    deps, *_ = make_deps(notify=sent.append)
+    service = JobService(ConfigStore.load_or_create(), deps=deps, lease_deps=box.deps())
+
+    def boom(*_a, **_k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(service_mod, "RunRecorder", boom)
+    service.run_route("nightly", RunTrigger.SCHEDULED)
+    _drain(service)
+
+    assert len(sent) == 1
+    ctx = sent[0]
+    assert ctx.run.id is None
+    assert ctx.run.status is RunStatus.FAILURE
+    assert ctx.route is not None and ctx.route.id == "nightly"
+    assert "database is locked" in ctx.run.error
+    with session_scope() as session:
+        assert session.execute(select(Run)).scalars().all() == []
+    assert not service.is_running  # the single-run lock was released
