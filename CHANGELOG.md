@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0]
+
 ### Added
 
 - Sync routes can now keep an independent, tighter retention on the target: the route's
@@ -616,7 +618,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Joulenap/joulenap/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Joulenap/joulenap/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Joulenap/joulenap/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Joulenap/joulenap/compare/v0.7.0...v0.8.0
