@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 
 import pytest
+from sqlalchemy import exc as sa_exc
 
 from app.api.schemas import StepInfo
 from app.db import session_scope
-from app.db.models import Run, RunKind, RunStatus, RunTrigger, StepName, StepStatus
+from app.db.models import LogLevel, Run, RunKind, RunStatus, RunTrigger, StepName, StepStatus
 from app.jobs.recorder import RunRecorder, set_detail
 
 
@@ -169,3 +170,80 @@ def test_a_step_that_set_a_detail_and_then_failed_shows_the_error(temp_db):
         assert step.detail == "datastore too full"
         assert step.detail_key is None and step.detail_params is None
         assert StepInfo.of(step, "it").detail == "datastore too full"
+
+
+# --- a failed commit must not zombify the run (#38) ----------------------------
+
+
+class _FlakySession:
+    """Wraps a real Session; ``commit`` raises for the calls listed in ``fail_on`` (1-based
+    call numbers, or "all"). Everything else is delegated untouched."""
+
+    def __init__(self, session, fail_on):
+        self._s = session
+        self._fail_on = fail_on
+        self.commits = 0
+        self.poisoned = False
+
+    def commit(self):
+        # Like SQLAlchemy after a failed flush: the transaction is dead and every later
+        # write raises PendingRollbackError until someone calls rollback().
+        if self.poisoned:
+            raise sa_exc.PendingRollbackError("This Session's transaction has been rolled back")
+        self.commits += 1
+        if self._fail_on == "all" or self.commits in self._fail_on:
+            self.poisoned = True
+            self._s.rollback()
+            raise RuntimeError("database is locked")
+        self._s.commit()
+
+    def rollback(self):
+        self.poisoned = False
+        self._s.rollback()
+
+    def __getattr__(self, name):
+        return getattr(self._s, name)
+
+
+def _run_status(run_id: int) -> tuple[str, list[str]]:
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        return run.status, [s.status for s in run.steps]
+
+
+def test_a_failed_task_log_commit_does_not_poison_the_session(temp_db):
+    from app.db import make_session
+
+    flaky = _FlakySession(make_session(), fail_on={4})  # 1: run, 2: step, 3: log, 4: task_log
+    with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL, session_factory=lambda: flaky) as rec:
+        with rec.step(StepName.BACKUP):
+            with pytest.raises(RuntimeError):
+                rec.task_log("backup", "pve", [(1, "INFO: hello")])
+            # The tailer swallows that and logs a warning on the same session; before the
+            # rollback this raised PendingRollbackError and took the whole run down with it.
+            rec.log(LogLevel.WARN, "could not store task-log line(s)")
+        rec.finish(RunStatus.SUCCESS)
+
+    assert _run_status(rec.run_id) == (RunStatus.SUCCESS, [StepStatus.SUCCESS])
+
+
+def test_a_run_whose_session_died_is_still_closed_out(temp_db):
+    from app.db import make_session
+
+    # Fails from the step's own commit on: the body dies, the step can't record FAILURE, and
+    # finish() on that session can't either. The fallback opens a fresh session for it.
+    flaky = _FlakySession(make_session(), fail_on={2, 3, 4, 5, 6})
+    factory_calls = []
+
+    def factory():
+        factory_calls.append(1)
+        return flaky if len(factory_calls) == 1 else make_session()
+
+    with pytest.raises(RuntimeError):
+        with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL, session_factory=factory) as rec:
+            with rec.step(StepName.BACKUP):
+                pass  # never reached: step() itself raises on its first commit
+
+    assert len(factory_calls) == 2  # the fallback session
+    status, _steps = _run_status(rec.run_id)
+    assert status == RunStatus.FAILURE  # not RUNNING: no zombie for the restart sweep

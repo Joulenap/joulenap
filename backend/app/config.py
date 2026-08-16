@@ -243,8 +243,9 @@ class RouteSchedule(_Base):
 
 
 class RouteOptions(_Base):
-    """Per-route tuning. The first three apply to backup routes; the last two to any route
-    that leaves the PBS awake (they run before power-off)."""
+    """Per-route tuning. The first three apply to backup routes; gc/verify_after to any
+    route that leaves the PBS awake (they run before power-off); reverify_days to verify
+    routes; the last two to sync routes."""
 
     mode: Literal["snapshot", "suspend", "stop"] = "snapshot"
     bwlimit: int = Field(default=0, ge=0)  # KiB/s, 0 = unlimited
@@ -258,6 +259,15 @@ class RouteOptions(_Base):
     # Verify routes only: re-verify snapshots whose last verification is older than this
     # many days, so a verify route stays mostly incremental. 0 = re-verify everything.
     reverify_days: int = Field(default=30, ge=0)
+    # Sync routes only. Copy only the newest N snapshots per group (PBS ``transfer-last``);
+    # 0 = every snapshot. Snapshots it skips are not "vanished", so remove_vanished leaves
+    # them alone on the target.
+    transfer_last: int = Field(default=0, ge=0)
+    # Sync routes only. PBS ``remove-vanished``: snapshots/groups gone from the source are
+    # DELETED on the target as well. Off = the target only ever grows (minus its own
+    # retention). Opt-in on purpose: an off-site copy that mirrors deletions is no longer
+    # a safety net against a fat-fingered prune on the source.
+    remove_vanished: bool = False
 
 
 class Route(_Base):

@@ -98,6 +98,8 @@ const OPTIONS = {
   gc: true,
   verify_after: false,
   reverify_days: 30,
+  transfer_last: 0,
+  remove_vanished: false,
 }
 const EVERY_DAY = [true, true, true, true, true, true, true]
 const SATURDAYS = [false, false, false, false, false, true, false]

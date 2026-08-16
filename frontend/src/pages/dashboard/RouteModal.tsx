@@ -543,6 +543,36 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                 ))}
               </div>
               <span className="help">{t('dashboard.routeModal.syncHelp')}</span>
+              <label className="lab" htmlFor="rm-xfer">
+                {t('dashboard.routeModal.transferLast')}
+              </label>
+              <div className="retention-row">
+                <div className="r">
+                  <input
+                    id="rm-xfer"
+                    type="number"
+                    min={0}
+                    value={draft.options.transfer_last}
+                    onChange={(e) =>
+                      patch({ options: { ...draft.options, transfer_last: num(e.target.value) } })
+                    }
+                  />
+                </div>
+              </div>
+              <span className="help">{t('dashboard.routeModal.transferLastHelp')}</span>
+              <label className="tglrow">
+                <Toggle
+                  size="sm"
+                  on={draft.options.remove_vanished}
+                  onClick={() =>
+                    patch({
+                      options: { ...draft.options, remove_vanished: !draft.options.remove_vanished },
+                    })
+                  }
+                />
+                <span>{t('dashboard.routeModal.removeVanished')}</span>
+              </label>
+              <span className="help">{t('dashboard.routeModal.removeVanishedHelp')}</span>
             </div>
           )}
 
@@ -566,6 +596,9 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                   </div>
                 ))}
               </div>
+              {kind === 'sync' && (
+                <span className="help">{t('dashboard.routeModal.retentionSyncHelp')}</span>
+              )}
               {overlaps.length > 0 && (
                 <span className="form-warn">
                   {t('dashboard.routeModal.retentionOverlap', { routes: overlaps.join(', ') })}

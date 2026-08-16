@@ -159,6 +159,49 @@ def test_push_sync_job_sends_the_direction_only_in_the_job_body():
     assert upid.startswith("UPID:")
 
 
+def test_sync_job_sends_transfer_last_and_remove_vanished_only_when_set():
+    handler, calls = _recorder({"sync": []})
+    client = make_client(handler)
+
+    client.ensure_sync_job("j", remote="j", remote_store="a", store="b")
+    bare = calls[-1][2]
+    client.ensure_sync_job(
+        "j", remote="j", remote_store="a", store="b", direction="push",
+        transfer_last=3, remove_vanished=True,
+    )
+    full = calls[-1][2]
+
+    # PBS's transfer-last has minimum 1, so 0 means "leave the parameter out"; and an
+    # omitted remove-vanished is PBS's own default (false), so a bare job stays byte-for-byte
+    # what it was before these options existed.
+    assert "transfer-last" not in bare and "remove-vanished" not in bare
+    assert "transfer-last=3" in full and "remove-vanished=1" in full
+    assert "sync-direction=push" in full  # both fields ride the same job schema as push
+
+
+def test_start_prune_maps_keep_counts_and_runs_as_a_task():
+    handler, calls = _recorder({})
+
+    upid = make_client(handler).start_prune(
+        {"keep_last": 0, "keep_daily": 7, "keep_weekly": 4, "keep_monthly": 0, "keep_yearly": 0}
+    )
+
+    assert calls[-1][:2] == ("POST", "/api2/json/admin/datastore/backup/prune-datastore")
+    body = calls[-1][2]
+    assert "keep-daily=7" in body and "keep-weekly=4" in body
+    assert "keep-last" not in body and "keep-monthly" not in body  # zeros are omitted
+    assert "use-task" not in body  # PBS 4.2 rejects it; prune-datastore is always a task
+    assert upid.startswith("UPID:")
+
+
+def test_start_prune_refuses_an_all_zero_retention():
+    handler, calls = _recorder({})
+
+    with pytest.raises(ValueError):
+        make_client(handler).start_prune({"keep_daily": 0})
+    assert calls == []
+
+
 def test_delete_sync_job_removes_an_existing_job_in_either_direction():
     handler, calls = _recorder({"sync": [{"id": "joulenap-r1"}]})
 

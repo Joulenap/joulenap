@@ -45,6 +45,8 @@ export const DEFAULT_OPTIONS: RouteOptions = {
   gc: true,
   verify_after: false,
   reverify_days: 30,
+  transfer_last: 0,
+  remove_vanished: false,
 }
 
 /**

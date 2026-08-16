@@ -140,10 +140,15 @@ The equivalent on the PBS itself, if you would rather not hand the password over
 
 ```sh
 proxmox-backup-manager acl update /remote RemoteAdmin --auth-id 'root@pam!joulenap-<datastore>'
-proxmox-backup-manager acl update /remote RemoteSyncPushOperator --auth-id 'root@pam!joulenap-<datastore>'
+proxmox-backup-manager acl update /remote RemoteDatastoreAdmin --auth-id 'root@pam!joulenap-<datastore>'
 ```
 
-Both roles are needed: `RemoteAdmin` alone does not cover a *push* sync.
+Both roles are needed: `RemoteAdmin` alone does not cover a *push* sync, and a push with
+*Mirror deletions to the target* (`remove_vanished`) also needs the `Remote.DatastorePrune`
+that only the second role carries. Boxes granted by Joulenap 1.0 got `RemoteSyncPushOperator`
+instead, which lacks it: re-run **Grant sync permissions** once (or the second line above)
+before turning that option on. Grant it on the box that *creates the job*: the **source** PBS
+for a push route, the **target** PBS for a pull route — each device has its own token.
 
 
 ## Security

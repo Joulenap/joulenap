@@ -95,6 +95,21 @@ def _drop_sync_config(pbs: PbsClient, name: str, recorder: RunRecorder) -> None:
         recorder.log(LogLevel.WARN, f"could not remove sync config '{name}': {exc}")
 
 
+def _route_prune_step(
+    target: PbsDevice, retention: dict[str, int], recorder: RunRecorder, deps: CycleDeps
+) -> None:
+    """Apply the route's keep-* counts to the whole target datastore. All-zero retention
+    means "don't prune", the same contract vzdump's prune-backups has on backup routes."""
+    if not any(retention.values()):
+        recorder.skip_step(StepName.PRUNE, "retention_empty")
+        return
+    with recorder.step(StepName.PRUNE) as step:
+        with deps.connect_pbs(target) as pbs:
+            upid = pbs.start_prune(retention)
+            step.detail = upid
+            _wait_or_stop(pbs, upid, recorder, deps, StepName.PRUNE.value, "pbs")
+
+
 def _sync_body(
     config: Config, route: Route, target: PbsDevice, recorder: RunRecorder, deps: CycleDeps
 ) -> DatastoreStatus | None:
@@ -134,6 +149,8 @@ def _sync_body(
                 remote_store=peer.datastore,
                 store=executor.datastore,
                 direction=route.sync_direction,
+                transfer_last=route.options.transfer_last,
+                remove_vanished=route.options.remove_vanished,
             )
             try:
                 upid = pbs.run_sync_job(name)
@@ -156,7 +173,11 @@ def _sync_body(
                 _drop_sync_config(pbs, name, recorder)
 
     # Maintenance runs on the target: it is the box that just gained snapshots, whichever
-    # side pushed or pulled them.
+    # side pushed or pulled them. Retention first, so a copy can keep fewer snapshots than
+    # its source (the next sync does not bring pruned ones back unless the source still has
+    # them — that is what transfer_last is for) and GC right after can reclaim the chunks.
+    _route_prune_step(target, route.retention.model_dump(), recorder, deps)
+
     if route.options.gc:
         _route_gc_step(target, recorder, deps)
     else:

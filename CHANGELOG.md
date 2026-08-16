@@ -7,6 +7,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Sync routes can now keep an independent, tighter retention on the target: the route's
+  retention (already shown in the form, but until now not applied to sync routes) is pruned on
+  the target datastore after each sync, before GC. All-zero retention means no prune, and
+  protected snapshots are never removed. Two new sync options in the route form:
+  `transfer_last` (copy only the newest N snapshots per group, PBS `transfer-last`) and
+  `remove_vanished` (delete on the target what disappeared from the source, PBS
+  `remove-vanished`; opt-in, off by default). Together they let an off-site or S3-backed
+  copy stay smaller than its source instead of re-growing to it on every run (#36).
+- The PBS token grant for sync routes is now `RemoteAdmin` + `RemoteDatastoreAdmin` (was
+  `RemoteSyncPushOperator`): a push job with `remove_vanished` needs `Remote.DatastorePrune`,
+  which the old role lacks. A box granted by 1.0 keeps working as before; re-run **Grant sync
+  permissions** on it (Settings → Devices → edit the PBS) before turning `remove_vanished` on
+  for a push route, or PBS refuses to create the job with "permission check failed".
+
+### Fixed
+
+- Long-running tasks are no longer failed at 6 hours. The wait on a PVE/PBS task had a
+  hard 6-hour cap, so a first full sync to an S3/Backblaze datastore was reported as
+  `failed (unknown status)` while the PBS worker went on and completed. The cap is now a
+  no-progress timeout: a task that keeps writing to its log runs as long as it needs, one
+  that goes silent for 6 hours fails with `timeout 6h` (#37).
+- A run could stay "Running" forever after its worker died: if a database write failed at
+  the wrong moment (a locked or slow SQLite at the peak of the log tail), the session was
+  left unusable, the step and the run could not be closed out, and only a restart's sweep
+  ended them, while Stop run answered "not the one in progress". Writes now recover from a
+  failed commit, a run whose session died is still closed out on a fresh one, and Stop run
+  on such an orphaned row marks it interrupted instead of refusing (#38).
+- The task log of a backup no longer starts with PVE's "no content" placeholder, which was
+  also swallowing the real first line of the vzdump output (#38).
+
+### Changed
+
+- If you had a sync route configured before this release, its retention block was saved with
+  the form defaults (keep-daily 7 / weekly 4 / monthly 6) and did nothing. It now prunes the
+  target with those values on the next run: review it, or set every keep-* to 0 to keep the
+  old "never prune" behaviour.
+
 ## [1.0.0]
 
 Joulenap is no longer built around one Proxmox host backing up to one backup server. It now models

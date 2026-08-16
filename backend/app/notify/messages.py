@@ -140,6 +140,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             # wake packet is instant, and wait/power-off are near-constant overhead that would
             # just crowd the line.
             "phase_backup": "backup",
+            "phase_prune": "prune",
             "phase_gc": "GC",
             "phase_verify": "verify",
             "phase_monitor": "watch",
@@ -205,6 +206,7 @@ _MESSAGES: dict[str, dict[str, dict[str, str]]] = {
             "next_run": "Prossima esecuzione pianificata",
             "run_no": "Run",
             "phase_backup": "backup",
+            "phase_prune": "prune",
             "phase_gc": "GC",
             "phase_verify": "verifica",
             "phase_monitor": "controllo",
@@ -295,6 +297,7 @@ _DETAILS: dict[str, dict[str, str]] = {
         "still_needed": "left on: still needed by another run",
         "unmanaged": "left on: Joulenap does not manage this box's power",
         "left_on": "left powered on",
+        "retention_empty": "no retention set for this route",
         "gc_disabled": "GC disabled for this route",
         "verify_disabled": "verify disabled for this route",
         "free_space": "{free}% free ({avail} GB)",
@@ -309,6 +312,7 @@ _DETAILS: dict[str, dict[str, str]] = {
         "still_needed": "lasciato acceso: serve ancora a un'altra esecuzione",
         "unmanaged": "lasciato acceso: Joulenap non gestisce l'alimentazione di questa macchina",
         "left_on": "lasciato acceso",
+        "retention_empty": "nessuna retention impostata per questa route",
         "gc_disabled": "GC disattivata per questa route",
         "verify_disabled": "verifica disattivata per questa route",
         "free_space": "{free}% libero ({avail} GB)",
@@ -439,6 +443,7 @@ def _format_duration(seconds: float) -> str:
 _PHASE_LABEL = {
     StepName.BACKUP: "phase_backup",
     StepName.MONITOR: "phase_monitor",
+    StepName.PRUNE: "phase_prune",
     StepName.GC: "phase_gc",
     StepName.VERIFY: "phase_verify",
 }

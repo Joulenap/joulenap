@@ -121,6 +121,7 @@ class FakePbs:
         self.fail_exit_status = fail_exit_status
         self.gc_started = False
         self.verify_started = False
+        self.prune_args: dict | None = None  # keep_* counts start_prune was asked for
         self.stopped: list[str] = []  # upids passed to stop_task
         self.verify_args: dict | None = None
         # Sync route bookkeeping: what a route asked this box to set up and run.
@@ -154,6 +155,10 @@ class FakePbs:
     def start_gc(self) -> str:
         self.gc_started = True
         return "UPID:pbs:gc"
+
+    def start_prune(self, retention: dict[str, int]) -> str:
+        self.prune_args = retention
+        return "UPID:pbs:prune"
 
     def start_verify(
         self, *, ignore_verified: bool = True, outdated_after: int | None = None
