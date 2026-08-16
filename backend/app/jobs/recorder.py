@@ -75,6 +75,7 @@ class RunRecorder:
     ):
         # TODO(M07): the scheduler passes the route that fired; until then every run is
         # route-less, which is also the right answer for a manual one-off.
+        self._session_factory = session_factory
         self._session = session_factory()
         try:
             self.run = Run(
@@ -90,17 +91,35 @@ class RunRecorder:
             # A DB error at run start (e.g. locked) must not leak the just-opened session.
             self._session.close()
             raise
+        # Kept as a plain int: after a rolled-back commit the ORM object's attributes are
+        # expired, and the id is needed exactly then (see ``__exit__``).
+        self._run_id: int = self.run.id
         self._finished = False
 
     @property
     def run_id(self) -> int:
-        return self.run.id
+        return self._run_id
+
+    def _commit(self) -> None:
+        """Commit, and on failure roll the session back before re-raising.
+
+        Without the rollback a single failed commit (``database is locked`` past the busy
+        timeout, a full disk) poisons the session: SQLAlchemy answers every later write with
+        ``PendingRollbackError``, so the step's FAILURE, the run's ``finish()`` and the tailer's
+        own warning all raise in turn, the worker thread dies, and the run sits RUNNING in the
+        history forever with a step that never ends — while PVE quietly completes the vzdump.
+        """
+        try:
+            self._session.commit()
+        except Exception:
+            self._session.rollback()
+            raise
 
     # --- logging -------------------------------------------------------------
 
     def log(self, level: LogLevel, message: str) -> None:
-        self._session.add(LogEvent(run_id=self.run.id, level=level, message=message))
-        self._session.commit()
+        self._session.add(LogEvent(run_id=self._run_id, level=level, message=message))
+        self._commit()
 
     def task_log(self, step: str, source: str, lines: list[tuple[int, str]]) -> None:
         """Append a batch of raw task-log lines for the live Task-log panel.
@@ -113,14 +132,14 @@ class RunRecorder:
         for line_no, text in lines:
             self._session.add(
                 TaskLogLine(
-                    run_id=self.run.id,
+                    run_id=self._run_id,
                     step=step,
                     source=source,
                     line_no=line_no,
                     text=text,
                 )
             )
-        self._session.commit()
+        self._commit()
 
     # --- steps ---------------------------------------------------------------
 
@@ -133,9 +152,9 @@ class RunRecorder:
         records one per source PVE, named ``backup:pve-alpha``.
         """
         full = f"{name.value}:{label}" if label else name.value
-        step = RunStep(run_id=self.run.id, name=full, status=StepStatus.RUNNING)
+        step = RunStep(run_id=self._run_id, name=full, status=StepStatus.RUNNING)
         self._session.add(step)
-        self._session.commit()
+        self._commit()
         self.log(LogLevel.INFO, f"{full}: started")
         try:
             yield step
@@ -150,7 +169,7 @@ class RunRecorder:
             step.detail_key = None
             step.detail_params = None
             self.log(LogLevel.ERROR, f"{full}: {exc}")
-            self._session.commit()
+            self._commit()
             raise
         else:
             step.finished_at = _utcnow()
@@ -160,7 +179,7 @@ class RunRecorder:
             if step.status == StepStatus.RUNNING:
                 step.status = StepStatus.SUCCESS
                 self.log(LogLevel.OK, f"{full}: done")
-            self._session.commit()
+            self._commit()
 
     def skip_step(self, name: StepName, detail_key: str | None = None, **params: object) -> None:
         """Record a step that was intentionally not run (e.g. GC when the toggle is off).
@@ -173,7 +192,7 @@ class RunRecorder:
         # ends up finishing before it started — a negative duration in the timeline.
         now = _utcnow()
         step = RunStep(
-            run_id=self.run.id,
+            run_id=self._run_id,
             name=name,
             status=StepStatus.SKIPPED,
             started_at=now,
@@ -187,7 +206,7 @@ class RunRecorder:
             self.log(LogLevel.INFO, f"{name.value}: skipped ({detail})")
         else:
             self.log(LogLevel.INFO, f"{name.value}: skipped")
-        self._session.commit()
+        self._commit()
 
     # --- finalisation --------------------------------------------------------
 
@@ -208,7 +227,7 @@ class RunRecorder:
             key, params = _error_code(error)
             self.run.error_key = key
             self.run.error_params = json.dumps(params) if params is not None else None
-        self._session.commit()
+        self._commit()
         self._finished = True
 
     def close(self) -> None:
@@ -220,5 +239,14 @@ class RunRecorder:
     def __exit__(self, exc_type, exc, _tb) -> None:
         # Safety net: if the job body raised before finishing, mark the run failed.
         if not self._finished:
-            self.finish(RunStatus.FAILURE, error=exc or LocalizedError("unknown"))
+            try:
+                self.finish(RunStatus.FAILURE, error=exc or LocalizedError("unknown"))
+            except Exception:
+                # The session itself is what's broken (the DB was unwritable when the body
+                # died). One more try on a fresh session, so the run cannot outlive its
+                # thread as a RUNNING row that only a restart's sweep would ever close.
+                self._session.close()
+                self._session = self._session_factory()
+                self.run = self._session.get(Run, self._run_id)
+                self.finish(RunStatus.FAILURE, error=exc or LocalizedError("unknown"))
         self.close()

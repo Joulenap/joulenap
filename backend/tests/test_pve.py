@@ -233,6 +233,15 @@ def test_task_log_parses_offset_lines():
     assert seen["qs"]["start"] == ["2"]
 
 
+def test_task_log_drops_pves_empty_log_placeholder():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return json_data([{"n": 1, "t": "no content"}])
+
+    # PVE's "log is still empty" answer is not a line: kept, it would take offset 1 and the
+    # tailer would skip the real first line of the vzdump log for good.
+    assert make_client(handler).task_log("UPID:x") == []
+
+
 def test_wait_task_tails_log_across_ticks():
     """The tailer drains new lines each poll (advancing the offset) and catches the tail."""
     full = ["INFO: start", "VM 100: 50%", "VM 100: done", "INFO: finished"]

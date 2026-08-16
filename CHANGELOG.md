@@ -23,6 +23,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   permissions** on it (Settings → Devices → edit the PBS) before turning `remove_vanished` on
   for a push route, or PBS refuses to create the job with "permission check failed".
 
+### Fixed
+
+- Long-running tasks are no longer failed at 6 hours. The wait on a PVE/PBS task had a
+  hard 6-hour cap, so a first full sync to an S3/Backblaze datastore was reported as
+  `failed (unknown status)` while the PBS worker went on and completed. The cap is now a
+  no-progress timeout: a task that keeps writing to its log runs as long as it needs, one
+  that goes silent for 6 hours fails with `timeout 6h` (#37).
+- A run could stay "Running" forever after its worker died: if a database write failed at
+  the wrong moment (a locked or slow SQLite at the peak of the log tail), the session was
+  left unusable, the step and the run could not be closed out, and only a restart's sweep
+  ended them, while Stop run answered "not the one in progress". Writes now recover from a
+  failed commit, a run whose session died is still closed out on a fresh one, and Stop run
+  on such an orphaned row marks it interrupted instead of refusing (#38).
+- The task log of a backup no longer starts with PVE's "no content" placeholder, which was
+  also swallowing the real first line of the vzdump output (#38).
+
 ### Changed
 
 - If you had a sync route configured before this release, its retention block was saved with

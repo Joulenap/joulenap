@@ -201,7 +201,13 @@ class PveClient:
             f"/nodes/{self._task_node(upid)}/tasks/{upid}/log",
             params={"start": start, "limit": limit},
         )
-        return [(int(e["n"]), e.get("t") or "") for e in (data or [])]
+        lines = [(int(e["n"]), e.get("t") or "") for e in (data or [])]
+        # A task whose log file is still empty answers with one placeholder line, "no
+        # content", numbered 1. Storing it would advance the tailer's offset past the real
+        # line 1 ("INFO: starting new backup job: ...") once vzdump starts writing.
+        if lines == [(1, "no content")]:
+            return []
+        return lines
 
     def stop_task(self, upid: str) -> None:
         """Ask PVE to stop a running task (the vzdump behind a cancelled run).

@@ -17,7 +17,7 @@ from app.config import load_config
 from app.connectors.pve import Guest
 from app.db import session_scope
 from app.db.datastore_stats import get_datastore_stat, upsert_datastore_stat
-from app.db.models import Run, RunKind, RunStatus, RunTrigger
+from app.db.models import Run, RunKind, RunStatus, RunStep, RunTrigger, StepStatus
 from app.jobs import JobService
 from app.main import create_app
 
@@ -449,6 +449,32 @@ def test_stop_conflicts_when_that_run_is_not_in_flight(app_ctx):
     client, app = app_ctx
     app.state.job_service.cancel = lambda run_id, *, power_off=False: False
     assert client.post("/api/runs/7/stop").status_code == 409
+
+
+def test_stop_closes_out_a_run_its_worker_abandoned(app_ctx):
+    # The history says RUNNING but the service has no such run: the worker died with the
+    # row open (#38). Stop sweeps that one run rather than telling the user to restart.
+    client, app = app_ctx
+    app.state.job_service.cancel = lambda run_id, *, power_off=False: False
+    with session_scope() as session:
+        run = Run(kind=RunKind.CYCLE, trigger=RunTrigger.MANUAL, status=RunStatus.RUNNING)
+        session.add(run)
+        session.flush()
+        run_id = run.id
+        session.add(RunStep(run_id=run_id, name="backup:pve-alpha", status=StepStatus.RUNNING))
+    with session_scope() as session:
+        other = Run(kind=RunKind.CYCLE, trigger=RunTrigger.MANUAL, status=RunStatus.RUNNING)
+        session.add(other)
+        session.flush()
+        other_id = other.id
+
+    assert client.post(f"/api/runs/{run_id}/stop").status_code == 202
+
+    with session_scope() as session:
+        swept = session.get(Run, run_id)
+        assert swept.status == RunStatus.FAILURE and swept.error_key == "interrupted"
+        assert swept.steps[0].status == StepStatus.FAILURE
+        assert session.get(Run, other_id).status == RunStatus.RUNNING  # only that one
 
 
 # --- runs / logs -------------------------------------------------------------

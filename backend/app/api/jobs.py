@@ -10,6 +10,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from ..db import session_scope
+from ..db.models import Run, RunStatus
+from ..db.startup import sweep_orphaned_runs
 from .deps import JobService, get_job_service, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["jobs"])
@@ -34,9 +37,18 @@ def stop_run(
     The run id is in the path rather than "stop whatever is running" on purpose: a click
     landing as one run ends and the next begins must not stop the wrong job.
     """
-    if not job_service.cancel(run_id, power_off=(body or StopRequest()).power_off):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="That run is not the one currently in progress",
-        )
-    return {"run_id": run_id}
+    if job_service.cancel(run_id, power_off=(body or StopRequest()).power_off):
+        return {"run_id": run_id}
+    # Not in flight — but is the history still showing it RUNNING? Then its worker died
+    # without closing it out (an unwritable DB at the wrong moment, #38) and nothing but a
+    # restart's sweep would ever end it. Stop is what the user reaches for; let it do the
+    # sweep for that one run instead of answering "not in progress" to a row that says it is.
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        if run is not None and run.status == RunStatus.RUNNING:
+            sweep_orphaned_runs(session, run_ids=[run_id])
+            return {"run_id": run_id}
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="That run is not the one currently in progress",
+    )
