@@ -39,12 +39,20 @@ def _make_engine(db_file: Path):
         #  - WAL lets those readers keep going while the cycle writes, instead of
         #    blocking each other (the default rollback journal serialises them).
         #  - busy_timeout makes a genuinely contended write WAIT rather than fail
-        #    instantly with "database is locked".
+        #    instantly with "database is locked". 30 s, not 5: the writers here are all
+        #    millisecond-long, so a wait that runs out means the *commit* itself stalled
+        #    (an fsync on a slow or busy disk), and a task-log line waiting half a minute
+        #    costs nothing next to a run dying on it.
+        #  - synchronous=NORMAL drops the per-commit fsync (WAL only syncs at checkpoint):
+        #    still safe across an app crash; a power loss can lose the last commits of
+        #    history, never corrupt the file. Full durability of run logs is not worth a
+        #    "database is locked" every time the disk hiccups under a backup.
         #  - foreign_keys makes the ondelete=CASCADE relationships actually enforce
         #    (SQLite leaves FK enforcement off by default).
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.execute("PRAGMA synchronous=NORMAL")
         cur.execute("PRAGMA foreign_keys=ON")
         cur.close()
 

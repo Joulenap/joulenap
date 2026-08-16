@@ -22,12 +22,13 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from ..config import Config, PbsDevice, Route
 from ..core.config_store import ConfigStore
 from ..db import session_scope
-from ..db.models import LogLevel, RunKind, RunStatus, RunTrigger, StepName, StepStatus
+from ..db.models import LogLevel, Run, RunKind, RunStatus, RunTrigger, StepName, StepStatus
 from ..db.prune import PruneResult, prune_history
 from ..notify.messages import LocalizedError, RunContext
 from .deps import CycleDeps
@@ -302,7 +303,30 @@ class JobService:
         subject, devices = resolved
 
         route = subject if isinstance(subject, Route) else None
-        recorder = self._start(item.kind, item.trigger, route)
+        try:
+            recorder = self._start(item.kind, item.trigger, route)
+        except Exception as exc:
+            # The run could not even write its own row (a locked database past the busy
+            # timeout, a full disk). Without this it vanished: no history row, no
+            # notification, one line in the container log. Say so on the configured
+            # channels with an unsaved Run (the message renders without a run number).
+            log.exception("Run for '%s' could not start", item.key)
+            now = datetime.now(UTC)
+            run = Run(
+                kind=item.kind,
+                trigger=item.trigger,
+                status=RunStatus.FAILURE,
+                route_id=route.id if route else None,
+                route_name=(route.name or route.id) if route else None,
+                started_at=now,
+                finished_at=now,
+                error=f"run could not start: {exc}",
+            )
+            try:
+                self.deps.notify(RunContext(config=config, run=run, route=route))
+            except Exception:  # noqa: BLE001 - nothing left to record it on
+                log.exception("Notification for the run that could not start failed too")
+            return
         item.run_id = recorder.run_id
         held: list[PbsDevice] = []
         multi = len(devices) > 1  # labels every WAIT/POWEROFF step of this run, consistently
@@ -499,9 +523,7 @@ class JobService:
 
     # --- internals -----------------------------------------------------------
 
-    def _start(
-        self, kind: RunKind, trigger: RunTrigger, route: Route | None
-    ) -> RunRecorder:
+    def _start(self, kind: RunKind, trigger: RunTrigger, route: Route | None) -> RunRecorder:
         """Wait for the single-run lock and create the run row. Caller owns the lock.
 
         Blocking is the point: the queue worker's whole job is to wait its turn. Anything

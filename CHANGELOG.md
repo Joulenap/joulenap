@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.1]
+
+### Fixed
+
+- A run that could not create its own history row (SQLite `database is locked` past the busy
+  timeout, a full disk) used to vanish: no row, no notification, one line in the container
+  log, so a scheduled sync looked as if it had never fired. It is now reported on the
+  configured notification channels as a failed run (without a run number) and the single-run
+  lock is released as usual (#38).
+- The SQLite database now uses `synchronous=NORMAL` with WAL, so a commit no longer fsyncs on
+  every task-log line, and the busy timeout is 30 s instead of 5 s. A disk that stalls for a
+  few seconds under a running backup (a VM on spinning disks, for instance) no longer turns
+  a task-log write into `database is locked` and a failed run. In WAL this remains safe across
+  an application crash; a power loss can at worst lose the last few seconds of run history,
+  never corrupt the file (#38).
+
 ## [1.1.0]
 
 ### Added
@@ -618,7 +634,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/Joulenap/joulenap/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Joulenap/joulenap/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Joulenap/joulenap/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Joulenap/joulenap/compare/v0.8.0...v0.9.0

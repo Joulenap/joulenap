@@ -28,7 +28,10 @@ def test_sqlite_pragmas_applied(temp_db):
     with session_scope() as s:
         assert s.execute(text("PRAGMA journal_mode")).scalar() == "wal"
         assert s.execute(text("PRAGMA foreign_keys")).scalar() == 1
-        assert s.execute(text("PRAGMA busy_timeout")).scalar() == 5000
+        assert s.execute(text("PRAGMA busy_timeout")).scalar() == 30000
+        # 1 = NORMAL: no fsync per commit; in WAL a stalled disk must not turn a
+        # task-log line into "database is locked" (#38).
+        assert s.execute(text("PRAGMA synchronous")).scalar() == 1
 
 
 def test_create_run_with_logs(temp_db):
