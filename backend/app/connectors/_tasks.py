@@ -19,6 +19,11 @@ from .errors import TaskCancelled, TaskError
 LogLine = tuple[int, str]
 
 
+def _human(seconds: float) -> str:
+    """``21600`` -> ``6h``, ``90`` -> ``90s``: what the failure line shows the user."""
+    return f"{seconds / 3600:g}h" if seconds >= 3600 else f"{seconds:.0f}s"
+
+
 def poll_task(
     status_fn: Callable[[str], dict[str, Any]],
     upid: str,
@@ -32,8 +37,11 @@ def poll_task(
 ) -> dict[str, Any]:
     """Poll ``status_fn(upid)`` until the task stops; return its final status.
 
-    Raises :class:`TaskError` if the task finishes with a non-OK exit status or does
-    not finish within ``timeout`` seconds.
+    Raises :class:`TaskError` if the task finishes with a non-OK exit status, or goes
+    ``timeout`` seconds without a sign of life. When the log is being tailed that means *no
+    new log line* for that long — a healthy 30-hour first sync to an S3 datastore keeps
+    talking and never trips it, a task hung in silence still fails; without a tail there is
+    no progress to see, so ``timeout`` is simply the total wait.
 
     ``should_cancel`` makes the wait interruptible: it is consulted once per poll, and a
     True raises :class:`TaskCancelled` — the caller decides whether to also stop the remote
@@ -49,7 +57,7 @@ def poll_task(
     seen = 0  # highest line number handed to on_lines so far (the fetch offset)
 
     def drain() -> None:
-        nonlocal seen
+        nonlocal seen, deadline
         if log_fn is None or on_lines is None:
             return
         while True:
@@ -58,6 +66,7 @@ def poll_task(
                 return
             on_lines(batch)
             seen = max(n for n, _ in batch)
+            deadline = time.monotonic() + timeout  # output = progress: the clock restarts
 
     while True:
         if should_cancel is not None and should_cancel():
@@ -76,5 +85,10 @@ def poll_task(
                 )
             return status
         if time.monotonic() >= deadline:
-            raise TaskError(f"Task {upid} did not finish within {timeout:.0f}s")
+            what = "produced no output for" if log_fn is not None else "did not finish within"
+            # A cause of its own, not None: the sync/GC/verify failure line otherwise reads
+            # "failed (unknown status)" for a task that PBS is very possibly still running.
+            raise TaskError(
+                f"Task {upid} {what} {_human(timeout)}", exit_status=f"timeout {_human(timeout)}"
+            )
         sleep(poll_interval)
