@@ -34,14 +34,17 @@ PBS_DATASTORE_ROLE = "DatastoreAdmin"
 PBS_SYSTEM_ROLE = "Audit"
 # ...and what a Sync route needs on /remote, where Joulenap creates the remote entry and the
 # sync job itself. RemoteAdmin is Remote.Audit+Modify+Read — enough for the remote and a PULL
-# job; a PUSH job additionally needs Remote.DatastoreBackup, which RemoteSyncPushOperator
-# carries (found on real hardware at GATE1: without it POST /config/sync is refused).
+# job; a PUSH job additionally needs Remote.DatastoreBackup, and a push job with
+# remove-vanished Remote.DatastorePrune too (PBS 4.2: POST /config/sync answers "400
+# permission check failed" without it — the check is on the job's *creation*, not its run).
+# RemoteDatastoreAdmin carries both, plus Remote.DatastoreModify for namespaces the push has
+# to create/remove on the peer; RemoteSyncPushOperator (Audit+DatastoreBackup) was not enough.
 #
 # This has to happen here, in the one-time root step: PBS answers *400 Unprivileged API tokens
 # can't set ACL items* to `PUT /access/acl` from any token, no matter which roles it holds. So
 # it can never be added later from the stored token — a PBS provisioned without these grants
 # has to be re-provisioned with root, or granted by hand on its console.
-PBS_REMOTE_ROLES = ("RemoteAdmin", "RemoteSyncPushOperator")
+PBS_REMOTE_ROLES = ("RemoteAdmin", "RemoteDatastoreAdmin")
 
 #: Default token name. A PVE device is one host, so it can never collide with itself.
 TOKEN_NAME = "joulenap"

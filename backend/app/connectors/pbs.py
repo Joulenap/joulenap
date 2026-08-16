@@ -257,10 +257,17 @@ class PbsClient:
         remote_store: str,
         store: str,
         direction: str = "pull",
+        transfer_last: int = 0,
+        remove_vanished: bool = False,
     ) -> None:
         """(Re)create a sync job between the local datastore ``store`` and ``remote_store``
         on ``remote``. ``direction`` says which way the data moves: ``pull`` (this PBS fetches)
-        or ``push`` (this PBS sends) — the job always lives on the side that does the work."""
+        or ``push`` (this PBS sends) — the job always lives on the side that does the work.
+
+        ``transfer_last`` > 0 copies only the newest N snapshots per group (PBS wants >= 1, so
+        0 means "omit the parameter"); ``remove_vanished`` deletes on the receiving side what
+        is gone from the sending side. Both are fields of the shared job schema, accepted for
+        pull and push alike."""
         data: dict[str, Any] = {
             "id": job_id,
             "store": store,
@@ -269,7 +276,27 @@ class PbsClient:
         }
         if direction == "push":
             data["sync-direction"] = "push"
+        if transfer_last > 0:
+            data["transfer-last"] = transfer_last
+        if remove_vanished:
+            data["remove-vanished"] = 1
         self._replace("sync", job_id, data)
+
+    def start_prune(self, retention: dict[str, int]) -> str:
+        """Prune the whole datastore with vzdump-style ``keep_*`` counts (``keep_daily=7``
+        -> ``keep-daily=7``); returns the task UPID. Zero counts are omitted, and all-zero is
+        refused here rather than sent: PBS would answer 400, and the caller skips the step
+        instead. Protected snapshots are never removed."""
+        keep = {
+            f"keep-{k[5:]}": v for k, v in retention.items() if k.startswith("keep_") and v > 0
+        }
+        if not keep:
+            raise ValueError("start_prune: no keep-* count set")
+        # Always a worker task on PBS's side (no ``use-task`` knob here — 4.2 rejects it as
+        # an unknown property), so the UPID can be tailed and waited on like GC's.
+        return self._api.request(
+            "POST", f"/admin/datastore/{self.datastore}/prune-datastore", data=keep
+        )
 
     def run_sync_job(self, job_id: str) -> str:
         """Run a sync job now; returns the task UPID.

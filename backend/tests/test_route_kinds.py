@@ -125,6 +125,8 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
             "remote_store": "offsite",  # the peer's datastore
             "store": "backup",  # the executing side's own
             "direction": "pull",
+            "transfer_last": 0,
+            "remove_vanished": False,
         }
     }
     # The run call carries no direction (PBS resolves the job by id); the direction lives in
@@ -165,6 +167,8 @@ def test_push_sync_runs_the_job_on_the_source(temp_db):
         "remote_store": "backup",
         "store": "offsite",
         "direction": "push",
+        "transfer_last": 0,
+        "remove_vanished": False,
     }
     assert pbs2.sync_runs == [{"id": "joulenap-r1"}]
     assert pbs2.remotes == {} and pbs2.sync_jobs == {}  # torn down after the run
@@ -172,8 +176,17 @@ def test_push_sync_runs_the_job_on_the_source(temp_db):
     assert _load(run_id)[0] == RunStatus.SUCCESS
 
 
+ZERO_RETENTION = dict.fromkeys(
+    ("keep_last", "keep_daily", "keep_weekly", "keep_monthly", "keep_yearly"), 0
+)
+
+
 def test_sync_tails_the_task_log(temp_db):
-    config = _config("sync", options={"gc": False, "verify_after": False})
+    # No prune/GC/verify: the fake replays the same lines for every task it is asked to
+    # wait on, and this test is about the sync step's tail alone.
+    config = _config(
+        "sync", retention=ZERO_RETENTION, options={"gc": False, "verify_after": False}
+    )
     deps, *_ = _deps(pbs1=FakePbs(log_lines=["sync started", "10 snapshots transferred"]))
 
     run_id = _run(config, deps)
@@ -187,7 +200,7 @@ def test_sync_tails_the_task_log(temp_db):
 
 
 def test_sync_maintenance_runs_on_the_target_only(temp_db):
-    # Push: the source executes the job, but GC/verify still belong to the box that
+    # Push: the source executes the job, but prune/GC/verify still belong to the box that
     # received the snapshots.
     config = _config("sync", sync_direction="push", options={"gc": True, "verify_after": True})
     deps, pbs1, pbs2, _pve = _deps()
@@ -196,9 +209,40 @@ def test_sync_maintenance_runs_on_the_target_only(temp_db):
 
     assert (pbs1.gc_started, pbs1.verify_started) == (True, True)
     assert (pbs2.gc_started, pbs2.verify_started) == (False, False)
+    # The route's retention is applied on the target, with the default keep-* counts.
+    assert pbs1.prune_args == {
+        "keep_last": 0, "keep_daily": 7, "keep_weekly": 4, "keep_monthly": 6, "keep_yearly": 0
+    }
+    assert pbs2.prune_args is None
     _status, steps = _load(run_id)
+    assert steps[StepName.PRUNE] == StepStatus.SUCCESS
+    assert _detail(run_id, StepName.PRUNE) == "UPID:pbs:prune"
     assert steps[StepName.GC] == StepStatus.SUCCESS
     assert steps[StepName.VERIFY] == StepStatus.SUCCESS
+    # Order: retention before GC, so the chunks it frees are GC's to reclaim.
+    with session_scope() as session:
+        names = [s.name for s in session.get(Run, run_id).steps]
+    assert names.index(StepName.PRUNE) < names.index(StepName.GC)
+
+
+def test_sync_with_all_zero_retention_skips_the_prune(temp_db):
+    config = _config("sync", retention=ZERO_RETENTION)
+    deps, pbs1, *_ = _deps()
+
+    run_id = _run(config, deps)
+
+    assert pbs1.prune_args is None
+    assert _load(run_id)[1][StepName.PRUNE] == StepStatus.SKIPPED
+
+
+def test_sync_passes_transfer_last_and_remove_vanished_to_the_job(temp_db):
+    config = _config("sync", options={"transfer_last": 3, "remove_vanished": True})
+    deps, pbs1, *_ = _deps()
+
+    _run(config, deps)
+
+    job = pbs1.sync_jobs_created["joulenap-r1"]
+    assert (job["transfer_last"], job["remove_vanished"]) == (3, True)
 
 
 def test_sync_without_maintenance_skips_both_steps(temp_db):

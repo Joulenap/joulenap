@@ -284,6 +284,9 @@ export interface RouteOptions {
   gc: boolean
   verify_after: boolean
   reverify_days: number
+  // Sync routes only: PBS transfer-last (0 = every snapshot) and remove-vanished.
+  transfer_last: number
+  remove_vanished: boolean
 }
 
 export interface Route {

@@ -31,6 +31,8 @@ const route = (over: Partial<Route>): Route => ({
     gc: true,
     verify_after: false,
     reverify_days: 30,
+    transfer_last: 0,
+    remove_vanished: false,
   },
   ...over,
 })

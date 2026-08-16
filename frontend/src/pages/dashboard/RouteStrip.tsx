@@ -232,6 +232,11 @@ function routeDetail(route: Route, t: (k: string, o?: Record<string, unknown>) =
     )
   } else if (route.kind === 'sync') {
     parts.push(t(`dashboard.sync_${route.sync_direction}`))
+    if (route.options.transfer_last > 0) {
+      parts.push(t('dashboard.syncLastN', { n: route.options.transfer_last }))
+    }
+    // Deletes on the target: worth a word in the strip, not just under Advanced.
+    if (route.options.remove_vanished) parts.push(t('dashboard.syncMirror'))
   } else {
     parts.push(t(`dashboard.kind_${route.kind}_detail`))
   }

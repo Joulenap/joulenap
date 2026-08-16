@@ -84,6 +84,8 @@ class StepName(StrEnum):
     MONITOR = "monitor"
     # Sync route: the remote + sync job run on the executing PBS.
     SYNC = "sync"
+    # Sync route: the route's retention applied on the target datastore after the sync.
+    PRUNE = "prune"
     GC = "gc"
     VERIFY = "verify"
     POWEROFF = "poweroff"

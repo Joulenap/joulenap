@@ -237,7 +237,8 @@ def test_pbs_provision_token_grants_both_remote_roles_for_sync():
     """Sync routes have Joulenap create the remote entry and the sync job itself, and PBS
     refuses ACL writes from a token — so if these two grants don't happen here, while the
     root ticket is still held, they can never happen over the API at all. RemoteAdmin alone
-    covers pull; push additionally needs Remote.DatastoreBackup (RemoteSyncPushOperator)."""
+    covers pull; push additionally needs Remote.DatastoreBackup, and push + remove-vanished
+    Remote.DatastorePrune (both in RemoteDatastoreAdmin)."""
     calls: list = []
     PbsProvisioner(
         "pbs.local", transport=httpx.MockTransport(_pbs_handler(calls))

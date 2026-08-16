@@ -165,6 +165,13 @@ routes: []
 #     schedule:
 #       time: "05:00"
 #       days: [false, false, false, false, false, false, true]   # Sundays only
+#     retention:              # pruned on the TARGET after each sync (all zero = no prune),
+#       keep_daily: 7         # so the copy can keep fewer snapshots than the source
+#       keep_weekly: 4
+#     options:
+#       transfer_last: 0      # copy only the newest N snapshots per group (0 = all)
+#       remove_vanished: false  # DELETE on the target what disappeared from the source.
+#                               # Off = the target only grows (minus its own retention).
 
 # --- Maintenance ---
 # GC and post-backup verify are per-route (routes[].options.gc / .verify_after), and a
