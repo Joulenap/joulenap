@@ -58,7 +58,7 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 ## Status
 
-**v1.0.0.** Built around routes over any number of PVE and PBS devices: backup, PBS→PBS sync,
+**v1.1.0.** Built around routes over any number of PVE and PBS devices: backup, PBS→PBS sync,
 external-schedule watching and verification, driven by a run queue and a per-server power lease
 so a box is woken once and slept once no matter how many routes need it. Packaged as a Docker
 image, with transport hardening (per-device PBS TLS pinning + SSH host-key verification) and auth
@@ -66,7 +66,10 @@ hardening (login rate-limit, session hardening). Includes guided wizards for add
 PBS, run history with a per-step timeline and live task output, the ability to stop a run
 mid-flight, [integrations](docs/INTEGRATIONS.md) for dashboards (Homepage/Homarr/Dashy/Glance)
 and Prometheus, persistent datastore usage shown even while a server is powered off, a
-per-channel notification test report, and a responsive UI that works on a phone.
+per-channel notification test report, and a responsive UI that works on a phone. 1.1 adds
+an independent retention on the target of a sync route (plus PBS `transfer-last` /
+`remove-vanished`), a no-progress timeout on task waits instead of a hard 6-hour cap, and
+runs that can no longer be left hanging by a failed database write.
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and API.
 
 **Known limitation.** Joulenap reads the **root namespace** of a PBS datastore: if your Proxmox
