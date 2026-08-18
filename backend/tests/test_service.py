@@ -30,7 +30,9 @@ def _service(box: FakeBox | None = None) -> tuple[JobService, FakeBox]:
 def _drain(service: JobService, timeout: float = 5) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if service.current() is None and not service.pending() and not service.is_running:
+        # Queue first, then the running entry: read the other way round, the worker can pop
+        # the item between the two reads and both look empty while the run is in flight.
+        if not service.pending() and service.current() is None and not service.is_running:
             return
         time.sleep(0.01)
     raise AssertionError("queue did not drain")
