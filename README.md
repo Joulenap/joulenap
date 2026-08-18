@@ -12,6 +12,10 @@
 </p>
 
 <p align="center">
+  <a href="https://www.joulenap.com/demo/"><strong>Try the live demo</strong></a> · <a href="https://joulenap.com">joulenap.com</a>
+</p>
+
+<p align="center">
   <a href="https://joulenap.com"><img src="https://img.shields.io/badge/website-joulenap.com-6b4fbb" alt="Website"></a>
   <a href="https://github.com/Joulenap/joulenap/actions/workflows/ci.yml"><img src="https://github.com/Joulenap/joulenap/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://coveralls.io/github/Joulenap/joulenap?branch=main"><img src="https://coveralls.io/repos/github/Joulenap/joulenap/badge.svg?branch=main" alt="Coverage"></a>
@@ -35,7 +39,7 @@ A dedicated PBS box is the right way to keep backups on separate hardware (3-2-1
 Joulenap fills that gap with a friendly UI: draw the routes, pick the times, pick which guests go where, and forget it.
 
 
-<img src="assets/homepage.jpg" width="830" title="Homepage">
+<a href="https://www.joulenap.com/demo/"><img src="assets/homepage.jpg" width="830" title="Homepage (click for the live demo)"></a>
 
 ## How it works
 
