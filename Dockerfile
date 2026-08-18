@@ -36,6 +36,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Pull in Debian security fixes published after the base image was built, so a fixed CVE
+# does not sit in our image until upstream rebuilds python:3.12-slim.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 # Install the backend package and its dependencies from pyproject. hatchling reads the
 # README referenced as "../README.md", so it must be present in the build context.
 # The cryptography/bcrypt/psutil wheels are manylinux prebuilds, so no compiler is needed.
