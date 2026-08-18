@@ -1,8 +1,10 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/lockup-dark.svg">
-    <img src="assets/lockup.svg" alt="Joulenap" width="360">
-  </picture>
+  <a href="https://joulenap.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/lockup-dark.svg">
+      <img src="assets/lockup.svg" alt="Joulenap" width="360">
+    </picture>
+  </a>
 </p>
 
 <p align="center">
@@ -10,6 +12,7 @@
 </p>
 
 <p align="center">
+  <a href="https://joulenap.com"><img src="https://img.shields.io/badge/website-joulenap.com-6b4fbb" alt="Website"></a>
   <a href="https://github.com/Joulenap/joulenap/actions/workflows/ci.yml"><img src="https://github.com/Joulenap/joulenap/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://coveralls.io/github/Joulenap/joulenap?branch=main"><img src="https://coveralls.io/repos/github/Joulenap/joulenap/badge.svg?branch=main" alt="Coverage"></a>
   <a href="https://github.com/Joulenap/joulenap/releases/latest"><img src="https://img.shields.io/github/v/release/Joulenap/joulenap" alt="Latest release"></a>
