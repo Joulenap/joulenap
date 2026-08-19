@@ -523,3 +523,43 @@ test('a cron-pinned route does not need a weekday ticked', () => {
   noCronNoDays.days = Array(7).fill(false)
   assert.ok(keys(noCronNoDays).includes('dashboard.routeModal.errNoDay'))
 })
+
+test('a difference in any single retention field is a conflict', () => {
+  // retentionDiffers is a chain of ors; a broken link means two routes that really will
+  // prune each other's snapshots are reported as compatible, which is the silent
+  // data-loss case this warning exists for.
+  for (const field of ['keep_last', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly'] as const) {
+    const other = route('weekly', {
+      name: 'Weekly',
+      retention: { ...DEFAULT_RETENTION, [field]: 42 },
+    })
+    assert.deepEqual(
+      retentionOverlaps(draft({ id: 'nightly' }), [other]),
+      ['Weekly'],
+      `${field} differing should be a conflict`,
+    )
+  }
+})
+
+test('the guest-selection check only applies to backup routes', () => {
+  // Reachable the moment a PBS chip is added to a route that already has PVE sources:
+  // inferKind calls that sync, but pveSources is still non-empty, so without the kind
+  // check the form would refuse to save over guests the route no longer backs up.
+  const mixed = draft({
+    sourceIds: ['pve:pve-alpha', 'pbs:pbs-01'],
+    target: 'pbs-02',
+    guestMode: 'include',
+    selection: { 'pve-alpha': [] },
+  })
+  assert.equal(inferKind(mixed.sourceIds, mixed.onWake), 'sync')
+  assert.ok(!keys(mixed).includes('dashboard.routeModal.errNoGuests'))
+
+  // The same empty selection on a real backup route is still refused.
+  const backup = draft({
+    sourceIds: ['pve:pve-alpha'],
+    target: 'pbs-01',
+    guestMode: 'include',
+    selection: { 'pve-alpha': [] },
+  })
+  assert.ok(keys(backup).includes('dashboard.routeModal.errNoGuests'))
+})
