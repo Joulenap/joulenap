@@ -489,3 +489,37 @@ test('a retention change in any single field counts as a change', () => {
     assert.equal(saved.retention?.[field], 99, field)
   }
 })
+
+test('the sync single-source rule only applies to sync routes', () => {
+  // `kind === 'sync' && length > 1`: with the kind check dropped, a two-PVE backup route
+  // (the normal case) would be refused.
+  const twoPves = draft({ sourceIds: ['pve:pve-alpha', 'pve:pve-beta'], target: 'pbs-01' })
+  assert.ok(!keys(twoPves).includes('dashboard.routeModal.errSyncSingle'))
+})
+
+test('the storage check only applies once a target is chosen', () => {
+  // `kind === 'backup' && draft.target`: without the target check it would report "no
+  // storage for pbs undefined" the moment a source chip is added.
+  const noTarget = draft({ sourceIds: ['pve-lab'], target: '' })
+  assert.ok(!keys(noTarget).includes('dashboard.routeModal.errNoStorage'))
+})
+
+test('an external route onto a managed box is accepted', () => {
+  // `target && !target.managed_power`: with the flag check dropped, every external route
+  // would be refused, including the ones that are the whole point of the kind.
+  const managed = draft({ sourceIds: [], onWake: 'external', target: 'pbs-01' })
+  assert.ok(!keys(managed).includes('dashboard.routeModal.errExternalUnmanaged'))
+})
+
+test('a cron-pinned route does not need a weekday ticked', () => {
+  // `!draft.cron && !days.some(...)`: the raw cron replaces the weekday toggles entirely,
+  // so demanding a day as well would make the advanced schedule unusable.
+  const pinned = draft({ sourceIds: ['pve:pve-alpha'], target: 'pbs-01' })
+  pinned.cron = '0 4 1 * *'
+  pinned.days = Array(7).fill(false)
+  assert.ok(!keys(pinned).includes('dashboard.routeModal.errNoDay'))
+
+  const noCronNoDays = draft({ sourceIds: ['pve:pve-alpha'], target: 'pbs-01' })
+  noCronNoDays.days = Array(7).fill(false)
+  assert.ok(keys(noCronNoDays).includes('dashboard.routeModal.errNoDay'))
+})

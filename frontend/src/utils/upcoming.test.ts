@@ -107,6 +107,21 @@ const NEXT = [
   { route_id: 'nightly', route_name: 'Nightly', at: local(2026, 8, 4, 2, 0).toISOString() },
 ]
 
+test('only the running row is marked as now', () => {
+  // `now` is what renders the pulsing dot, so a scheduled row inheriting it would show a
+  // future firing as if it were happening.
+  const rows = upcomingRows({
+    running: { routeId: 'nightly', routeName: 'Nightly' },
+    nextRuns: NEXT,
+    routes: [nightly, lab],
+    capacity: 5,
+  })
+
+  assert.equal(rows.filter((r) => r.now).length, 1)
+  assert.equal(rows[0].now, true)
+  assert.ok(rows.slice(1).every((r) => r.now === false))
+})
+
 test('the running row comes first and carries no timestamp', () => {
   const rows = upcomingRows({
     running: { routeId: 'nightly', routeName: 'Nightly' },

@@ -54,6 +54,22 @@ def test_a_lapsed_lock_starts_a_fresh_streak():
     assert rl.locked_for("5.5.5.5") == 0.0  # one failure into a new streak, not locked
 
 
+def test_the_expiry_instant_clears_the_entry_not_just_the_answer():
+    # locked_for reports 0 either way at the exact instant; what has to happen *as well* is
+    # that the entry is dropped, so the next failure starts a fresh streak instead of
+    # re-locking immediately off the old count.
+    t = [0.0]
+    rl = LoginRateLimiter(max_failures=2, lockout_seconds=50, now=lambda: t[0])
+    rl.record_failure("7.7.7.7")
+    rl.record_failure("7.7.7.7")
+
+    t[0] = 50.0
+    assert rl.locked_for("7.7.7.7") == 0.0
+
+    rl.record_failure("7.7.7.7")
+    assert rl.locked_for("7.7.7.7") == 0.0  # one of two, not locked again
+
+
 def test_an_ip_that_never_failed_is_never_locked():
     rl = LoginRateLimiter(max_failures=1, lockout_seconds=50, now=lambda: 0.0)
     assert rl.locked_for("6.6.6.6") == 0.0

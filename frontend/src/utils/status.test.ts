@@ -222,3 +222,17 @@ test('runDurationMs returns null on an unparseable timestamp and never goes nega
     0,
   )
 })
+
+test('the routeless failed pill is shaped like its named twin', () => {
+  // The named branch is deep-equalled above; this one was only checked for its label, so
+  // `busy` was free to drift and spin the header on a run that is long over.
+  const adhoc = headerPill(
+    status({ last_run: lastRun({ status: 'failure', route_id: null, route_name: null }) }),
+  )
+  assert.deepEqual(adhoc, {
+    labelKey: 'status.lastRunFailedRun',
+    tone: 'red',
+    busy: false,
+    failedAt: '2026-08-08T00:30:00Z',
+  })
+})

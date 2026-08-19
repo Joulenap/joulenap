@@ -411,3 +411,14 @@ test('the port bounds are refused at both ends', () => {
   assert.ok(!keys(1).includes('settings.devices.errPort'))
   assert.ok(!keys(65535).includes('settings.devices.errPort'))
 })
+
+test('an emptied SSH user falls back to root rather than to nothing', () => {
+  // `draft.sshUser.trim() || 'root'`: an empty ssh_user reaches the backend as a device
+  // that can never be powered off, and the failure only shows up at the end of a backup.
+  const device = pbsDeviceFrom(
+    { ...freshPbsDraft([]), host: 'pbs.lan', datastore: 'backup', mac: '00:11:22:33:44:55', sshUser: '   ' },
+    { id: 'root@pam!joulenap-backup', secret: 'sec' },
+  )
+
+  assert.equal(device.ssh_user, 'root')
+})

@@ -394,14 +394,17 @@ def test_node_status_converts_cpu_fraction_and_memory_bytes_to_percentages():
         return json_data(
             {
                 "cpu": 0.073,  # 7.3% -> 7
-                "memory": {"total": 8_000_000_000, "used": 3_000_000_000},  # 37.5% -> 38
+                # 90%, deliberately not a round third: a percentage computed against the
+                # wrong scale lands on a different integer here rather than rounding back
+                # onto the right answer.
+                "memory": {"total": 10_000_000_000, "used": 9_000_000_000},
                 "uptime": 3600,
             }
         )
 
     load = make_client(handler).node_status()
 
-    assert (load.cpu, load.mem, load.uptime) == (7, 38, 3600)
+    assert (load.cpu, load.mem, load.uptime) == (7, 90, 3600)
 
 
 def test_node_status_survives_a_node_reporting_no_memory():

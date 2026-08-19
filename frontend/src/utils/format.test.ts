@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { fmtBytesTB, fmtDuration, fmtUptime, rel } from './format.ts'
+import { fmtBytesTB, fmtClock, fmtDT, fmtDuration, fmtShort, fmtUptime, rel } from './format.ts'
 
 test('rel: sub-minute vs rounds-to-a-minute', () => {
   assert.equal(rel(0), '<1m')
@@ -41,4 +41,21 @@ test('fmtUptime: compact d/h/m with rollovers', () => {
   assert.equal(fmtUptime(3660), '1h 1m')
   assert.equal(fmtUptime(90_000), '1d 1h')
   assert.equal(fmtUptime(-5), '0m')
+})
+
+test('fmtClock shows seconds by default and drops them on request', () => {
+  // The header clock ticks every second, so the default matters; the compact form is what
+  // the run rows use. Neither was covered.
+  const d = new Date(2026, 7, 19, 4, 5, 9)
+  assert.equal(fmtClock(d), '04:05:09')
+  assert.equal(fmtClock(d, false), '04:05')
+  assert.equal(fmtClock(d, true), '04:05:09')
+})
+
+test('fmtDT and fmtShort pad every field to two digits', () => {
+  // Day/month order is deliberate and locale-independent here; an unpadded field would
+  // make the column ragged and the dates ambiguous.
+  const d = new Date(2026, 7, 3, 4, 5)
+  assert.equal(fmtShort(d), '03/08 04:05')
+  assert.ok(fmtDT(d).endsWith('03/08 04:05'))
 })

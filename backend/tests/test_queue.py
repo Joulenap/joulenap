@@ -554,3 +554,31 @@ def test_a_powered_off_box_is_not_reported_as_left_on(temp_config, temp_db):
 
     assert box.poweroffs == ["pbs1"]
     assert seen[0].left_on == []
+
+
+def test_a_job_that_explodes_still_releases_its_lease(temp_config, temp_db):
+    """The last-resort release in the worker's finally block.
+
+    A job that raises out of the recorder block leaves the leases held, and a held lease is
+    never revisited: the queue moves on and nothing would ever put that box back to sleep.
+    The box itself stays on, which is the documented behaviour for a run that did not
+    succeed, but the *lease* has to be given back or the next run cannot take it either.
+    """
+    service, box = make_service()
+
+    def exploding_job(_config, _subject, _recorder, _deps):
+        raise RuntimeError("job exploded")
+
+    enqueue(service, "r1", exploding_job, trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    pbs = next(p for p in service._store.config.pbss if p.id == "pbs1")
+    assert service.lease.state(pbs).holders == 0
+    assert box.poweroffs == []  # a run that failed leaves the box up for inspection
+
+    # And the queue is usable afterwards rather than wedged: the next run takes the lease
+    # and closes the box normally.
+    enqueue(service, "r2", ok_job, trigger=RunTrigger.SCHEDULED)
+    drain(service)
+    assert box.poweroffs == ["pbs1"]
+    assert service.lease.state(pbs).holders == 0

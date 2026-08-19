@@ -210,3 +210,65 @@ test('a 204 resolves to nothing instead of failing to parse an empty body', asyn
     restore()
   }
 })
+
+test('a successful GET returns the parsed body', async () => {
+  // Guards the 204 branch from the other side: treating every response as empty would
+  // hand every caller undefined and blank the whole dashboard.
+  const { restore } = recordFetch(jsonResponse(200, { scheduler_enabled: false }))
+  try {
+    assert.deepEqual(await api.status(), { scheduler_enabled: false })
+  } finally {
+    restore()
+  }
+})
+
+test('an abort that is not our timeout is not disguised as a 408', async () => {
+  // Only our own backstop produces 408. A different DOMException has to reach the caller
+  // as itself, or a real browser error would be reported as "the request timed out".
+  const orig = globalThis.fetch
+  globalThis.fetch = (async () => {
+    throw new DOMException('network changed', 'NetworkError')
+  }) as typeof fetch
+  try {
+    await assert.rejects(
+      () => api.status(),
+      (e: unknown) => e instanceof DOMException && e.name === 'NetworkError',
+    )
+  } finally {
+    globalThis.fetch = orig
+  }
+})
+
+test('an error body with no detail keeps the status text', async () => {
+  // `j && typeof j.detail !== 'undefined'`: without the second half, the message becomes
+  // the string "undefined" instead of something the user can read.
+  const { restore } = recordFetch(
+    new Response(JSON.stringify({ error: 'nope' }), {
+      status: 500,
+      statusText: 'Internal Server Error',
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  )
+  try {
+    await assert.rejects(
+      () => api.status(),
+      (e: unknown) => e instanceof ApiError && e.message === 'Internal Server Error',
+    )
+  } finally {
+    restore()
+  }
+})
+
+test('an omitted password is sent as null, not dropped from the body', async () => {
+  // The backend reads null/"" as "keep the current password"; a missing key would be a
+  // different request shape and the account form would stop being able to say "unchanged".
+  const { calls, restore } = recordFetch(jsonResponse(200, { username: 'admin' }))
+  try {
+    await api.updateAccount('current-pw', 'admin')
+    const body = JSON.parse(calls[0].body as string)
+    assert.ok('password' in body)
+    assert.equal(body.password, null)
+  } finally {
+    restore()
+  }
+})
