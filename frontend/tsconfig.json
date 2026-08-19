@@ -15,8 +15,11 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "types": ["node"]
+    "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The tests run under node, not in the browser, so they are checked by tsconfig.test.json
+  // with the node types added. Pulling those in here instead would put node's globals in
+  // scope for app code and change what `fetch`, `RequestInit` and friends mean.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

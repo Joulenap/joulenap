@@ -124,3 +124,11 @@ test('a cron-pinned route shows the cron and suppresses time/days', () => {
   assert.equal(s.time, '')
   assert.equal(s.daysKey, 'dashboard.scheduleCron')
 })
+
+test('a half-built sync route does not report an unpicked source box', () => {
+  // Both halves of the condition matter: kind alone would push an empty id into the
+  // topology wires and the "left powered on" list.
+  assert.deepEqual(routePbss(route({ kind: 'sync', source_pbs: '', target: 'pbs-02' })), [
+    'pbs-02',
+  ])
+})

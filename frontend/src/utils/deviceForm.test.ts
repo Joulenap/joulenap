@@ -247,3 +247,13 @@ test('deviceSaveErrors pins a 422 on its field and a whole-config error on the b
     { message: 'api_token_secret was sent as ***REDACTED***' },
   ])
 })
+
+test('an unmanaged box that is down reads offline, not always-on', () => {
+  // managedPower defaults to false, so an omitted argument must mean "not ours to wake":
+  // calling a downed box "sleeping" would present a fault as normal behaviour.
+  assert.equal(deviceState(false), 'offline')
+  assert.equal(deviceState(undefined), 'offline')
+  assert.equal(deviceState(false, false), 'offline')
+  assert.equal(deviceState(false, true), 'sleeping')
+  assert.equal(deviceState(true, false), 'connected')
+})

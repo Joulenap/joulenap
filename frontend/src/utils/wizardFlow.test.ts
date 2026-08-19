@@ -343,3 +343,71 @@ test('nothing to warn about when no one else uses that host', () => {
   const victims = tokenConflictVictims('192.0.2.50', [], { pve: [] })
   assert.deepEqual(victims, { devices: [], storages: [] })
 })
+
+// --- the defaults the wizard starts a device from ----------------------------
+//
+// These are what a user gets by clicking through with nothing typed, so each one is a
+// decision. verify_tls in particular is the frontend twin of the backend default: it is
+// what actually lands in config.yaml, and nothing asserted it.
+
+test('a new Proxmox host starts on the PVE port in root mode', () => {
+  const draft = freshPveDraft([])
+
+  assert.equal(draft.port, 8006) // PVE, not the PBS 8007
+  assert.equal(draft.cred, 'root') // quick setup: mint a scoped token from a root password
+  assert.equal(draft.user, 'root@pam')
+  assert.equal(draft.host, '') // nothing pre-filled that could be saved unread
+})
+
+test('a new backup server starts managed, on the PBS port, installing its own key', () => {
+  const draft = freshPbsDraft([])
+
+  assert.equal(draft.port, 8007)
+  // managedPower on is what makes this a power-saving tool rather than a backup scheduler.
+  assert.equal(draft.managedPower, true)
+  assert.equal(draft.autoInstall, true) // offer to install the SSH key, since we generated it
+  assert.equal(draft.sshUser, 'root')
+  assert.equal(draft.cred, 'root')
+})
+
+test('the saved Proxmox device does not verify TLS', () => {
+  // Homelab certificates are self-signed. This is the value that reaches config.yaml, so
+  // it belongs in a test even though (especially though) it is the permissive choice.
+  const device = pveDeviceFrom(
+    { ...freshPveDraft([]), host: '192.168.1.10' },
+    { id: 'root@pam!joulenap', secret: 'sec' },
+    {},
+  )
+
+  assert.equal(device.verify_tls, false)
+})
+
+test('token mode needs both halves, and either one missing is refused', () => {
+  // `tokenId && tokenSecret`: with the wrong operator, half a credential would be sent to
+  // the backend and come back as a confusing 401 instead of a field error.
+  const withToken = (over: Record<string, string>) => ({
+    ...freshPveDraft([]),
+    host: 'pve.lan',
+    cred: 'token' as const,
+    tokenId: 'root@pam!joulenap',
+    tokenSecret: 'sec',
+    ...over,
+  })
+  const keys = (draft: ReturnType<typeof withToken>) =>
+    validateConnectStep(draft, [], []).map((e) => e.key)
+
+  assert.deepEqual(keys(withToken({})), [])
+  assert.ok(keys(withToken({ tokenId: '' })).includes('wizard.err.tokenRequired'))
+  assert.ok(keys(withToken({ tokenSecret: '' })).includes('wizard.err.tokenRequired'))
+  assert.ok(keys(withToken({ tokenId: '   ' })).includes('wizard.err.tokenRequired'))
+})
+
+test('the port bounds are refused at both ends', () => {
+  const draft = (port: number) => ({ ...freshPveDraft([]), host: 'pve.lan', password: 'pw', port })
+  const keys = (port: number) => validateConnectStep(draft(port), [], []).map((e) => e.key)
+
+  assert.ok(keys(0).includes('settings.devices.errPort'))
+  assert.ok(keys(65536).includes('settings.devices.errPort'))
+  assert.ok(!keys(1).includes('settings.devices.errPort'))
+  assert.ok(!keys(65535).includes('settings.devices.errPort'))
+})

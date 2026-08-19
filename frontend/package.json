@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "build:demo": "tsc --noEmit && vite build --mode demo --base ./ --outDir dist-demo",
+    "build": "npm run typecheck && vite build",
+    "build:demo": "npm run typecheck && vite build --mode demo --base ./ --outDir dist-demo",
     "preview": "vite preview",
-    "test": "node --test"
+    "test": "node --test",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",

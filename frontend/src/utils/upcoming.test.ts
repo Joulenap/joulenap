@@ -72,6 +72,28 @@ test('a malformed time yields nothing instead of Invalid Date rows', () => {
   assert.deepEqual(nextOccurrences(sched({ time: 'nope' }), local(2026, 8, 3), 3), [])
 })
 
+test('half a malformed time is still malformed', () => {
+  // Either field alone being unparseable has to stop it: an hour with a junk minute would
+  // otherwise render an Invalid Date row on the dashboard.
+  assert.deepEqual(nextOccurrences(sched({ time: '04:xx' }), local(2026, 8, 3), 3), [])
+  assert.deepEqual(nextOccurrences(sched({ time: 'xx:30' }), local(2026, 8, 3), 3), [])
+})
+
+test('asking for no occurrences returns none, and asking for one returns one', () => {
+  // `count <= 0` is the guard: with a strict `<`, a zero-length panel would still scan
+  // seven days per requested row and hand back a firing nobody asked for.
+  assert.deepEqual(nextOccurrences(sched({}), local(2026, 8, 3), 0), [])
+  assert.deepEqual(nextOccurrences(sched({}), local(2026, 8, 3), -1), [])
+  assert.equal(nextOccurrences(sched({}), local(2026, 8, 3), 1).length, 1)
+})
+
+test('a schedule with every day switched off never fires', () => {
+  assert.deepEqual(
+    nextOccurrences(sched({ days: Array(7).fill(false) }), local(2026, 8, 3), 3),
+    [],
+  )
+})
+
 // --- upcomingRows ------------------------------------------------------------
 
 const nightly = route('nightly', { color: '#e8830f' })

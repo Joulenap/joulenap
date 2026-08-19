@@ -429,3 +429,63 @@ test('anything else falls back to the message the client already built', () => {
     { message: 'config.yaml is read-only' },
   ])
 })
+
+// --- the defaults a new route starts from ------------------------------------
+//
+// Asserted whole, because these are what the user gets by opening the modal and pressing
+// Save. Nothing pinned them, so every flag in DEFAULT_OPTIONS and every field of a fresh
+// draft could flip without a single test noticing.
+
+test('a new route runs GC, does not verify, and does not remove vanished snapshots', () => {
+  assert.deepEqual(DEFAULT_OPTIONS, {
+    mode: 'snapshot',
+    bwlimit: 0,
+    min_free_percent: 0, // the free-space preflight is opt-in
+    gc: true, // reclaiming space is the point of an automated backup
+    verify_after: false, // verification is slow; it is a choice, not a default
+    reverify_days: 30,
+    transfer_last: 0,
+    remove_vanished: false, // never delete on the target unless asked
+  })
+})
+
+test('the default retention is a week of dailies tapering to six months', () => {
+  assert.deepEqual(DEFAULT_RETENTION, {
+    keep_last: 0, // no "keep the last N whatever they are": the tiers below decide
+    keep_daily: 7,
+    keep_weekly: 4,
+    keep_monthly: 6,
+    keep_yearly: 0,
+  })
+})
+
+test('a fresh draft is enabled, notifying, and armed every day', () => {
+  const draft = draftFromRoute(null, [pbs('pbs-01'), pbs('pbs-02')])
+
+  assert.equal(draft.enabled, true) // a route you just created should run
+  assert.equal(draft.notify, true) // and tell you when it did
+  assert.deepEqual(draft.days, Array(7).fill(true))
+  assert.equal(draft.time, '04:00')
+  assert.equal(draft.cron, '') // the simple schedule, not the raw escape hatch
+  assert.equal(draft.guestMode, 'all')
+  assert.equal(draft.target, 'pbs-01') // the first backup server, not an empty select
+  assert.deepEqual(draft.options, DEFAULT_OPTIONS)
+})
+
+test('a fresh draft has no target when there is no backup server yet', () => {
+  assert.equal(draftFromRoute(null, []).target, '')
+})
+
+test('a retention change in any single field counts as a change', () => {
+  // The comparison is a chain of ors; with one link broken, editing that one field would
+  // save a route whose retention silently reverted to the stored value.
+  const stored = route('nightly')
+  for (const field of ['keep_last', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly'] as const) {
+    const draft = {
+      ...draftFromRoute(stored, [pbs('pbs-01')]),
+      retention: { ...DEFAULT_RETENTION, [field]: 99 },
+    }
+    const saved = draftToRoute(draft, [])
+    assert.equal(saved.retention?.[field], 99, field)
+  }
+})
