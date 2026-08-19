@@ -53,7 +53,7 @@
 
 /* Theme palettes. Dark is the default; index.html sets data-theme before first paint from
    localStorage, and ConfigContext keeps it in sync with app.theme. Every color the app uses
-   must exist in BOTH blocks (test/theme-parity.test.js enforces it). */
+   must exist in BOTH blocks (src/theme.test.ts enforces it). */
 :root {
   color-scheme: dark;
   --jn-bg: #0f1216;

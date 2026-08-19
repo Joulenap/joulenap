@@ -22,8 +22,6 @@ import {
   validateDraft,
 } from './routeForm.ts'
 
-const PBS_IDS = ['pbs-01', 'pbs-02']
-
 const pve = (id: string, storages: Record<string, string> = { 'pbs-01': 'pbs-backup' }): PveDevice => ({
   id,
   host: '10.0.0.1',
