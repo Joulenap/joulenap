@@ -103,3 +103,46 @@ def test_password_is_hashed_not_plaintext(client, temp_config):
 def test_setup_rejects_short_password(client):
     r = client.post("/api/auth/setup", json={"username": "admin", "password": "1234"})
     assert r.status_code == 422
+
+
+# --- the password-length boundary ---------------------------------------------
+#
+# Eight is the documented minimum, so both sides of it need a test: a nine-character
+# password proves nothing about where the line sits, and "at least 8" quietly becoming
+# "more than 8" would reject the password the setup wizard itself suggests.
+
+
+def test_exactly_eight_characters_is_accepted_at_setup(client):
+    r = client.post("/api/auth/setup", json={"username": "admin", "password": "12345678"})
+    assert r.status_code == 201
+
+
+def test_seven_characters_is_refused_at_setup(client):
+    r = client.post("/api/auth/setup", json={"username": "admin", "password": "1234567"})
+    assert r.status_code == 422
+
+
+def test_exactly_eight_characters_is_accepted_on_an_account_change(client):
+    client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
+
+    r = client.put(
+        "/api/account",
+        json={"current_password": "secret12", "username": "admin", "password": "abcdefgh"},
+    )
+
+    assert r.status_code == 200
+    client.post("/api/logout")
+    assert client.post(
+        "/api/login", json={"username": "admin", "password": "abcdefgh"}
+    ).status_code == 200
+
+
+def test_seven_characters_is_refused_on_an_account_change(client):
+    client.post("/api/auth/setup", json={"username": "admin", "password": "secret12"})
+
+    r = client.put(
+        "/api/account",
+        json={"current_password": "secret12", "username": "admin", "password": "abcdefg"},
+    )
+
+    assert r.status_code == 422

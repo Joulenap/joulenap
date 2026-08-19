@@ -280,3 +280,24 @@ def test_http_error_becomes_apierror():
     with pytest.raises(ApiError) as exc:
         make_client(handler).version()
     assert exc.value.status == 401
+
+
+def test_a_plain_400_is_an_error_too():
+    """400 is the boundary of "4xx/5xx is a failure", and PVE returns it for a rejected
+    vzdump parameter. With the comparison one off, a 400 would be parsed as a success and
+    the run would report a backup that never started."""
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, text="parameter verification failed")
+
+    with pytest.raises(ApiError) as exc:
+        make_client(handler).version()
+    assert exc.value.status == 400
+    assert "parameter verification failed" in str(exc.value)
+
+
+def test_a_399_is_not_treated_as_an_error():
+    # The other side of the same line: a 3xx must not be turned into a failure.
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": {"version": "8.2"}})
+
+    assert make_client(handler).version() == {"version": "8.2"}

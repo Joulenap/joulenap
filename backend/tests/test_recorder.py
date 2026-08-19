@@ -247,3 +247,46 @@ def test_a_run_whose_session_died_is_still_closed_out(temp_db):
     assert len(factory_calls) == 2  # the fallback session
     status, _steps = _run_status(rec.run_id)
     assert status == RunStatus.FAILURE  # not RUNNING: no zombie for the restart sweep
+
+
+def test_a_localized_error_stores_its_key_and_params(temp_db):
+    """error_key/error_params are what the notification layer translates from, so both have
+    to survive the round trip: the key selects the sentence, the params fill it in."""
+    from app.notify.messages import LocalizedError
+
+    with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
+        run_id = recorder.run_id
+        recorder.finish(RunStatus.ABORTED, error=LocalizedError("no_storage_mapping", pve="pve-1"))
+
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.error_key == "no_storage_mapping"
+        assert json.loads(run.error_params) == {"pve": "pve-1"}
+
+
+def test_an_exception_from_a_library_lands_under_unexpected_with_its_text(temp_db):
+    # Someone else's exception has no key of its own: a translated frame around a verbatim
+    # payload, rather than an untranslated traceback in the notification.
+    with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
+        run_id = recorder.run_id
+        recorder.finish(RunStatus.FAILURE, error=RuntimeError("boom"))
+
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.error == "boom"
+        assert run.error_key == "unexpected"
+        assert json.loads(run.error_params) == {"detail": "boom"}
+
+
+def test_a_plain_string_error_stores_no_key_and_no_params(temp_db):
+    # The third branch: raw text keeps the pre-i18n behaviour, stored and rendered as-is,
+    # and must leave error_params NULL so nothing tries to json.loads it.
+    with RunRecorder(RunKind.CYCLE, RunTrigger.MANUAL) as recorder:
+        run_id = recorder.run_id
+        recorder.finish(RunStatus.FAILURE, error="something went wrong")
+
+    with session_scope() as session:
+        run = session.get(Run, run_id)
+        assert run.error == "something went wrong"
+        assert run.error_key is None
+        assert run.error_params is None

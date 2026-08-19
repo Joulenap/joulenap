@@ -263,6 +263,10 @@ class FakeBox:
         self.wol: list[str] = []  # pbs ids a magic packet was sent to, in order
         self.waits: list[float] = []  # the timeout of every reachability probe
         self.poweroffs: list[str] = []  # pbs ids actually powered off
+        # Recorded rather than proved by raising: the lease swallows idle-check errors on
+        # purpose (a flaky check must not keep a box awake), so an exception here produces
+        # the same outcome as a successful check and cannot show whether it was skipped.
+        self.idle_checks: list[str] = []
 
     def _answer(self) -> bool:
         if isinstance(self._reachable, list):
@@ -279,7 +283,8 @@ class FakeBox:
         def send_wol(pbs) -> None:
             self.wol.append(pbs.id)
 
-        def wait_idle(_pbs) -> bool:
+        def wait_idle(pbs) -> bool:
+            self.idle_checks.append(pbs.id)
             if self.idle_error is not None:
                 raise self.idle_error
             return self.idle
