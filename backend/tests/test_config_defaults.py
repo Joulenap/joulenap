@@ -36,7 +36,7 @@ def test_no_outbound_call_is_configured_by_default():
 
 
 def test_pve_tls_verification_defaults_to_off():
-    # Homelab Proxmox certificates are self-signed, so off is the deliberate default —
+    # Homelab Proxmox certificates are self-signed, so off is the deliberate default,
     # but it has to be the *declared* one, not one the example happens to repeat.
     assert PveDevice(id="pve-01").verify_tls is False
 

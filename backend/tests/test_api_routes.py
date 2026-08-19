@@ -94,7 +94,7 @@ def test_create_rejects_a_backup_route_with_no_storage_mapping(app_ctx):
 
 
 def test_create_rejects_a_cron_the_model_cannot_catch(app_ctx, temp_config):
-    """It wouldn't crash arming — but the route would silently never fire, which is worse.
+    """It wouldn't crash arming, but the route would silently never fire, which is worse.
 
     ``0 4 * * 8`` is deliberately *well-formed*: five fields, so ``RouteSchedule`` accepts it
     and only ``check_route_crons`` (BE-B1) can reject it. A 4-field string never reaches the
