@@ -446,3 +446,17 @@ def test_keep_on_leaves_the_box_awake(app_ctx):
     _drain(app)
 
     assert box.poweroffs == []
+
+
+def test_maintenance_with_no_body_powers_the_box_back_off(app_ctx):
+    """The default half of ``keep_on``, and the reason this app exists: the "Run GC" button
+    sends no body, so the model default is what decides whether the box goes back to sleep.
+    Flipping it to True left every ad-hoc run's box awake with nothing failing."""
+    client, app = app_ctx
+    box = FakeBox()
+    _inject(app, box=box)
+
+    assert client.post("/api/devices/pbss/pbs-01/gc").status_code == 202
+    _drain(app)
+
+    assert box.poweroffs == ["pbs-01"]

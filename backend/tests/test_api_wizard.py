@@ -278,3 +278,86 @@ def test_wol_test_falls_back_to_the_global_broadcast_without_a_host(client, monk
 
     assert resp.status_code == 200
     assert sent == [("00:11:22:33:44:55", "255.255.255.255")]
+
+
+# --- request-model defaults ---------------------------------------------------
+#
+# Every field below is a default the UI relies on by *omitting* it. Nothing pinned them,
+# so the whole of api/wizard.py could be mutated freely without a single failure: a
+# replace_token defaulting to True would have silently replaced a token on a live backup
+# server, which is exactly what test_an_existing_token_is_never_replaced_silently guards
+# one layer down.
+
+
+def _capture(monkeypatch, name: str, result: dict) -> dict:
+    """Patch a core-wizard entry point and hand back the kwargs the router forwarded."""
+    captured: dict = {}
+
+    def fake(**kwargs):
+        captured.update(kwargs)
+        return result
+
+    monkeypatch.setattr(wizard, name, fake)
+    return captured
+
+
+def test_pve_connect_defaults_to_the_pve_port_no_tls_and_no_token_replacement(
+    client, monkeypatch
+):
+    captured = _capture(
+        monkeypatch, "pve_connect", {"connected": True, "nodes": [], "storages": [], "token": None}
+    )
+
+    assert client.post("/api/wizard/pve/connect", json={"host": "pve.local"}).status_code == 200
+
+    assert captured["port"] == 8006  # PVE, not the PBS 8007 next door
+    assert captured["verify_tls"] is False  # homelab certs are self-signed
+    assert captured["replace_token"] is False  # never clobber a token unasked
+    assert captured["mode"] == "token"  # the safe mode: no root password involved
+    assert captured["token_name"] == "joulenap"
+
+
+def test_pbs_provision_defaults_to_the_pbs_port_no_tls_and_no_token_replacement(
+    client, monkeypatch
+):
+    captured = _capture(monkeypatch, "pbs_provision", {"id": "root@pam!joulenap", "secret": "s"})
+
+    r = client.post(
+        "/api/wizard/pbs/provision",
+        json={"host": "pbs.local", "password": "pw", "datastore": "backup"},
+    )
+    assert r.status_code == 200
+
+    assert captured["port"] == 8007
+    assert captured["verify_tls"] is False
+    assert captured["replace_token"] is False
+    assert captured["username"] == "root@pam"
+    assert captured["fingerprint"] == ""  # nothing pinned until the check step supplies one
+
+
+def test_pbs_check_defaults_to_the_pbs_port(client, monkeypatch):
+    captured = _capture(monkeypatch, "pbs_check", {"reachable": True, "fingerprint": None})
+
+    assert client.post("/api/wizard/pbs/check", json={"host": "pbs.local"}).status_code == 200
+
+    assert captured["port"] == 8007
+
+
+def test_the_ssh_endpoints_default_to_port_22_and_the_root_user(client, monkeypatch):
+    install = _capture(monkeypatch, "ssh_install", {"installed": True})
+    client.post(
+        "/api/wizard/ssh/install",
+        json={"host": "pbs.local", "password": "pw", "public_key": "ssh-ed25519 AAAA"},
+    )
+    assert install["port"] == 22 and install["user"] == "root"
+
+    hostkey = _capture(monkeypatch, "ssh_hostkey", {"key_type": "ssh-ed25519", "key_base64": "AA"})
+    client.post("/api/wizard/ssh/hostkey", json={"host": "pbs.local"})
+    assert hostkey["port"] == 22
+
+    trust = _capture(monkeypatch, "ssh_trust", {"trusted": True})
+    client.post(
+        "/api/wizard/ssh/trust",
+        json={"host": "pbs.local", "key_type": "ssh-ed25519", "key_base64": "AA"},
+    )
+    assert trust["port"] == 22

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from fakes import FakeBox, make_deps
+from fakes import FakeBox, FakePve, make_deps
 from fastapi.testclient import TestClient
 
 from app.config import load_config
+from app.connectors.pve import Guest
 from app.jobs import JobService
 from app.main import create_app
 
@@ -204,6 +205,47 @@ def test_run_queues_the_route(app_ctx):
     assert r.status_code == 202
     assert r.json() == {"route_id": "nightly", "queued": 0}
     _drain(app)
+
+
+def _inject_box(app) -> FakeBox:
+    """Re-wire the job service onto a FakeBox we keep a handle on, to read poweroffs.
+
+    Both sources get a guest: a source with nothing to back up fails, and a failed run
+    deliberately leaves the box on, which would mask what these tests are asking about.
+    """
+    box = FakeBox()
+    guest = Guest(vmid=100, name="ct", type="lxc", status="running", node="n1")
+    deps, *_ = make_deps(
+        pves={"pve-alpha": FakePve(guests=[guest]), "pve-beta": FakePve(guests=[guest])}
+    )
+    app.state.job_service = JobService(
+        app.state.config_store, deps=deps, lease_deps=box.deps()
+    )
+    return box
+
+
+def test_a_run_with_no_body_powers_the_pbs_back_off(app_ctx):
+    """The default half of ``keep_on``. Posting *no body* is what the dashboard's Run
+    button does, so this is the path that decides whether the box goes back to sleep, and
+    nothing pinned it: flipping ``keep_on`` to True left every manual run's target awake
+    and the suite stayed green."""
+    client, app = app_ctx
+    box = _inject_box(app)
+
+    assert client.post("/api/routes/nightly/run").status_code == 202
+    _drain(app)
+
+    assert box.poweroffs == ["pbs-01"]
+
+
+def test_a_run_asking_to_keep_the_pbs_on_leaves_it_awake(app_ctx):
+    client, app = app_ctx
+    box = _inject_box(app)
+
+    assert client.post("/api/routes/nightly/run", json={"keep_on": True}).status_code == 202
+    _drain(app)
+
+    assert box.poweroffs == []
 
 
 def test_run_404s_on_an_unknown_route(app_ctx):
