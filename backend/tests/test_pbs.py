@@ -379,3 +379,44 @@ def test_get_fingerprint(monkeypatch):
         "ssl.SSLContext.wrap_socket", lambda self, sock, server_hostname=None: FakeTLS()
     )
     assert get_fingerprint("pbs.local") == expected
+
+
+# --- node status --------------------------------------------------------------
+#
+# FakePbs hands the dashboard a canned NodeLoad, so the real call and its unit conversions
+# had never run. PBS reports cpu as a 0-1 fraction and memory in bytes; the header shows
+# both as whole percentages.
+
+
+def test_node_status_converts_cpu_fraction_and_memory_bytes_to_percentages():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/nodes/localhost/status")
+        return json_data(
+            {
+                "cpu": 0.073,  # 7.3% -> 7
+                "memory": {"total": 8_000_000_000, "used": 3_000_000_000},  # 37.5% -> 38
+                "uptime": 3600,
+            }
+        )
+
+    load = make_client(handler).node_status()
+
+    assert (load.cpu, load.mem, load.uptime) == (7, 38, 3600)
+
+
+def test_node_status_survives_a_node_reporting_no_memory():
+    # Dividing by a zero total would 500 the whole status endpoint over a cosmetic figure.
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return json_data({"cpu": 0.0, "memory": {}, "uptime": 12})
+
+    load = make_client(handler).node_status()
+
+    assert (load.cpu, load.mem, load.uptime) == (0, 0, 12)
+
+
+def test_node_status_raises_when_the_node_returns_nothing():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return json_data(None)
+
+    with pytest.raises(ApiError, match="node status"):
+        make_client(handler).node_status()
