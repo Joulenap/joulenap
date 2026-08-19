@@ -54,7 +54,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        # 3.12 is what the image ships; 3.13 and 3.14 are compatibility legs, and 3.14 is
+        # what development actually happens on, so it should not be the untested one.
+        python-version: ["3.12", "3.13", "3.14"]
     defaults:
       run:
         working-directory: backend
@@ -73,8 +75,10 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      # --cov-fail-under: coverage sat at 96% with no gate at all, so a change could quietly
+      # take it back down. 94 leaves room for a legitimate dip without letting one slide.
       - name: Test (pytest)
-        run: pytest --cov=app --cov-report=lcov
+        run: pytest --cov=app --cov-report=lcov --cov-fail-under=94
 
       # One upload per commit is enough; the 3.13 leg exists for compat, not coverage.
       - name: Upload coverage (Coveralls)
@@ -102,7 +106,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build (tsc --noEmit && vite build)
+      # npm run build now type-checks the tests too (tsconfig.test.json), which tsconfig.json
+      # used to exclude.
+      - name: Build (typecheck + vite build)
         run: npm run build
 
       - name: Test (node --test)
