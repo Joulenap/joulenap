@@ -37,6 +37,10 @@ def _armed(app) -> set[str]:
     return set(app.state.scheduler.armed_route_ids())
 
 
+def _route(config, route_id: str):
+    return next(r for r in config.routes if r.id == route_id)
+
+
 # --- read ---------------------------------------------------------------------
 
 
@@ -88,14 +92,62 @@ def test_create_rejects_a_backup_route_with_no_storage_mapping(app_ctx):
     assert "storage" in str(r.json()["detail"])
 
 
-def test_create_rejects_an_unparseable_cron(app_ctx, temp_config):
-    # It wouldn't crash arming — but the route would silently never fire, which is worse.
+def test_create_rejects_a_cron_the_model_cannot_catch(app_ctx, temp_config):
+    """It wouldn't crash arming — but the route would silently never fire, which is worse.
+
+    ``0 4 * * 8`` is deliberately *well-formed*: five fields, so ``RouteSchedule`` accepts it
+    and only ``check_route_crons`` (BE-B1) can reject it. A 4-field string never reaches the
+    guard, so testing with one proves the model validator and nothing else.
+    """
     client, _app = app_ctx
-    body = {**NEW_ROUTE, "schedule": {"cron": "0 4 * *"}}
+    body = {**NEW_ROUTE, "schedule": {"cron": "0 4 * * 8"}}  # day-of-week 8 does not exist
     r = client.post("/api/routes", json=body)
+    assert r.status_code == 422
+    detail = str(r.json()["detail"])
+    assert "invalid schedule.cron" in detail  # the guard's own wording, not pydantic's
+    assert "0 4 * * 8" in detail
+    assert len(load_config(temp_config).routes) == 3
+
+
+def test_create_still_rejects_a_cron_with_the_wrong_field_count(app_ctx, temp_config):
+    # The model validator's half of the same contract, kept separate so neither can mask
+    # the other going missing.
+    client, _app = app_ctx
+    r = client.post("/api/routes", json={**NEW_ROUTE, "schedule": {"cron": "0 4 * *"}})
     assert r.status_code == 422
     assert "schedule.cron" in str(r.json()["detail"])
     assert len(load_config(temp_config).routes) == 3
+
+
+def test_an_unchanged_bad_cron_does_not_block_an_unrelated_edit(app_ctx, temp_config):
+    """The "changed-only" half of the guard: a legacy string already on disk must not lock
+    the user out of Settings. Written straight to the store because the API would refuse it."""
+    client, app = app_ctx
+    app.state.config_store.update(
+        lambda c: setattr(_route(c, "nightly").schedule, "cron", "0 4 * * 8")
+    )
+
+    body = client.get("/api/routes").json()[0]
+    body["name"] = "Nightly renamed"
+    assert client.put("/api/routes/nightly", json=body).status_code == 200
+
+    saved = _route(load_config(temp_config), "nightly")
+    assert saved.name == "Nightly renamed"
+    assert saved.schedule.cron == "0 4 * * 8"  # carried through, still saveable
+
+
+def test_changing_a_bad_cron_to_another_bad_one_is_rejected(app_ctx):
+    # Unchanged is grandfathered; *edited* is not, or the escape hatch would become a hole.
+    client, app = app_ctx
+    app.state.config_store.update(
+        lambda c: setattr(_route(c, "nightly").schedule, "cron", "0 4 * * 8")
+    )
+
+    body = client.get("/api/routes").json()[0]
+    body["schedule"]["cron"] = "0 99 * * *"
+    r = client.put("/api/routes/nightly", json=body)
+    assert r.status_code == 422
+    assert "invalid schedule.cron" in str(r.json()["detail"])
 
 
 # --- update -------------------------------------------------------------------

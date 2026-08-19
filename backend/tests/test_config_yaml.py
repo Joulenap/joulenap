@@ -89,10 +89,24 @@ def test_a_deleted_0_9_section_is_rejected_rather_than_silently_ignored(client):
 
 
 def test_invalid_cron_is_rejected_through_the_yaml_path(client):
-    # Proves the shared guards (BE-B1) still run for the editor. A list value replaces
-    # wholesale, so the route has to be sent in full.
+    """Proves the shared guard (BE-B1) still runs for the editor. A list value replaces
+    wholesale, so the route has to be sent in full.
+
+    ``0 4 * * 8`` has the right field count, so ``RouteSchedule`` lets it through and only
+    ``check_route_crons`` can stop it. With a 4-field string the model rejects it first and
+    this test would pass even with the guard deleted.
+    """
     doc = yaml.safe_load(_text(client))
-    doc["routes"][0]["schedule"]["cron"] = "0 4 * *"  # 4 fields, unparseable
+    doc["routes"][0]["schedule"]["cron"] = "0 4 * * 8"  # 5 fields, day-of-week 8
+    resp = _put(client, yaml.safe_dump({"routes": doc["routes"]}))
+    assert resp.status_code == 422
+    assert "invalid schedule.cron" in resp.json()["detail"]["message"]
+
+
+def test_a_cron_with_the_wrong_field_count_is_rejected_through_the_yaml_path(client):
+    # The model validator's half, so removing either guard fails a test of its own.
+    doc = yaml.safe_load(_text(client))
+    doc["routes"][0]["schedule"]["cron"] = "0 4 * *"
     resp = _put(client, yaml.safe_dump({"routes": doc["routes"]}))
     assert resp.status_code == 422
     assert "schedule.cron" in resp.json()["detail"]["message"]
