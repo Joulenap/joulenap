@@ -52,9 +52,9 @@ def test_detect_mac_primes_arp_with_a_real_connect():
     ``python:3.12-slim`` image — the failure was swallowed, so the cache was never
     populated and the lookup only ever succeeded on traffic somebody else had made.
     """
-    with mock.patch("app.connectors.net.socket.create_connection") as connect:
+    with mock.patch("app.connectors.net.fetch_peer_der") as connect:
         discovery._prime_arp("10.0.0.5", 8007)
-    assert connect.call_args.args[0] == ("10.0.0.5", 8007)
+    assert connect.call_args.args[:2] == ("10.0.0.5", 8007)
 
 
 def test_detect_mac_primes_even_when_the_port_refuses():

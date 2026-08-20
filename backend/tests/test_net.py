@@ -1,21 +1,22 @@
-"""TCP reachability helpers — socket mocked — plus interface/WoL-target resolution."""
+"""Reachability helpers (the TLS probe mocked) plus interface/WoL-target resolution."""
 
 from __future__ import annotations
 
 from unittest import mock
 
 from app.connectors import net
+from app.connectors.errors import ApiError
 from app.connectors.net import NetInterface, tcp_reachable, wait_until_reachable
 
 
 def test_tcp_reachable_true():
-    with mock.patch("socket.create_connection") as cc:
-        cc.return_value.__enter__.return_value = mock.MagicMock()
+    with mock.patch("app.connectors.net.fetch_peer_der") as probe:
         assert tcp_reachable("10.0.0.12", 8007) is True
+    assert probe.called
 
 
 def test_tcp_reachable_false_on_oserror():
-    with mock.patch("socket.create_connection", side_effect=OSError("refused")):
+    with mock.patch("app.connectors.net.fetch_peer_der", side_effect=ApiError("refused")):
         assert tcp_reachable("10.0.0.12", 8007) is False
 
 
@@ -25,13 +26,11 @@ def test_wait_until_reachable_succeeds_after_retries():
     def flaky(*_a, **_k):
         calls["n"] += 1
         if calls["n"] < 3:
-            raise OSError("not yet")
+            raise ApiError("not yet")
         return mock.MagicMock()
 
-    with mock.patch("socket.create_connection", side_effect=flaky):
-        ok = wait_until_reachable(
-            "10.0.0.12", 8007, timeout=10, interval=0, sleep=lambda _s: None
-        )
+    with mock.patch("app.connectors.net.fetch_peer_der", side_effect=flaky):
+        ok = wait_until_reachable("10.0.0.12", 8007, timeout=10, interval=0, sleep=lambda _s: None)
     assert ok is True
     assert calls["n"] == 3
 
@@ -39,7 +38,7 @@ def test_wait_until_reachable_succeeds_after_retries():
 def test_wait_until_reachable_gives_up_immediately_when_cancelled():
     # A cancelled run must not sit through the full wake timeout (11.2). Reported as False,
     # same as a timeout, because "the PBS isn't up" is the state the caller has to handle.
-    with mock.patch("socket.create_connection", side_effect=OSError("down")) as sock:
+    with mock.patch("app.connectors.net.fetch_peer_der", side_effect=ApiError("down")) as sock:
         ok = wait_until_reachable(
             "10.0.0.12",
             8007,
@@ -49,14 +48,12 @@ def test_wait_until_reachable_gives_up_immediately_when_cancelled():
             should_cancel=lambda: True,
         )
     assert ok is False
-    assert sock.call_count == 0  # bailed before even trying to connect
+    assert sock.call_count == 0  # bailed before even trying to reach the host
 
 
 def test_wait_until_reachable_times_out():
-    with mock.patch("socket.create_connection", side_effect=OSError("down")):
-        ok = wait_until_reachable(
-            "10.0.0.12", 8007, timeout=0, interval=0, sleep=lambda _s: None
-        )
+    with mock.patch("app.connectors.net.fetch_peer_der", side_effect=ApiError("down")):
+        ok = wait_until_reachable("10.0.0.12", 8007, timeout=0, interval=0, sleep=lambda _s: None)
     assert ok is False
 
 
