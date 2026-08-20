@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The reachability probe that tells an awake PBS from a sleeping one now completes the TLS
+  handshake instead of opening a connection and closing it without speaking. The old probe
+  made `proxmox-backup-proxy` write `failed to check for TLS handshake` and
+  `Failed to get api service` to the PBS syslog on every poll, roughly every 8 seconds while
+  a dashboard was open (#44).
+
 ## [1.1.1]
 
 ### Fixed

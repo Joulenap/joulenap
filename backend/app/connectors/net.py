@@ -1,5 +1,5 @@
-"""Network helpers: TCP reachability (waiting for PBS after WoL) and local interface
-enumeration + Wake-on-LAN target resolution."""
+"""Network helpers: reachability probing (waiting for PBS after WoL) and local
+interface enumeration + Wake-on-LAN target resolution."""
 
 from __future__ import annotations
 
@@ -12,18 +12,26 @@ from dataclasses import dataclass
 
 import psutil
 
+from .errors import ApiError
+from .tls import fetch_peer_der
+
 log = logging.getLogger("joulenap.net")
 
 _GLOBAL_BROADCAST = "255.255.255.255"
 
 
 def tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
-    """True if a TCP connection to ``host:port`` succeeds within ``timeout`` seconds."""
+    """True if ``host:port`` completes a TLS handshake within ``timeout`` seconds.
+
+    Connecting and closing without speaking makes proxmox-backup-proxy log a failed
+    handshake on every poll (issue #44). The cert is read and dropped: only reaching
+    the handshake matters. Every caller targets a PVE or PBS API port, all TLS.
+    """
     try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
+        fetch_peer_der(host, port, timeout)
+    except ApiError:
         return False
+    return True
 
 
 def wait_until_reachable(
