@@ -80,7 +80,10 @@ jobs:
       - name: Test (pytest)
         run: pytest --cov=app --cov-report=lcov --cov-fail-under=94
 
-      # One upload per commit is enough; the 3.13 leg exists for compat, not coverage.
+      # One upload per commit is enough, and it comes from the version the image ships:
+      # the other legs are compatibility checks, and the same figure three times would just
+      # race itself. Gated on the step above passing, so a run that trips --cov-fail-under
+      # leaves the badge on the last good commit rather than publishing the dip.
       - name: Upload coverage (Coveralls)
         if: matrix.python-version == '3.12'
         uses: coverallsapp/github-action@v2
