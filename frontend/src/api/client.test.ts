@@ -81,3 +81,194 @@ test('the backstop timeout aborts a hung request and surfaces a 408 ApiError (FE
   mock.timers.reset()
   setTimeoutMessage('The request timed out.')
 })
+
+// --- what actually goes on the wire, and what comes back ---------------------
+//
+// The stub above ignores the URL, so nothing proved a method calls the right endpoint,
+// carries a JSON body, or decodes the backend's error shapes. That decoding is how every
+// 422 reaches the UI.
+
+type Recorded = { url: string; method: string; headers: Headers; body?: string }
+
+function recordFetch(response: Response): { calls: Recorded[]; restore: () => void } {
+  const calls: Recorded[] = []
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    calls.push({
+      url,
+      method: String(init.method),
+      headers: new Headers(init.headers),
+      body: init.body as string | undefined,
+    })
+    return response.clone()
+  }) as unknown as typeof fetch
+  return { calls, restore: () => { globalThis.fetch = orig } }
+}
+
+const jsonResponse = (status: number, payload: unknown) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+test('a GET carries no body and no content type', async () => {
+  const { calls, restore } = recordFetch(jsonResponse(200, { scheduler_enabled: true }))
+  try {
+    await api.status()
+    assert.equal(calls[0].url, '/api/status')
+    assert.equal(calls[0].method, 'GET')
+    assert.equal(calls[0].body, undefined)
+    assert.equal(calls[0].headers.get('content-type'), null)
+  } finally {
+    restore()
+  }
+})
+
+test('a body is JSON-encoded and announced as JSON', async () => {
+  // Without the header FastAPI reads the body as a form and answers 422 for everything.
+  const { calls, restore } = recordFetch(jsonResponse(200, { username: 'admin' }))
+  try {
+    await api.login('admin', 'secret12')
+    assert.equal(calls[0].url, '/api/login')
+    assert.equal(calls[0].method, 'POST')
+    assert.equal(calls[0].headers.get('content-type'), 'application/json')
+    assert.deepEqual(JSON.parse(calls[0].body as string), {
+      username: 'admin',
+      password: 'secret12',
+    })
+  } finally {
+    restore()
+  }
+})
+
+test('a string detail becomes the error message', async () => {
+  const { restore } = recordFetch(jsonResponse(409, { detail: 'route is already running' }))
+  try {
+    await assert.rejects(
+      () => api.status(),
+      (e: unknown) =>
+        e instanceof ApiError && e.status === 409 && e.message === 'route is already running',
+    )
+  } finally {
+    restore()
+  }
+})
+
+test('a structured detail prefers its message and keeps the raw payload', async () => {
+  // The YAML editor's 422 shape: the modal shows `message` and uses `line` to place the
+  // marker, so both halves have to survive.
+  const detail = { message: 'invalid schedule.cron', line: 12 }
+  const { restore } = recordFetch(jsonResponse(422, { detail }))
+  try {
+    await assert.rejects(
+      () => api.status(),
+      (e: unknown) => {
+        assert.ok(e instanceof ApiError)
+        assert.equal(e.message, 'invalid schedule.cron')
+        assert.deepEqual(e.raw, detail)
+        return true
+      },
+    )
+  } finally {
+    restore()
+  }
+})
+
+test('a structured detail with no message falls back to its JSON', async () => {
+  const detail = [{ loc: ['body', 'host'], msg: 'field required' }]
+  const { restore } = recordFetch(jsonResponse(422, { detail }))
+  try {
+    await assert.rejects(
+      () => api.status(),
+      (e: unknown) => e instanceof ApiError && e.message === JSON.stringify(detail),
+    )
+  } finally {
+    restore()
+  }
+})
+
+test('a non-JSON error body keeps the status text', async () => {
+  const { restore } = recordFetch(
+    new Response('<html>502 Bad Gateway</html>', { status: 502, statusText: 'Bad Gateway' }),
+  )
+  try {
+    await assert.rejects(
+      () => api.status(),
+      (e: unknown) => e instanceof ApiError && e.message === 'Bad Gateway',
+    )
+  } finally {
+    restore()
+  }
+})
+
+test('a 204 resolves to nothing instead of failing to parse an empty body', async () => {
+  // DELETE /config/api-key answers 204; parsing "" as JSON would throw over a success.
+  const { restore } = recordFetch(new Response(null, { status: 204 }))
+  try {
+    assert.equal(await api.logout(), undefined)
+  } finally {
+    restore()
+  }
+})
+
+test('a successful GET returns the parsed body', async () => {
+  // Guards the 204 branch from the other side: treating every response as empty would
+  // hand every caller undefined and blank the whole dashboard.
+  const { restore } = recordFetch(jsonResponse(200, { scheduler_enabled: false }))
+  try {
+    assert.deepEqual(await api.status(), { scheduler_enabled: false })
+  } finally {
+    restore()
+  }
+})
+
+test('an abort that is not our timeout is not disguised as a 408', async () => {
+  // Only our own backstop produces 408. A different DOMException has to reach the caller
+  // as itself, or a real browser error would be reported as "the request timed out".
+  const orig = globalThis.fetch
+  globalThis.fetch = (async () => {
+    throw new DOMException('network changed', 'NetworkError')
+  }) as typeof fetch
+  try {
+    await assert.rejects(
+      () => api.status(),
+      (e: unknown) => e instanceof DOMException && e.name === 'NetworkError',
+    )
+  } finally {
+    globalThis.fetch = orig
+  }
+})
+
+test('an error body with no detail keeps the status text', async () => {
+  // `j && typeof j.detail !== 'undefined'`: without the second half, the message becomes
+  // the string "undefined" instead of something the user can read.
+  const { restore } = recordFetch(
+    new Response(JSON.stringify({ error: 'nope' }), {
+      status: 500,
+      statusText: 'Internal Server Error',
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  )
+  try {
+    await assert.rejects(
+      () => api.status(),
+      (e: unknown) => e instanceof ApiError && e.message === 'Internal Server Error',
+    )
+  } finally {
+    restore()
+  }
+})
+
+test('an omitted password is sent as null, not dropped from the body', async () => {
+  // The backend reads null/"" as "keep the current password"; a missing key would be a
+  // different request shape and the account form would stop being able to say "unchanged".
+  const { calls, restore } = recordFetch(jsonResponse(200, { username: 'admin' }))
+  try {
+    await api.updateAccount('current-pw', 'admin')
+    const body = JSON.parse(calls[0].body as string)
+    assert.ok('password' in body)
+    assert.equal(body.password, null)
+  } finally {
+    restore()
+  }
+})

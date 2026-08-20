@@ -93,3 +93,110 @@ def test_wol_target_falls_back_to_host_when_no_subnet_match(monkeypatch):
     dest, source_ip = net.wol_target("192.0.2.213")
     assert dest == "192.0.2.213"
     assert source_ip is None
+
+
+# --- the real NIC enumeration -------------------------------------------------
+#
+# wol_target's tests monkeypatch `net.list_interfaces`, so the psutil walk behind it had
+# never executed. It decides which NIC the magic packet is bound to, and getting it wrong
+# means a packet that never reaches the PBS.
+
+
+class _Stat:
+    def __init__(self, isup: bool):
+        self.isup = isup
+
+
+class _Addr:
+    def __init__(self, family, address, netmask):
+        self.family, self.address, self.netmask = family, address, netmask
+
+
+def _fake_psutil(stats: dict, addrs: dict):
+    class FakePsutil:
+        @staticmethod
+        def net_if_stats():
+            return stats
+
+        @staticmethod
+        def net_if_addrs():
+            return addrs
+
+    return FakePsutil
+
+
+def test_list_interfaces_keeps_only_up_non_loopback_ipv4(monkeypatch):
+    import socket as socket_mod
+
+    monkeypatch.setattr(
+        net,
+        "psutil",
+        _fake_psutil(
+            stats={"eth0": _Stat(True), "eth1": _Stat(False), "lo": _Stat(True)},
+            addrs={
+                "eth0": [
+                    _Addr(socket_mod.AF_INET6, "fe80::1", None),  # not IPv4: WoL is IPv4
+                    _Addr(socket_mod.AF_INET, "192.168.1.10", "255.255.255.0"),
+                ],
+                "eth1": [_Addr(socket_mod.AF_INET, "10.0.0.5", "255.0.0.0")],  # down
+                "lo": [_Addr(socket_mod.AF_INET, "127.0.0.1", "255.0.0.0")],  # loopback
+            },
+        ),
+    )
+
+    ifaces = net.list_interfaces()
+
+    assert [(i.name, i.address, i.netmask) for i in ifaces] == [
+        ("eth0", "192.168.1.10", "255.255.255.0")
+    ]
+    assert ifaces[0].broadcast == "192.168.1.255"
+
+
+def test_list_interfaces_defaults_a_missing_netmask_to_a_single_host(monkeypatch):
+    # psutil can report an IPv4 address with no netmask; /32 is the safe reading, because
+    # guessing a wider subnet would broadcast the packet at machines that are not the PBS.
+    import socket as socket_mod
+
+    monkeypatch.setattr(
+        net,
+        "psutil",
+        _fake_psutil(
+            stats={"eth0": _Stat(True)},
+            addrs={"eth0": [_Addr(socket_mod.AF_INET, "192.168.1.10", None)]},
+        ),
+    )
+
+    assert net.list_interfaces()[0].netmask == "255.255.255.255"
+
+
+def test_list_interfaces_keeps_a_nic_psutil_reports_no_stats_for(monkeypatch):
+    # `name in stats` guards the isup lookup: an interface missing from net_if_stats is
+    # kept rather than dropped, so an unusual NIC never silently disappears.
+    import socket as socket_mod
+
+    monkeypatch.setattr(
+        net,
+        "psutil",
+        _fake_psutil(
+            stats={},
+            addrs={"weird0": [_Addr(socket_mod.AF_INET, "192.168.5.10", "255.255.255.0")]},
+        ),
+    )
+
+    assert [i.name for i in net.list_interfaces()] == ["weird0"]
+
+
+def test_find_interface_reads_the_real_enumeration(monkeypatch):
+    import socket as socket_mod
+
+    monkeypatch.setattr(
+        net,
+        "psutil",
+        _fake_psutil(
+            stats={"eth0": _Stat(True)},
+            addrs={"eth0": [_Addr(socket_mod.AF_INET, "192.168.1.10", "255.255.255.0")]},
+        ),
+    )
+
+    assert net.find_interface("eth0").address == "192.168.1.10"
+    assert net.find_interface("eth9") is None

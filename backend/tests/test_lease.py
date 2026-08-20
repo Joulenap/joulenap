@@ -230,12 +230,29 @@ def test_a_failing_idle_check_fails_open():
 
 
 def test_the_idle_check_is_skipped_when_the_wait_is_zero():
-    box = FakeBox(idle_error=RuntimeError("must not be called"))
+    """poweroff_task_wait=0 means "don't ask, just shut it down".
+
+    Asserted on the recorded call, not by raising: a raising check fails open (the test
+    above), so it powers off either way and the assertion could not tell the two apart.
+    """
+    box = FakeBox()
     lease = PowerLease(box.deps())
     pbs = make_pbs(poweroff_task_wait=0)
 
     lease.acquire(pbs)
     assert lease.release(pbs) is ReleaseOutcome.POWERED_OFF
+    assert box.idle_checks == []
+
+
+def test_the_idle_check_runs_when_a_wait_is_configured():
+    # The other side of the same boundary, so neither direction can drift unnoticed.
+    box = FakeBox()
+    lease = PowerLease(box.deps())
+    pbs = make_pbs(poweroff_task_wait=1)
+
+    lease.acquire(pbs)
+    assert lease.release(pbs) is ReleaseOutcome.POWERED_OFF
+    assert box.idle_checks == ["pbs1"]
 
 
 def test_a_failed_power_off_is_swallowed():

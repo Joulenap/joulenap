@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from fakes import FakeBox, make_deps
+from fakes import FakeBox, FakePve, make_deps
 from fastapi.testclient import TestClient
 
 from app.config import load_config
+from app.connectors.pve import Guest
 from app.jobs import JobService
 from app.main import create_app
 
@@ -35,6 +36,10 @@ def app_ctx(temp_config, temp_db, monkeypatch):
 
 def _armed(app) -> set[str]:
     return set(app.state.scheduler.armed_route_ids())
+
+
+def _route(config, route_id: str):
+    return next(r for r in config.routes if r.id == route_id)
 
 
 # --- read ---------------------------------------------------------------------
@@ -88,14 +93,62 @@ def test_create_rejects_a_backup_route_with_no_storage_mapping(app_ctx):
     assert "storage" in str(r.json()["detail"])
 
 
-def test_create_rejects_an_unparseable_cron(app_ctx, temp_config):
-    # It wouldn't crash arming — but the route would silently never fire, which is worse.
+def test_create_rejects_a_cron_the_model_cannot_catch(app_ctx, temp_config):
+    """It wouldn't crash arming, but the route would silently never fire, which is worse.
+
+    ``0 4 * * 8`` is deliberately *well-formed*: five fields, so ``RouteSchedule`` accepts it
+    and only ``check_route_crons`` (BE-B1) can reject it. A 4-field string never reaches the
+    guard, so testing with one proves the model validator and nothing else.
+    """
     client, _app = app_ctx
-    body = {**NEW_ROUTE, "schedule": {"cron": "0 4 * *"}}
+    body = {**NEW_ROUTE, "schedule": {"cron": "0 4 * * 8"}}  # day-of-week 8 does not exist
     r = client.post("/api/routes", json=body)
+    assert r.status_code == 422
+    detail = str(r.json()["detail"])
+    assert "invalid schedule.cron" in detail  # the guard's own wording, not pydantic's
+    assert "0 4 * * 8" in detail
+    assert len(load_config(temp_config).routes) == 3
+
+
+def test_create_still_rejects_a_cron_with_the_wrong_field_count(app_ctx, temp_config):
+    # The model validator's half of the same contract, kept separate so neither can mask
+    # the other going missing.
+    client, _app = app_ctx
+    r = client.post("/api/routes", json={**NEW_ROUTE, "schedule": {"cron": "0 4 * *"}})
     assert r.status_code == 422
     assert "schedule.cron" in str(r.json()["detail"])
     assert len(load_config(temp_config).routes) == 3
+
+
+def test_an_unchanged_bad_cron_does_not_block_an_unrelated_edit(app_ctx, temp_config):
+    """The "changed-only" half of the guard: a legacy string already on disk must not lock
+    the user out of Settings. Written straight to the store because the API would refuse it."""
+    client, app = app_ctx
+    app.state.config_store.update(
+        lambda c: setattr(_route(c, "nightly").schedule, "cron", "0 4 * * 8")
+    )
+
+    body = client.get("/api/routes").json()[0]
+    body["name"] = "Nightly renamed"
+    assert client.put("/api/routes/nightly", json=body).status_code == 200
+
+    saved = _route(load_config(temp_config), "nightly")
+    assert saved.name == "Nightly renamed"
+    assert saved.schedule.cron == "0 4 * * 8"  # carried through, still saveable
+
+
+def test_changing_a_bad_cron_to_another_bad_one_is_rejected(app_ctx):
+    # Unchanged is grandfathered; *edited* is not, or the escape hatch would become a hole.
+    client, app = app_ctx
+    app.state.config_store.update(
+        lambda c: setattr(_route(c, "nightly").schedule, "cron", "0 4 * * 8")
+    )
+
+    body = client.get("/api/routes").json()[0]
+    body["schedule"]["cron"] = "0 99 * * *"
+    r = client.put("/api/routes/nightly", json=body)
+    assert r.status_code == 422
+    assert "invalid schedule.cron" in str(r.json()["detail"])
 
 
 # --- update -------------------------------------------------------------------
@@ -152,6 +205,47 @@ def test_run_queues_the_route(app_ctx):
     assert r.status_code == 202
     assert r.json() == {"route_id": "nightly", "queued": 0}
     _drain(app)
+
+
+def _inject_box(app) -> FakeBox:
+    """Re-wire the job service onto a FakeBox we keep a handle on, to read poweroffs.
+
+    Both sources get a guest: a source with nothing to back up fails, and a failed run
+    deliberately leaves the box on, which would mask what these tests are asking about.
+    """
+    box = FakeBox()
+    guest = Guest(vmid=100, name="ct", type="lxc", status="running", node="n1")
+    deps, *_ = make_deps(
+        pves={"pve-alpha": FakePve(guests=[guest]), "pve-beta": FakePve(guests=[guest])}
+    )
+    app.state.job_service = JobService(
+        app.state.config_store, deps=deps, lease_deps=box.deps()
+    )
+    return box
+
+
+def test_a_run_with_no_body_powers_the_pbs_back_off(app_ctx):
+    """The default half of ``keep_on``. Posting *no body* is what the dashboard's Run
+    button does, so this is the path that decides whether the box goes back to sleep, and
+    nothing pinned it: flipping ``keep_on`` to True left every manual run's target awake
+    and the suite stayed green."""
+    client, app = app_ctx
+    box = _inject_box(app)
+
+    assert client.post("/api/routes/nightly/run").status_code == 202
+    _drain(app)
+
+    assert box.poweroffs == ["pbs-01"]
+
+
+def test_a_run_asking_to_keep_the_pbs_on_leaves_it_awake(app_ctx):
+    client, app = app_ctx
+    box = _inject_box(app)
+
+    assert client.post("/api/routes/nightly/run", json={"keep_on": True}).status_code == 202
+    _drain(app)
+
+    assert box.poweroffs == []
 
 
 def test_run_404s_on_an_unknown_route(app_ctx):

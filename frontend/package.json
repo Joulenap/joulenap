@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "build:demo": "tsc --noEmit && vite build --mode demo --base ./ --outDir dist-demo",
+    "build": "npm run typecheck && vite build",
+    "build:demo": "npm run typecheck && vite build --mode demo --base ./ --outDir dist-demo",
     "preview": "vite preview",
-    "test": "node --test"
+    "test": "node --test",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
@@ -24,6 +25,7 @@
     "react-i18next": "^17.0.11"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",

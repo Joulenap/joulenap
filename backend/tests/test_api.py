@@ -60,16 +60,66 @@ def _wait_run(client, run_id, *, timeout=5.0):
 # --- auth guard --------------------------------------------------------------
 
 
-def test_protected_endpoints_require_auth(temp_config, temp_db):
+#: The only endpoints that may answer an unauthenticated caller, and why.
+#:   health      the container probe, before any account exists
+#:   auth/status what the SPA asks to decide between login and the setup wizard
+#:   auth/setup  first-run account creation (refused once an account exists)
+#:   login       obviously
+#:   logout      clearing a cookie you may not have is harmless
+#:   dashboard   guarded by the API key instead of the session (403 when unconfigured)
+PUBLIC_OPERATIONS = {
+    ("GET", "/api/health"),
+    ("GET", "/api/auth/status"),
+    ("POST", "/api/auth/setup"),
+    ("POST", "/api/login"),
+    ("POST", "/api/logout"),
+    ("GET", "/api/dashboard"),
+}
+
+_PATH_PARAMS = {
+    "pbs_id": "pbs-01", "pve_id": "pve-alpha", "device_id": "pbs-01",
+    "kind": "pbss", "action": "gc", "route_id": "nightly", "run_id": "1",
+}
+
+
+def _operations(app) -> list[tuple[str, str]]:
+    """Every (method, path) FastAPI serves under /api, read off the app itself."""
+    return [
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        for method in operations
+        if method in {"get", "post", "put", "delete", "patch"}
+    ]
+
+
+def test_every_endpoint_requires_auth_unless_it_is_deliberately_public(temp_config, temp_db):
+    """Enumerated from the route table, not from a hand-kept list.
+
+    The list version covered 22 of the 50 operations, so a new endpoint could ship
+    unprotected without failing anything. Anything not named in PUBLIC_OPERATIONS has to
+    answer 401, and adding an endpoint means either protecting it or saying here why not.
+    """
+    app = create_app()
+    with TestClient(app) as client:
+        operations = _operations(app)
+        assert len(operations) > 40, "the route table looks wrong, not the auth guard"
+
+        for method, path in operations:
+            if (method, path) in PUBLIC_OPERATIONS:
+                continue
+            url = path
+            for name, value in _PATH_PARAMS.items():
+                url = url.replace("{" + name + "}", value)
+            assert "{" not in url, f"unmapped path parameter in {path}"
+            response = client.request(method, url, json={})
+            assert response.status_code == 401, f"{method} {path} answered {response.status_code}"
+
+
+def test_the_public_endpoints_are_still_reachable_without_a_session(temp_config, temp_db):
+    # The other half: an over-eager guard that 401s the login form would lock everyone out.
     with TestClient(create_app()) as client:
-        for path in ("/api/status", "/api/config", "/api/guests", "/api/runs",
-                     "/api/logs", "/api/tasklog", "/api/routes", "/api/devices"):
-            assert client.get(path).status_code == 401, path
-        for path in ("/api/routes", "/api/routes/nightly/run", "/api/runs/1/stop",
-                     "/api/devices/pbss", "/api/devices/pbss/pbs-01/power",
-                     "/api/devices/pbss/pbs-01/gc", "/api/devices/pbss/pbs-01/test",
-                     "/api/notify/test", "/api/scheduler/toggle", "/api/wizard/wol/test"):
-            assert client.post(path).status_code == 401, path
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/auth/status").status_code == 200
 
 
 def test_login_locks_out_after_repeated_failures(app_ctx):
@@ -959,3 +1009,31 @@ def test_run_history_falls_back_to_the_stored_english_error(app_ctx):
         run_id = run.id
 
     assert client.get(f"/api/runs/{run_id}").json()["error"] == "vzdump exited with code 255"
+
+
+# --- bcrypt's 72-byte boundary ------------------------------------------------
+
+
+def test_a_password_longer_than_bcrypt_accepts_still_round_trips():
+    """bcrypt truncates at 72 bytes, and hash_password does it explicitly so the behaviour
+    is the same everywhere, including the hashpw CLI. The constant is load-bearing: with a
+    different cut, a password hashed by one path would not verify through the other."""
+    from app.core.security import _BCRYPT_MAX_BYTES, hash_password, verify_password
+
+    assert _BCRYPT_MAX_BYTES == 72
+    long_password = "a" * 100
+    stored = hash_password(long_password)
+
+    assert verify_password(long_password, stored) is True
+    # Everything past byte 72 is invisible to bcrypt, so these are the same password.
+    assert verify_password("a" * 72, stored) is True
+    assert verify_password("a" * 71, stored) is False
+
+
+def test_a_multibyte_password_is_cut_on_bytes_not_characters():
+    # "é" is two bytes in UTF-8, so a character-based cut would produce a different hash
+    # than bcrypt's own and logins would fail for anyone with a long accented password.
+    from app.core.security import hash_password, verify_password
+
+    stored = hash_password("é" * 40)  # 80 bytes, truncated to 72 => 36 characters
+    assert verify_password("é" * 36, stored) is True

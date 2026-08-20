@@ -22,8 +22,6 @@ import {
   validateDraft,
 } from './routeForm.ts'
 
-const PBS_IDS = ['pbs-01', 'pbs-02']
-
 const pve = (id: string, storages: Record<string, string> = { 'pbs-01': 'pbs-backup' }): PveDevice => ({
   id,
   host: '10.0.0.1',
@@ -430,4 +428,138 @@ test('anything else falls back to the message the client already built', () => {
   assert.deepEqual(saveErrors(new ApiError(500, 'config.yaml is read-only')), [
     { message: 'config.yaml is read-only' },
   ])
+})
+
+// --- the defaults a new route starts from ------------------------------------
+//
+// Asserted whole, because these are what the user gets by opening the modal and pressing
+// Save. Nothing pinned them, so every flag in DEFAULT_OPTIONS and every field of a fresh
+// draft could flip without a single test noticing.
+
+test('a new route runs GC, does not verify, and does not remove vanished snapshots', () => {
+  assert.deepEqual(DEFAULT_OPTIONS, {
+    mode: 'snapshot',
+    bwlimit: 0,
+    min_free_percent: 0, // the free-space preflight is opt-in
+    gc: true, // reclaiming space is the point of an automated backup
+    verify_after: false, // verification is slow; it is a choice, not a default
+    reverify_days: 30,
+    transfer_last: 0,
+    remove_vanished: false, // never delete on the target unless asked
+  })
+})
+
+test('the default retention is a week of dailies tapering to six months', () => {
+  assert.deepEqual(DEFAULT_RETENTION, {
+    keep_last: 0, // no "keep the last N whatever they are": the tiers below decide
+    keep_daily: 7,
+    keep_weekly: 4,
+    keep_monthly: 6,
+    keep_yearly: 0,
+  })
+})
+
+test('a fresh draft is enabled, notifying, and armed every day', () => {
+  const draft = draftFromRoute(null, [pbs('pbs-01'), pbs('pbs-02')])
+
+  assert.equal(draft.enabled, true) // a route you just created should run
+  assert.equal(draft.notify, true) // and tell you when it did
+  assert.deepEqual(draft.days, Array(7).fill(true))
+  assert.equal(draft.time, '04:00')
+  assert.equal(draft.cron, '') // the simple schedule, not the raw escape hatch
+  assert.equal(draft.guestMode, 'all')
+  assert.equal(draft.target, 'pbs-01') // the first backup server, not an empty select
+  assert.deepEqual(draft.options, DEFAULT_OPTIONS)
+})
+
+test('a fresh draft has no target when there is no backup server yet', () => {
+  assert.equal(draftFromRoute(null, []).target, '')
+})
+
+test('a retention change in any single field counts as a change', () => {
+  // The comparison is a chain of ors; with one link broken, editing that one field would
+  // save a route whose retention silently reverted to the stored value.
+  const stored = route('nightly')
+  for (const field of ['keep_last', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly'] as const) {
+    const draft = {
+      ...draftFromRoute(stored, [pbs('pbs-01')]),
+      retention: { ...DEFAULT_RETENTION, [field]: 99 },
+    }
+    const saved = draftToRoute(draft, [])
+    assert.equal(saved.retention?.[field], 99, field)
+  }
+})
+
+test('the sync single-source rule only applies to sync routes', () => {
+  // `kind === 'sync' && length > 1`: with the kind check dropped, a two-PVE backup route
+  // (the normal case) would be refused.
+  const twoPves = draft({ sourceIds: ['pve:pve-alpha', 'pve:pve-beta'], target: 'pbs-01' })
+  assert.ok(!keys(twoPves).includes('dashboard.routeModal.errSyncSingle'))
+})
+
+test('the storage check only applies once a target is chosen', () => {
+  // `kind === 'backup' && draft.target`: without the target check it would report "no
+  // storage for pbs undefined" the moment a source chip is added.
+  const noTarget = draft({ sourceIds: ['pve-lab'], target: '' })
+  assert.ok(!keys(noTarget).includes('dashboard.routeModal.errNoStorage'))
+})
+
+test('an external route onto a managed box is accepted', () => {
+  // `target && !target.managed_power`: with the flag check dropped, every external route
+  // would be refused, including the ones that are the whole point of the kind.
+  const managed = draft({ sourceIds: [], onWake: 'external', target: 'pbs-01' })
+  assert.ok(!keys(managed).includes('dashboard.routeModal.errExternalUnmanaged'))
+})
+
+test('a cron-pinned route does not need a weekday ticked', () => {
+  // `!draft.cron && !days.some(...)`: the raw cron replaces the weekday toggles entirely,
+  // so demanding a day as well would make the advanced schedule unusable.
+  const pinned = draft({ sourceIds: ['pve:pve-alpha'], target: 'pbs-01' })
+  pinned.cron = '0 4 1 * *'
+  pinned.days = Array(7).fill(false)
+  assert.ok(!keys(pinned).includes('dashboard.routeModal.errNoDay'))
+
+  const noCronNoDays = draft({ sourceIds: ['pve:pve-alpha'], target: 'pbs-01' })
+  noCronNoDays.days = Array(7).fill(false)
+  assert.ok(keys(noCronNoDays).includes('dashboard.routeModal.errNoDay'))
+})
+
+test('a difference in any single retention field is a conflict', () => {
+  // retentionDiffers is a chain of ors; a broken link means two routes that really will
+  // prune each other's snapshots are reported as compatible, which is the silent
+  // data-loss case this warning exists for.
+  for (const field of ['keep_last', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly'] as const) {
+    const other = route('weekly', {
+      name: 'Weekly',
+      retention: { ...DEFAULT_RETENTION, [field]: 42 },
+    })
+    assert.deepEqual(
+      retentionOverlaps(draft({ id: 'nightly' }), [other]),
+      ['Weekly'],
+      `${field} differing should be a conflict`,
+    )
+  }
+})
+
+test('the guest-selection check only applies to backup routes', () => {
+  // Reachable the moment a PBS chip is added to a route that already has PVE sources:
+  // inferKind calls that sync, but pveSources is still non-empty, so without the kind
+  // check the form would refuse to save over guests the route no longer backs up.
+  const mixed = draft({
+    sourceIds: ['pve:pve-alpha', 'pbs:pbs-01'],
+    target: 'pbs-02',
+    guestMode: 'include',
+    selection: { 'pve-alpha': [] },
+  })
+  assert.equal(inferKind(mixed.sourceIds, mixed.onWake), 'sync')
+  assert.ok(!keys(mixed).includes('dashboard.routeModal.errNoGuests'))
+
+  // The same empty selection on a real backup route is still refused.
+  const backup = draft({
+    sourceIds: ['pve:pve-alpha'],
+    target: 'pbs-01',
+    guestMode: 'include',
+    selection: { 'pve-alpha': [] },
+  })
+  assert.ok(keys(backup).includes('dashboard.routeModal.errNoGuests'))
 })

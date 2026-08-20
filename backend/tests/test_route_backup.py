@@ -341,6 +341,84 @@ def test_no_precheck_step_when_the_guard_is_off(temp_db):
     assert "precheck" not in steps
 
 
+def test_preflight_accepts_a_datastore_sitting_exactly_on_the_threshold(temp_db):
+    # "less than this percentage free" is exclusive: the fake reports 75% free, so a 75%
+    # guard is satisfied. An off-by-one here aborts backups on a datastore that is fine.
+    config = _config()
+    config.routes[0].options.min_free_percent = 75
+    deps, alpha, _beta, _pbs = _deps()
+
+    status, steps = _load(_run(config, deps))
+
+    assert status == RunStatus.SUCCESS
+    assert steps["precheck"] == "success"
+    assert len(alpha.vzdump_calls) == 3
+
+
+def test_preflight_aborts_one_point_below_the_threshold(temp_db):
+    config = _config()
+    config.routes[0].options.min_free_percent = 76
+    deps, alpha, _beta, _pbs = _deps()
+
+    status, _steps = _load(_run(config, deps))
+
+    assert status == RunStatus.ABORTED
+    assert alpha.vzdump_calls == []
+
+
+# --- aborts before anything runs ----------------------------------------------
+#
+# Config validation should make these unreachable, so they are the belt to that braces:
+# they exist for a config edited by hand or a device deleted mid-flight, and each aborts
+# the run with a named reason instead of raising something the UI cannot explain.
+
+
+def test_a_route_whose_target_is_gone_aborts_without_touching_a_source(temp_db):
+    config = _config()
+    config.pbss = []  # the target device deleted out from under the route
+    deps, alpha, _beta, _pbs = _deps()
+
+    run_id = _run(config, deps)
+    status, steps = _load(run_id)
+
+    assert status == RunStatus.ABORTED
+    assert steps == {}  # not even a backup step was opened
+    assert alpha.vzdump_calls == []
+    with session_scope() as session:
+        assert session.get(Run, run_id).error_key == "target_pbs_missing"
+
+
+def test_a_source_whose_pve_is_gone_fails_that_source_only(temp_db):
+    config = _config()
+    config.pves = [p for p in config.pves if p.id != "pve-alpha"]
+    deps, alpha, beta, _pbs = _deps()
+
+    run_id = _run(config, deps)
+    status, steps = _load(run_id)
+
+    # The missing source fails; pve-beta still gets its backup, which is the whole point
+    # of isolating sources from each other.
+    assert status == RunStatus.FAILURE
+    assert steps["backup:pve-beta"] == "success"
+    assert alpha.vzdump_calls == []
+    assert len(beta.vzdump_calls) == 1
+    assert any("source_pve_missing" in m or "pve-alpha" in m for m in _logs(run_id, LogLevel.ERROR))
+
+
+def test_a_source_with_no_storage_for_the_target_fails_that_source(temp_db):
+    config = _config()
+    config.pves[0].storages = {}  # pve-alpha can no longer reach the target
+    deps, alpha, beta, _pbs = _deps()
+
+    run_id = _run(config, deps)
+    status, steps = _load(run_id)
+
+    assert status == RunStatus.FAILURE
+    assert steps["backup:pve-alpha"] == "failure"
+    assert alpha.vzdump_calls == []
+    assert len(beta.vzdump_calls) == 1
+
+
 # --- caches -------------------------------------------------------------------
 
 
@@ -415,6 +493,59 @@ def test_cancel_before_the_first_source_starts_nothing(temp_db):
     assert status == RunStatus.ABORTED
     assert alpha.vzdump_calls == []
     assert steps == {}
+
+
+def test_cancel_between_sources_leaves_the_rest_unstarted(temp_db):
+    # The gap the task waits cannot cover: a stop that lands after one source finished and
+    # before the next begins.
+    config = _config()
+    alpha = FakePve(guests=list(ALPHA_GUESTS))
+    beta = FakePve(guests=list(BETA_GUESTS))
+    deps, *_ = _deps(alpha=alpha, beta=beta, cancelled=lambda: bool(alpha.vzdump_calls))
+
+    status, steps = _load(_run(config, deps))
+
+    assert status == RunStatus.ABORTED
+    assert alpha.vzdump_calls != []  # the first source did run
+    assert beta.vzdump_calls == []  # the second never started
+    assert "backup:pve-beta" not in steps
+
+
+def test_cancel_after_the_sources_skips_gc(temp_db):
+    # Stopping a run must not leave GC churning on a box the user just asked to release.
+    config = _config()
+    config.routes[0].options.gc = True
+    alpha = FakePve(guests=list(ALPHA_GUESTS))
+    beta = FakePve(guests=list(BETA_GUESTS))
+    pbs = FakePbs()
+    # Cancelled the moment both sources have run, which is exactly the gap before GC.
+    deps, *_ = _deps(
+        alpha=alpha, beta=beta, pbs=pbs,
+        cancelled=lambda: bool(alpha.vzdump_calls) and bool(beta.vzdump_calls),
+    )
+
+    status, steps = _load(_run(config, deps))
+
+    assert status == RunStatus.ABORTED
+    assert pbs.gc_started is False
+    assert "gc" not in steps
+
+
+def test_cancel_after_gc_skips_verify(temp_db):
+    config = _config()
+    config.routes[0].options.gc = True
+    config.routes[0].options.verify_after = True
+    alpha = FakePve(guests=list(ALPHA_GUESTS))
+    beta = FakePve(guests=list(BETA_GUESTS))
+    pbs = FakePbs()
+    deps, *_ = _deps(alpha=alpha, beta=beta, pbs=pbs, cancelled=lambda: pbs.gc_started)
+
+    status, steps = _load(_run(config, deps))
+
+    assert status == RunStatus.ABORTED
+    assert pbs.gc_started is True  # GC did run
+    assert pbs.verify_started is False  # verify did not
+    assert "verify" not in steps
 
 
 # --- end to end through the queue (the lease owns the power) ------------------

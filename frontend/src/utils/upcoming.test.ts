@@ -72,6 +72,28 @@ test('a malformed time yields nothing instead of Invalid Date rows', () => {
   assert.deepEqual(nextOccurrences(sched({ time: 'nope' }), local(2026, 8, 3), 3), [])
 })
 
+test('half a malformed time is still malformed', () => {
+  // Either field alone being unparseable has to stop it: an hour with a junk minute would
+  // otherwise render an Invalid Date row on the dashboard.
+  assert.deepEqual(nextOccurrences(sched({ time: '04:xx' }), local(2026, 8, 3), 3), [])
+  assert.deepEqual(nextOccurrences(sched({ time: 'xx:30' }), local(2026, 8, 3), 3), [])
+})
+
+test('asking for no occurrences returns none, and asking for one returns one', () => {
+  // `count <= 0` is the guard: with a strict `<`, a zero-length panel would still scan
+  // seven days per requested row and hand back a firing nobody asked for.
+  assert.deepEqual(nextOccurrences(sched({}), local(2026, 8, 3), 0), [])
+  assert.deepEqual(nextOccurrences(sched({}), local(2026, 8, 3), -1), [])
+  assert.equal(nextOccurrences(sched({}), local(2026, 8, 3), 1).length, 1)
+})
+
+test('a schedule with every day switched off never fires', () => {
+  assert.deepEqual(
+    nextOccurrences(sched({ days: Array(7).fill(false) }), local(2026, 8, 3), 3),
+    [],
+  )
+})
+
 // --- upcomingRows ------------------------------------------------------------
 
 const nightly = route('nightly', { color: '#e8830f' })
@@ -84,6 +106,21 @@ const NEXT = [
   { route_id: 'lab', route_name: 'Lab', at: local(2026, 8, 8, 4, 0).toISOString() },
   { route_id: 'nightly', route_name: 'Nightly', at: local(2026, 8, 4, 2, 0).toISOString() },
 ]
+
+test('only the running row is marked as now', () => {
+  // `now` is what renders the pulsing dot, so a scheduled row inheriting it would show a
+  // future firing as if it were happening.
+  const rows = upcomingRows({
+    running: { routeId: 'nightly', routeName: 'Nightly' },
+    nextRuns: NEXT,
+    routes: [nightly, lab],
+    capacity: 5,
+  })
+
+  assert.equal(rows.filter((r) => r.now).length, 1)
+  assert.equal(rows[0].now, true)
+  assert.ok(rows.slice(1).every((r) => r.now === false))
+})
 
 test('the running row comes first and carries no timestamp', () => {
   const rows = upcomingRows({

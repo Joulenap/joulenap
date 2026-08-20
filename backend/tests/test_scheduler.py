@@ -11,7 +11,9 @@ from conftest import with_devices
 from app.config import Config
 from app.core.scheduler import (
     HEARTBEAT_JOB_ID,
+    PRUNE_HOUR,
     PRUNE_JOB_ID,
+    PRUNE_MINUTE,
     Scheduler,
     _build_trigger,
     _translate_dow,
@@ -381,3 +383,18 @@ def test_the_heartbeat_survives_the_kill_switch():
     sched.arm_heartbeat()
     sched.rearm(_config(scheduler_enabled=False))
     assert sched._scheduler.get_job(HEARTBEAT_JOB_ID) is not None
+
+
+def test_the_prune_job_fires_at_the_documented_time():
+    """03:30 daily, and the only thing that said so was a log line.
+
+    Moving it would silently change when history is deleted, in the middle of the window
+    a nightly backup is most likely to still be running.
+    """
+    sched = Scheduler(lambda _id, _t: None, run_prune=lambda: None, timezone="UTC")
+    sched.arm_prune()
+
+    trigger = str(sched.prune_job.trigger)
+    assert f"hour='{PRUNE_HOUR}'" in trigger
+    assert f"minute='{PRUNE_MINUTE}'" in trigger
+    assert (PRUNE_HOUR, PRUNE_MINUTE) == (3, 30)

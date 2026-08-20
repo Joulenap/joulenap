@@ -234,6 +234,64 @@ def test_test_502s_when_the_device_cannot_be_reached(app_ctx):
 # --- storage re-read ----------------------------------------------------------
 
 
+def test_list_storages_reports_what_the_pve_actually_has(app_ctx):
+    """The read half of the storages pair, and the whole handler was untested.
+
+    The wizard asks this before minting a token, because the answer decides whether
+    replacing an API token on that backup server would break a storage entry nobody would
+    think to look at. Nothing is written.
+    """
+    client, app = app_ctx
+    _inject(
+        app,
+        pves={
+            "pve-beta": FakePve(
+                pbs_storages=[
+                    {
+                        "storage": "pbs-offsite",
+                        "server": "192.0.2.21",
+                        "datastore": "offsite",
+                        "fingerprint": "AA:BB",
+                    }
+                ]
+            )
+        },
+    )
+
+    r = client.get("/api/devices/pves/pve-beta/storages")
+
+    assert r.status_code == 200
+    assert r.json() == [
+        {
+            "storage": "pbs-offsite",
+            "host": "192.0.2.21",
+            "port": 8007,
+            "datastore": "offsite",
+            "fingerprint": "AA:BB",
+        }
+    ]
+    # Read-only: the stored map is untouched, unlike the POST sibling below.
+    stored = next(p for p in load_config().pves if p.id == "pve-beta")
+    assert stored.storages == {"pbs-01": "pbs"}
+
+
+def test_list_storages_404s_on_an_unknown_pve(app_ctx):
+    client, _app = app_ctx
+    assert client.get("/api/devices/pves/nope/storages").status_code == 404
+
+
+def test_list_storages_reports_an_unreachable_pve_as_502(app_ctx):
+    # 502 and not 500: the wizard shows "could not reach this host", which is actionable,
+    # rather than an internal error the user can do nothing about.
+    client, app = app_ctx
+    _inject(app, pves={"pve-beta": UnreachablePve()})
+
+    r = client.get("/api/devices/pves/pve-beta/storages")
+
+    assert r.status_code == 502
+    assert "connection refused" in r.json()["detail"]
+
+
 def test_refresh_storages_links_a_backup_server_added_later(app_ctx):
     """The reason this endpoint exists: register a backup server *after* the Proxmox host
     that backs up to it and nothing could complete the map — the Add-PVE wizard refuses a
@@ -446,3 +504,17 @@ def test_keep_on_leaves_the_box_awake(app_ctx):
     _drain(app)
 
     assert box.poweroffs == []
+
+
+def test_maintenance_with_no_body_powers_the_box_back_off(app_ctx):
+    """The default half of ``keep_on``, and the reason this app exists: the "Run GC" button
+    sends no body, so the model default is what decides whether the box goes back to sleep.
+    Flipping it to True left every ad-hoc run's box awake with nothing failing."""
+    client, app = app_ctx
+    box = FakeBox()
+    _inject(app, box=box)
+
+    assert client.post("/api/devices/pbss/pbs-01/gc").status_code == 202
+    _drain(app)
+
+    assert box.poweroffs == ["pbs-01"]

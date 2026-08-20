@@ -162,3 +162,58 @@ test('no document available: resolves false without throwing', async () => {
     restoreDocument()
   }
 })
+
+// Each condition in the secure-context guard on its own. The suite covered "all four true"
+// and "none true", so any one of them could be dropped and the copy button would either
+// throw on plain HTTP or skip a working Clipboard API.
+
+test('a secure context with no Clipboard API falls back rather than throwing', async () => {
+  const restoreWindow = setGlobal('window', { isSecureContext: true })
+  const restoreNavigator = setGlobal('navigator', {}) // no .clipboard at all
+  const restoreDocument = setGlobal('document', undefined)
+  try {
+    assert.equal(await copyToClipboard('x'), false) // fell through to the textarea path
+  } finally {
+    restoreWindow()
+    restoreNavigator()
+    restoreDocument()
+  }
+})
+
+test('an insecure context never touches navigator.clipboard', async () => {
+  // http://192.168.x.x is how this app is normally reached, and writeText there throws or
+  // silently no-ops, so it must not even be attempted.
+  let attempted = false
+  const restoreWindow = setGlobal('window', { isSecureContext: false })
+  const restoreNavigator = setGlobal('navigator', {
+    clipboard: {
+      writeText: async () => {
+        attempted = true
+      },
+    },
+  })
+  const restoreDocument = setGlobal('document', undefined)
+  try {
+    assert.equal(await copyToClipboard('x'), false)
+    assert.equal(attempted, false)
+  } finally {
+    restoreWindow()
+    restoreNavigator()
+    restoreDocument()
+  }
+})
+
+test('a document with no body yet resolves false instead of throwing', async () => {
+  // appendChild on a null body would throw out of an event handler and take the click
+  // with it; returning false lets the caller show "copy failed".
+  const restoreWindow = setGlobal('window', { isSecureContext: false })
+  const restoreNavigator = setGlobal('navigator', {})
+  const restoreDocument = setGlobal('document', { createElement: () => ({}), body: null })
+  try {
+    assert.equal(await copyToClipboard('x'), false)
+  } finally {
+    restoreWindow()
+    restoreNavigator()
+    restoreDocument()
+  }
+})

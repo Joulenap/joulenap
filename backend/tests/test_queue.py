@@ -512,3 +512,73 @@ def test_a_run_on_another_pbs_does_not_hold_the_first(temp_config, temp_db):
     drain(service)
 
     assert box.poweroffs == ["pbs1", "pbs2"]
+
+
+def test_a_single_box_run_records_an_unlabelled_power_off_step(temp_config, temp_db):
+    """``multi`` decides whether the POWEROFF step is labelled with a device id.
+
+    A one-box run reads better as a bare "poweroff", and a sync route's two boxes need the
+    labels to be told apart. Only the labelled case was covered, so the boundary that picks
+    between them was free to move.
+    """
+    service, _box = make_service()
+
+    enqueue(service, "r1", ok_job, trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    with session_scope() as session:
+        names = {s.name for s in session.scalars(select(Run)).one().steps}
+    assert StepName.POWEROFF in names
+    assert not any(str(n).startswith("poweroff:") for n in names)
+
+
+def test_a_two_box_run_labels_each_power_off_step(temp_config, temp_db):
+    service, _box = make_service()
+
+    enqueue(service, "sync", ok_job, trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    with session_scope() as session:
+        names = {s.name for s in session.scalars(select(Run)).one().steps}
+    assert {"poweroff:pbs1", "poweroff:pbs2"} <= names
+
+
+def test_a_powered_off_box_is_not_reported_as_left_on(temp_config, temp_db):
+    # The notification's "left powered on" line is built from the release outcome, so
+    # confusing POWERED_OFF with LEFT_ON would warn about a box that went to sleep fine.
+    service, box = make_service()
+    seen = sent(service)
+
+    enqueue(service, "r1", notifying_job(), trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    assert box.poweroffs == ["pbs1"]
+    assert seen[0].left_on == []
+
+
+def test_a_job_that_explodes_still_releases_its_lease(temp_config, temp_db):
+    """The last-resort release in the worker's finally block.
+
+    A job that raises out of the recorder block leaves the leases held, and a held lease is
+    never revisited: the queue moves on and nothing would ever put that box back to sleep.
+    The box itself stays on, which is the documented behaviour for a run that did not
+    succeed, but the *lease* has to be given back or the next run cannot take it either.
+    """
+    service, box = make_service()
+
+    def exploding_job(_config, _subject, _recorder, _deps):
+        raise RuntimeError("job exploded")
+
+    enqueue(service, "r1", exploding_job, trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    pbs = next(p for p in service._store.config.pbss if p.id == "pbs1")
+    assert service.lease.state(pbs).holders == 0
+    assert box.poweroffs == []  # a run that failed leaves the box up for inspection
+
+    # And the queue is usable afterwards rather than wedged: the next run takes the lease
+    # and closes the box normally.
+    enqueue(service, "r2", ok_job, trigger=RunTrigger.SCHEDULED)
+    drain(service)
+    assert box.poweroffs == ["pbs1"]
+    assert service.lease.state(pbs).holders == 0

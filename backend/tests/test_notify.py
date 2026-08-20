@@ -171,6 +171,39 @@ def test_ntfy_http_uses_insecure_scheme():
     assert _urls(cfg) == ["ntfy://192.168.1.9:8080/t"]
 
 
+def test_email_on_465_uses_implicit_tls():
+    # 465 is implicit TLS: the session is encrypted from the first byte, so the scheme has
+    # to be mailtos and the mode ssl. Only 587 was covered, and this branch decides whether
+    # a password crosses the network in the clear.
+    cfg = _notifications_config()
+    cfg.notifications.email.smtp_port = 465
+
+    url = next(u for u in _urls(cfg) if u.startswith("mailto"))
+
+    assert url.startswith("mailtos://")
+    assert "mode=ssl" in url
+    assert ":465?" in url
+
+
+def test_email_on_a_plain_port_stays_unencrypted_and_says_so():
+    # Port 25 or a LAN relay: no TLS to ask for, so no mode at all rather than a mode the
+    # server would reject. The scheme is the visible difference in the generated URL.
+    cfg = _notifications_config()
+    cfg.notifications.email.smtp_port = 25
+
+    url = next(u for u in _urls(cfg) if u.startswith("mailto"))
+
+    assert url.startswith("mailto://")
+    assert "mode=" not in url
+
+
+def test_email_needs_host_from_and_to_before_it_produces_a_url():
+    for missing in ("smtp_host", "from_addr", "to_addr"):
+        cfg = _notifications_config()
+        setattr(cfg.notifications.email, missing, "")
+        assert not any(u.startswith("mailto") for u in _urls(cfg)), missing
+
+
 # --- messages ----------------------------------------------------------------
 
 
@@ -976,6 +1009,72 @@ def test_failure_sent_when_on_failure_enabled():
     report = _send(svc, cfg, _run(RunStatus.FAILURE, error="boom"))
     assert report.sent is True
     assert "boom" in fake.payload[1]
+
+
+def test_on_failure_off_silences_a_failed_run():
+    cfg = _notifications_config()
+    cfg.notifications.on_failure = False
+    svc = NotificationService(apprise_factory=FakeApprise)
+
+    report = _send(svc, cfg, _run(RunStatus.FAILURE, error="boom"))
+
+    # The whole report, not just `skipped`: the fields are what /api/notify/test and the
+    # run log show, so a wrong channel count or reason is a wrong answer on screen.
+    assert (report.sent, report.channels, report.skipped) == (False, 0, True)
+    assert report.reason == "on_failure disabled"
+
+
+def test_on_failure_off_also_silences_an_aborted_run():
+    # ABORTED is a failure for routing purposes: a run someone stopped, or one that aborted
+    # on a full datastore, follows on_failure and not on_success.
+    cfg = _notifications_config()
+    cfg.notifications.on_failure = False
+    svc = NotificationService(apprise_factory=FakeApprise)
+
+    report = _send(svc, cfg, _run(RunStatus.ABORTED))
+
+    assert report.skipped is True and report.reason == "on_failure disabled"
+
+
+def test_an_aborted_run_is_sent_when_on_failure_is_on():
+    fake = FakeApprise()
+    cfg = _notifications_config()
+    cfg.notifications.on_success = False  # only the failure route can carry this one
+    svc = NotificationService(apprise_factory=lambda: fake)
+
+    assert _send(svc, cfg, _run(RunStatus.ABORTED)).sent is True
+
+
+def test_on_failure_off_does_not_silence_a_successful_run():
+    # The inverse mistake: the two toggles are independent, and muting failures must not
+    # take the success notification with it.
+    fake = FakeApprise()
+    cfg = _notifications_config()
+    cfg.notifications.on_failure = False
+    svc = NotificationService(apprise_factory=lambda: fake)
+
+    assert _send(svc, cfg, _run(RunStatus.SUCCESS)).sent is True
+
+
+def test_on_success_off_reports_the_full_skip_shape():
+    cfg = _notifications_config()
+    cfg.notifications.on_success = False
+    svc = NotificationService(apprise_factory=FakeApprise)
+
+    report = _send(svc, cfg, _run(RunStatus.SUCCESS))
+
+    assert (report.sent, report.channels, report.skipped) == (False, 0, True)
+    assert report.reason == "on_success disabled"
+
+
+def test_failed_channels_are_logged_on_an_alert(caplog):
+    # The twin of test_failed_channels_are_logged_on_a_run, for the startup alerts (a
+    # missed backup, an interrupted run). Same silent-channel problem, separate loop.
+    fake = FakeApprise(fail_urls={"ntfys://ntfy.sh/homelab": "boom"})
+    svc = NotificationService(apprise_factory=lambda: fake)
+    with caplog.at_level(logging.WARNING, logger="app.notify.service"):
+        svc.send_alert(_notifications_config(), "Backup missed", "while the app was down")
+    assert any("ntfy" in r.message and "boom" in r.message for r in caplog.records)
 
 
 # --- who sends it, and when --------------------------------------------------

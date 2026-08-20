@@ -17,8 +17,25 @@ test('round-trips a weekday subset (Mon,Wed,Fri)', () => {
 })
 
 test('0 and 7 both mean Sunday (our index 6)', () => {
-  assert.equal(parseCron('0 2 * * 0').days[6], true)
-  assert.equal(parseCron('0 2 * * 7').days[6], true)
+  // The whole array, not just index 6: checking one slot cannot tell "Sunday" from
+  // "Sunday and whatever the array happened to start with".
+  const sunday = [false, false, false, false, false, false, true]
+  assert.deepEqual(parseCron('0 2 * * 0').days, sunday)
+  assert.deepEqual(parseCron('0 2 * * 7').days, sunday)
+})
+
+test('a single mid-week day selects that day and nothing else', () => {
+  // cron dow 2 = Tuesday = our index 1.
+  assert.deepEqual(parseCron('0 2 * * 2').days, [
+    false, true, false, false, false, false, false,
+  ])
+  assert.equal(buildCron(parseCron('0 2 * * 2')), '0 2 * * 2')
+})
+
+test('an unparseable day list falls back to every day rather than to none', () => {
+  // A cron nobody can read must not produce a schedule that never fires; daily is the
+  // safe reading, and it is what the UI then shows the user.
+  assert.deepEqual(parseCron('0 2 * * xyz').days, Array(7).fill(true))
 })
 
 test('preserves day-of-month/month through the round-trip (JN-006)', () => {

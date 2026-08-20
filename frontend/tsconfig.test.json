@@ -1,0 +1,12 @@
+// The tests, type-checked. They were excluded from tsconfig.json and node --test strips
+// types without checking them, so nothing verified that a test still matched the module it
+// imports. Kept as a second config rather than folded into the first because these run
+// under node: they need node's globals, and app code must not have them in scope.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  "exclude": []
+}
