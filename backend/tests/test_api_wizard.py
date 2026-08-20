@@ -361,3 +361,33 @@ def test_the_ssh_endpoints_default_to_port_22_and_the_root_user(client, monkeypa
         json={"host": "pbs.local", "key_type": "ssh-ed25519", "key_base64": "AA"},
     )
     assert trust["port"] == 22
+
+
+def test_storage_derive_and_grant_sync_default_to_no_tls_and_their_own_ports(
+    client, monkeypatch
+):
+    # The two remaining wizard bodies, same contract as the ones above: a UI that omits
+    # these fields must get the permissive-but-deliberate defaults, not whatever a later
+    # edit leaves behind.
+    derive = _capture(monkeypatch, "storage_derive", {"host": "pbs.local", "datastore": "backup"})
+    r = client.post(
+        "/api/wizard/storage/derive",
+        json={
+            "host": "pve.local",
+            "api_token_id": "root@pam!joulenap",
+            "api_token_secret": "sec",
+            "storage_id": "pbs",
+        },
+    )
+    assert r.status_code == 200
+    assert derive["port"] == 8006 and derive["verify_tls"] is False
+
+    grant = _capture(monkeypatch, "pbs_grant_sync", {"token_id": "t", "roles": ["RemoteAudit"]})
+    r = client.post(
+        "/api/wizard/pbs/grant-sync",
+        json={"host": "pbs.local", "password": "pw", "api_token_id": "root@pam!joulenap"},
+    )
+    assert r.status_code == 200
+    assert grant["port"] == 8007 and grant["verify_tls"] is False
+    assert grant["username"] == "root@pam"
+    assert grant["fingerprint"] == ""
