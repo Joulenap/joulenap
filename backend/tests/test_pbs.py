@@ -358,14 +358,17 @@ def test_get_fingerprint(monkeypatch):
     expected = ":".join(expected[i : i + 2] for i in range(0, len(expected), 2))
 
     class FakeTLS:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
         def getpeercert(self, binary_form=False):
             return der
+
+        def sendall(self, data):  # the GET / (#44)
+            pass
+
+        def recv(self, n):
+            return b""
+
+        def close(self):
+            pass
 
     class FakeSock:
         def __enter__(self):
@@ -373,6 +376,9 @@ def test_get_fingerprint(monkeypatch):
 
         def __exit__(self, *a):
             return False
+
+        def close(self):
+            pass
 
     monkeypatch.setattr("socket.create_connection", lambda *a, **k: FakeSock())
     monkeypatch.setattr(
