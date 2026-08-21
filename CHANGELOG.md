@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Backups triggered by Joulenap now carry the guest name in their Notes, the way a backup job
+  created in the Proxmox VE web interface does. Both the PVE and PBS backup lists show the name
+  next to the ID again, so picking the right snapshot to restore no longer means matching VMIDs
+  by hand.
+
 ## [1.1.3]
 
 ### Fixed
