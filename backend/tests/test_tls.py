@@ -1,4 +1,5 @@
 import ssl
+from unittest import mock
 
 import pytest
 
@@ -49,3 +50,24 @@ def test_pinned_context_raises_on_mismatch():
     der = _self_signed_der()
     with pytest.raises(ApiError, match="fingerprint changed"):
         tls.pinned_ssl_context("pbs", 8007, "AA:BB:CC", fetch_der=lambda h, p: der)
+
+
+def test_fetch_peer_der_speaks_before_it_leaves(monkeypatch):
+    """A connection that only shakes hands and vanishes makes PBS log a failed poll (#44),
+    so the probe asks for the login page and reads the answer out before closing."""
+    tls_sock = mock.MagicMock()
+    tls_sock.getpeercert.return_value = b"DER"
+    tls_sock.recv.side_effect = [b"HTTP/1.0 200 OK", b""]
+    ctx = mock.MagicMock(**{"wrap_socket.return_value": tls_sock})
+    monkeypatch.setattr(tls.ssl, "create_default_context", lambda *a, **k: ctx)
+    monkeypatch.setattr(tls.socket, "create_connection", mock.MagicMock())
+
+    assert tls.fetch_peer_der("pbs", 8007) == b"DER"
+    assert tls_sock.sendall.call_args.args[0].startswith(b"GET / HTTP/1.0")
+    tls_sock.close.assert_called_once_with()
+
+    # A server that won't talk must not fail the read, nor leak the socket.
+    tls_sock.reset_mock()
+    tls_sock.sendall.side_effect = OSError("peer gone")
+    assert tls.fetch_peer_der("pbs", 8007) == b"DER"
+    tls_sock.close.assert_called_once_with()

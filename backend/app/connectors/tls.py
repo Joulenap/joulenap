@@ -27,13 +27,34 @@ def fetch_peer_der(host: str, port: int, timeout: float = 5.0) -> bytes:
     context.verify_mode = ssl.CERT_NONE
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
-            with context.wrap_socket(sock, server_hostname=host) as tls_sock:
+            tls_sock = context.wrap_socket(sock, server_hostname=host)
+            try:
                 der = tls_sock.getpeercert(binary_form=True)
+                _say_hello(tls_sock, host)
+            finally:
+                tls_sock.close()
     except OSError as exc:
         raise ApiError(f"Could not read TLS certificate from {host}:{port}: {exc}") from exc
     if not der:
         raise ApiError(f"No TLS certificate presented by {host}:{port}")
     return der
+
+
+def _say_hello(tls_sock: ssl.SSLSocket, host: str) -> None:
+    """Ask for the login page and wait for the answer, so the server sees a visitor.
+
+    proxmox-backup-proxy builds the API service for a connection, peer address and all, in
+    the moment right after the handshake. A client that hangs up in that same moment makes
+    it log a failed poll, once per dashboard refresh (#44). One round trip is enough to be
+    somebody. ``GET /`` needs no credentials, while ``/api2/json/version`` would answer 401
+    and log two lines of its own.
+    """
+    try:
+        tls_sock.sendall(f"GET / HTTP/1.0\r\nHost: {host}\r\n\r\n".encode())
+        while tls_sock.recv(8192):  # read the answer out, or the close resets the connection
+            pass
+    except OSError:
+        pass  # the certificate is what we came for, and the handshake already proved it is up
 
 
 def fingerprint_hex(der: bytes) -> str:

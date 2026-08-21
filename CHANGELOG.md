@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.3]
+
+### Fixed
+
+- The reachability probe now makes a real request instead of shaking hands and hanging up.
+  `proxmox-backup-proxy` prepares each connection, peer address and all, in the moment right
+  after the handshake, and a client that disappears exactly then left
+  `Failed to get api service: Transport endpoint is not connected` in the PBS syslog on every
+  poll. Second half of the log-spam fix started in 1.1.2 (#44).
+
 ## [1.1.2]
 
 ### Fixed
@@ -644,7 +654,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/Joulenap/joulenap/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/Joulenap/joulenap/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/Joulenap/joulenap/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Joulenap/joulenap/compare/v1.0.0...v1.1.0
