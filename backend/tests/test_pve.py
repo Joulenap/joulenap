@@ -135,6 +135,7 @@ def test_vzdump_builds_params_and_returns_upid():
     assert body["mode"] == ["snapshot"]
     assert body["prune-backups"] == ["keep-daily=7"]
     assert body["bwlimit"] == ["51200"]
+    assert body["notes-template"] == ["{{guestname}}"]
 
 
 def test_vzdump_all_guests():

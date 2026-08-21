@@ -162,7 +162,15 @@ class PveClient:
         cluster node to run it on (a backup route starts one task per node); it defaults to
         the client's own node.
         """
-        params: dict[str, Any] = {"storage": storage, "mode": mode}
+        # PVE fills the backup's Notes only when asked to: the GUI's backup-job form defaults
+        # to "{{guestname}}", a bare API call defaults to nothing. Send it ourselves so a
+        # Joulenap-triggered backup is labelled with the guest name in the PVE/PBS lists like
+        # a native job. Available since libpve-guest-common 4.1-2 (PVE 7.3).
+        params: dict[str, Any] = {
+            "storage": storage,
+            "mode": mode,
+            "notes-template": "{{guestname}}",
+        }
         if all_guests:
             params["all"] = 1
         elif vmids:
