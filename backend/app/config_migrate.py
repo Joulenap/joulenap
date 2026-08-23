@@ -284,18 +284,8 @@ def _route(
 
 def _guests(guests: dict[str, Any]) -> dict[str, Any]:
     mode = guests.get("mode", "all")
-    if mode == "exclude":
-        # 1.0 has no exclude mode. Inverting the list would need a live guest list we do
-        # not have at load time, so widen to "all" — never silently drop guests from a
-        # backup — and say so.
-        log.warning(
-            "config: guest mode 'exclude' no longer exists and became 'all', so guests %s "
-            "are now included; narrow the route down from the UI if that is wrong",
-            guests.get("list", []),
-        )
-        return {"mode": "all", "list": []}
-    if mode == "include":
-        return {"mode": "include", "list": list(guests.get("list", []))}
+    if mode in ("include", "exclude"):
+        return {"mode": mode, "list": list(guests.get("list", []))}
     return {"mode": "all", "list": []}
 
 

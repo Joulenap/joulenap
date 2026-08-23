@@ -5,14 +5,33 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0]
 
 ### Added
 
+- Backup routes gained an **Exclude** guest mode next to All and Selection: the route covers
+  everything on its sources except the guests you tick. A VM or container created later is
+  backed up on the next run without touching the route, which is what the explicit Selection
+  list could never do. The exclusion is handed to `vzdump` itself (`--all` with `--exclude`),
+  so Proxmox keeps deciding which guests a run covers and a guest marked *exclude from backup*
+  on the host is still honoured (#46).
+- Each of the three guest modes now explains itself under the switch, including the one that
+  was missing before: Selection says outright that a guest created later has to be added by
+  hand.
 - Backups triggered by Joulenap now carry the guest name in their Notes, the way a backup job
   created in the Proxmox VE web interface does. Both the PVE and PBS backup lists show the name
   next to the ID again, so picking the right snapshot to restore no longer means matching VMIDs
-  by hand.
+  by hand (#48).
+
+### Changed
+
+- A route that excludes every guest is refused at save time, the rule that already covered a
+  Selection with nothing ticked. Either one wakes the backup server on schedule and aborts the
+  run without ever writing a backup.
+- A 0.9 config that used the old `exclude` guest mode migrates straight through instead of
+  widening to `all` with a warning. The mode exists again, so nothing has to be approximated.
+- Excluded VMIDs the source no longer has are shown in the route editor and can be removed,
+  rather than sitting in the config unseen.
 
 ## [1.1.3]
 
@@ -662,6 +681,7 @@ Backup Server, all from a web UI.
   redacted from API responses.
 
 [Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.1.3...HEAD
+[1.2.0]: https://github.com/Joulenap/joulenap/compare/v1.1.3...v1.2.0
 [1.1.3]: https://github.com/Joulenap/joulenap/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/Joulenap/joulenap/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/Joulenap/joulenap/compare/v1.1.0...v1.1.1

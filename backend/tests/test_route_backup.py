@@ -154,6 +154,57 @@ def test_include_mode_groups_the_selection_per_node(temp_db):
     assert all(c["all_guests"] is False for c in alpha.vzdump_calls)
 
 
+def test_exclude_mode_stays_on_the_all_flag_and_passes_the_exclusion(temp_db):
+    config = _config(
+        sources=[RouteSource(pve="pve-alpha", guests=RouteGuests(mode="exclude", list=[101, 200]))]
+    )
+    deps, alpha, _beta, _pbs = _deps()
+
+    status, _steps = _load(_run(config, deps))
+
+    assert status == RunStatus.SUCCESS
+    # n2 holds only the excluded 200, so it never gets a task. The nodes that do run stay on
+    # vzdump's own ``all`` flag with the exclusion attached, so PVE keeps deciding.
+    assert [c["node"] for c in alpha.vzdump_calls] == ["n1", "n3"]
+    assert all(
+        c["all_guests"] is True and c["vmids"] is None and c["exclude"] == [101, 200]
+        for c in alpha.vzdump_calls
+    )
+
+
+def test_excluding_every_guest_fails_that_source(temp_db):
+    config = _config(
+        sources=[
+            RouteSource(
+                pve="pve-alpha", guests=RouteGuests(mode="exclude", list=[100, 101, 200, 300])
+            )
+        ]
+    )
+    deps, alpha, _beta, _pbs = _deps()
+
+    status, steps = _load(_run(config, deps))
+
+    assert status == RunStatus.FAILURE
+    assert steps["backup:pve-alpha"] == "failure"
+    assert alpha.vzdump_calls == []
+
+
+def test_excluded_guest_that_is_gone_is_not_warned_about(temp_db):
+    # The include-mode warning says "you asked for this and are not getting it". A stale entry
+    # in an exclude list just skips nothing, so it must stay quiet.
+    config = _config(
+        sources=[RouteSource(pve="pve-alpha", guests=RouteGuests(mode="exclude", list=[999]))]
+    )
+    deps, alpha, _beta, _pbs = _deps()
+
+    run_id = _run(config, deps)
+
+    status, _steps = _load(run_id)
+    assert status == RunStatus.SUCCESS
+    assert len(alpha.vzdump_calls) == 3
+    assert not [m for m in _logs(run_id, LogLevel.WARN) if "999" in m]
+
+
 def test_route_options_and_retention_drive_the_vzdump_arguments(temp_db):
     config = _config()
     route = config.routes[0]
@@ -434,6 +485,23 @@ def test_last_backup_cache_is_attributed_to_each_source(temp_db):
     with session_scope() as session:
         rows = {(r.pve_id, r.vmid, r.pbs_id) for r in session.scalars(select(GuestBackup))}
     assert rows == {("pve-alpha", 100, "pbs1"), ("pve-beta", 500, "pbs1")}
+
+
+def test_last_backup_cache_leaves_out_an_excluded_guest(temp_db):
+    config = _config(
+        sources=[RouteSource(pve="pve-alpha", guests=RouteGuests(mode="exclude", list=[101]))]
+    )
+    # The datastore holds a snapshot for 101 too (an older run made it); this route no longer
+    # covers that guest, so it must not claim it.
+    deps, _alpha, _beta, _pbs = _deps(
+        pbs=FakePbs(snapshots={100: 1_700_000_000, 101: 1_700_000_100})
+    )
+
+    _run(config, deps)
+
+    with session_scope() as session:
+        rows = {(r.pve_id, r.vmid) for r in session.scalars(select(GuestBackup))}
+    assert rows == {("pve-alpha", 100)}
 
 
 def test_datastore_stat_is_keyed_by_the_target_pbs(temp_db):

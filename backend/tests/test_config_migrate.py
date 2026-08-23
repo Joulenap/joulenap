@@ -311,15 +311,10 @@ def test_a_disabled_backup_job_migrates_to_a_disabled_route(tmp_path: Path):
 # --- guest modes --------------------------------------------------------------
 
 
-def test_exclude_mode_widens_to_all(tmp_path: Path, caplog):
-    # 1.0 has no exclude mode and inverting the list needs a live guest list we don't have
-    # at load time. Widening never drops a guest from a backup; narrowing could.
+def test_exclude_mode_maps_straight_through(tmp_path: Path):
     path = _write(tmp_path, backup={"guests": {"mode": "exclude", "list": [999]}})
-    with caplog.at_level("WARNING"):
-        cfg = load_config(path)
-    guests = cfg.routes[0].sources[0].guests
-    assert guests.mode == "all" and guests.list == []
-    assert "exclude" in caplog.text
+    guests = load_config(path).routes[0].sources[0].guests
+    assert guests.mode == "exclude" and guests.list == [999]
 
 
 def test_all_mode_maps_straight_through(tmp_path: Path):

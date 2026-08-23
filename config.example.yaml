@@ -122,13 +122,15 @@ routes: []
 #     notify: true            # send notifications for this route (channels are global, below)
 #     kind: backup            # backup | sync | external | verify
 #     # Guests are per source: vmids collide between PVEs, so each source picks its own.
-#     # A newly created VM/CT is backed up automatically in "all" mode but NOT in
-#     # "include" mode — that list is explicit, so add new guests to it yourself.
+#     # A newly created VM/CT is backed up automatically in "all" and "exclude" mode but NOT
+#     # in "include" mode: that list is explicit, so add new guests to it yourself.
 #     sources:
 #       - pve: pve-01
 #         guests:
-#           mode: all         # all | include
-#           list: []          # used when mode = include, e.g. [104, 106, 202]
+#           mode: all         # all | include | exclude
+#           # The vmids the mode talks about: the ones to back up when mode = include,
+#           # the ones to skip when mode = exclude, e.g. [104, 106, 202]. Unused for "all".
+#           list: []
 #     target: pbs-01
 #     schedule:
 #       time: "04:00"

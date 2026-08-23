@@ -259,7 +259,8 @@ export interface DeviceLists {
 export type RouteKind = 'backup' | 'sync' | 'external' | 'verify'
 
 export interface RouteGuests {
-  mode: 'all' | 'include'
+  mode: 'all' | 'include' | 'exclude'
+  /** The vmids the mode talks about: backed up in `include`, skipped in `exclude`, unused in `all`. */
   list: number[]
 }
 

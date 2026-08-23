@@ -1260,6 +1260,20 @@
 .guest-row.off .gname {
   color: var(--jn-text-muted);
 }
+/* Exclude mode: a struck-out name says "skipped on purpose", not just "not picked". */
+.guest-row.excluded .gname {
+  text-decoration: line-through;
+}
+/* A stored vmid the PVE listing no longer knows about. */
+.guest-row.gone .gname,
+.guest-row.gone .gid {
+  color: var(--jn-text-faint);
+  font-style: italic;
+}
+.guest-row.gone .gtype {
+  color: var(--jn-text-faint);
+  background: var(--jn-panel-alt);
+}
 .guest-empty {
   padding: 16px;
   text-align: center;

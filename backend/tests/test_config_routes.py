@@ -221,9 +221,17 @@ def test_guests_are_selected_per_source():
     assert first.guests.list == [100, 101] and second.guests.list == [100]
 
 
-def test_exclude_guest_mode_is_gone():
+def test_exclude_guest_mode_keeps_its_list():
+    cfg = _cfg(
+        routes=[_route(sources=[{"pve": "pve-01", "guests": {"mode": "exclude", "list": [12]}}])]
+    )
+    guests = cfg.routes[0].sources[0].guests
+    assert guests.mode == "exclude" and guests.list == [12]
+
+
+def test_unknown_guest_mode_is_rejected():
     with pytest.raises(ValidationError):
-        _cfg(routes=[_route(sources=[{"pve": "pve-01", "guests": {"mode": "exclude"}}])])
+        _cfg(routes=[_route(sources=[{"pve": "pve-01", "guests": {"mode": "sometimes"}}])])
 
 
 # --- managed_power ------------------------------------------------------------

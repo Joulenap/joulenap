@@ -39,7 +39,7 @@ The **kind** follows from which devices the route names:
 | `external` | none | a PBS | nothing of its own — it watches the tasks PVE/PBS start on their own schedules |
 | `verify` | none | a PBS | a verification pass over the target's snapshots |
 
-Guests are selected **per source** (`sources[].guests`), because vmids collide between PVEs. Mode is `all` or `include`; in `include` mode a newly created guest is *not* picked up automatically.
+Guests are selected **per source** (`sources[].guests`), because vmids collide between PVEs. Mode is `all`, `include` or `exclude`, and `list` holds the vmids the mode talks about. Only `include` spells the guests out to vzdump; `all` and `exclude` both ride vzdump's own `--all` flag (with `--exclude` attached in the second case), so PVE keeps deciding and a newly created guest is picked up automatically in both. In `include` mode it is *not*.
 
 The per-guest last-backup cache is filled by listing the target datastore's snapshots, and that listing covers the datastore's **root namespace only** — no `ns` parameter is sent, and a PBS namespace is configured on the Proxmox storage entry, where Joulenap never sees it. A namespaced setup therefore backs up, prunes and collects garbage correctly while every one of its guests reads *never backed up*. PBS groups are `ct/<vmid>` / `vm/<vmid>` with no record of which host wrote them, so two PVEs sharing a datastore and a vmid also share a group and prune each other's snapshots — use non-overlapping vmid ranges across hosts.
 
@@ -101,7 +101,7 @@ All steps are recorded in the DB and exposed on the run itself via `/api/runs/{i
 
 Two rules keep it from ever bricking a boot: the original is copied to **`config.yaml.pre-overhaul.bak`** first (an existing `.bak` is never overwritten, and the copy is chmod'd `0600` because it holds every secret), and the converted config is validated before it is adopted — if it fails, the file on disk is left untouched, but nothing in 1.0 reads the 0.9 sections, so the app boots with **no devices and no routes and nothing scheduled**. The reason is surfaced as `config_error` on `/api/status` precisely so the UI says why instead of looking like a fresh install; the user can rewrite `config.yaml` from the Advanced tab while running empty.
 
-One conversion is lossy and deliberately widens rather than narrows: **0.9's `exclude` guest mode no longer exists**. Inverting the list would need a live guest list that is not available at load time, so the route becomes `all` and a warning is logged — a route that backs up more than before, never less. Narrow it from the UI if that is not what you want.
+Every guest mode carries over as it is, `exclude` included: the list is stored as written and never inverted at load time, so a 0.9 route that skipped two containers still skips exactly those two.
 
 
 ## REST API

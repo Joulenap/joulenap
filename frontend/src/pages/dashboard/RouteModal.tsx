@@ -18,7 +18,9 @@ import {
   draftToRoute,
   guestTally,
   inferKind,
+  isExcluded,
   isPicked,
+  orphanVmids,
   pveSources,
   retentionOverlaps,
   saveErrors,
@@ -27,6 +29,14 @@ import {
   toggleGuest,
   validateDraft,
 } from '../../utils/routeForm'
+
+/** The three guest modes with their label keys, so the segmented control renders from one
+ *  list instead of three near-identical buttons. */
+const GUEST_MODES = [
+  ['all', 'dashboard.routeModal.guestsAll', 'dashboard.routeModal.guestsHelp'],
+  ['include', 'dashboard.routeModal.guestsSelection', 'dashboard.routeModal.guestsSelectionHelp'],
+  ['exclude', 'dashboard.routeModal.guestsExclude', 'dashboard.routeModal.guestsExcludeHelp'],
+] as const
 
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 const COLOR_LABELS = ['Orange', 'Blue', 'Amber', 'Violet', 'Teal', 'Pink'].map(
@@ -86,7 +96,9 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
   const sections = sectionsFor(kind)
   const badge = routeKindBadge(kind)
   const sources = pveSources(draft.sourceIds)
-  const tally = guestTally(draft.sourceIds, groups, draft.selection)
+  const excluding = draft.guestMode === 'exclude'
+  const helpKey = GUEST_MODES.find(([m]) => m === draft.guestMode)![2]
+  const tally = guestTally(draft.sourceIds, groups, draft.selection, draft.guestMode)
   const overlaps = retentionOverlaps(draft, routes)
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial.current)
@@ -94,7 +106,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
   const close = () => guard(onClose)
 
   const errors: FieldError[] = [
-    ...(attempted ? validateDraft(draft, pves, pbss) : []),
+    ...(attempted ? validateDraft(draft, pves, pbss, groups) : []),
     ...serverErrors,
   ]
 
@@ -126,7 +138,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
 
   const save = async () => {
     setAttempted(true)
-    if (validateDraft(draft, pves, pbss).length) return
+    if (validateDraft(draft, pves, pbss, groups).length) return
     const taken = routes.map((r) => r.id)
     const body = draftToRoute(draft, taken)
     setSaving(true)
@@ -451,24 +463,25 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                     ? ''
                     : draft.guestMode === 'all'
                       ? t('dashboard.routeModal.guestsCountAll', { count: tally.total })
-                      : t('dashboard.routeModal.guestsCountSel', { chosen: tally.chosen, total: tally.total })}
+                      : draft.guestMode === 'exclude'
+                        ? t('dashboard.routeModal.guestsCountExc', { chosen: tally.chosen, total: tally.total })
+                        : t('dashboard.routeModal.guestsCountSel', { chosen: tally.chosen, total: tally.total })}
                 </span>
               </span>
               <div className="seg" role="group" aria-labelledby="rm-guests">
-                <SegButton
-                  on={draft.guestMode === 'all'}
-                  onClick={() => patch({ guestMode: 'all', selection: {} })}
-                  label={t('dashboard.routeModal.guestsAll')}
-                />
-                <SegButton
-                  on={draft.guestMode === 'include'}
-                  onClick={() => patch({ guestMode: 'include' })}
-                  label={t('dashboard.routeModal.guestsSelection')}
-                />
+                {GUEST_MODES.map(([m, key]) => (
+                  <SegButton
+                    key={m}
+                    on={draft.guestMode === m}
+                    // Always clear the selection: the two lists mean opposite things, so
+                    // carrying one into the other would silently change what gets backed up.
+                    onClick={() => patch({ guestMode: m, selection: {} })}
+                    label={t(key)}
+                  />
+                ))}
               </div>
-              {draft.guestMode === 'all' ? (
-                <span className="help">{t('dashboard.routeModal.guestsHelp')}</span>
-              ) : (
+              <span className="help">{t(helpKey)}</span>
+              {draft.guestMode !== 'all' && (
                 <div className="guest-list">
                   {sources.length === 0 && (
                     <div className="guest-empty">{t('dashboard.routeModal.guestsNoSource')}</div>
@@ -490,18 +503,36 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                           </div>
                         )}
                         {guests.map((g) => {
-                          const on = isPicked(draft.selection, pve, g.vmid)
+                          // The toggle flips meaning between the modes (on = backed up in
+                          // Selection, on = skipped in Exclude) but the dimming never does: a
+                          // dimmed row is a guest this route will not back up, in both modes.
+                          const on = excluding
+                            ? isExcluded(draft.selection, pve, g.vmid)
+                            : isPicked(draft.selection, pve, g.vmid)
+                          const skipped = excluding ? on : !on
                           return (
-                            <div className={`guest-row${on ? '' : ' off'}`} key={g.vmid}>
+                            <div
+                              className={`guest-row${skipped ? ' off' : ''}${excluding && on ? ' excluded' : ''}`}
+                              key={g.vmid}
+                            >
                               <Toggle
                                 size="sm"
                                 on={on}
-                                label={t('dashboard.routeModal.guestIncludeLabel', {
-                                  name: g.name,
-                                  vmid: g.vmid,
-                                })}
+                                label={t(
+                                  excluding
+                                    ? 'dashboard.routeModal.guestExcludeLabel'
+                                    : 'dashboard.routeModal.guestIncludeLabel',
+                                  { name: g.name, vmid: g.vmid },
+                                )}
                                 onClick={() =>
-                                  patch({ selection: toggleGuest(draft.selection, pve, g.vmid, vmids) })
+                                  patch({
+                                    selection: toggleGuest(
+                                      draft.selection,
+                                      pve,
+                                      g.vmid,
+                                      excluding ? [] : vmids,
+                                    ),
+                                  })
                                 }
                               />
                               <span className={`gtype ${g.type === 'qemu' ? 'vm' : 'ct'}`}>
@@ -512,6 +543,30 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                             </div>
                           )
                         })}
+                        {/* Stored vmids the PVE no longer has. Shown so a stale entry can be
+                            removed instead of rotting invisibly in the config. */}
+                        {orphanVmids(draft.selection, pve, vmids).map((vmid) => (
+                          <div className="guest-row off gone" key={`gone-${vmid}`}>
+                            <Toggle
+                              size="sm"
+                              on
+                              label={t('dashboard.routeModal.guestGoneLabel', { vmid })}
+                              onClick={() =>
+                                patch({
+                                  selection: toggleGuest(
+                                    draft.selection,
+                                    pve,
+                                    vmid,
+                                    excluding ? [] : vmids,
+                                  ),
+                                })
+                              }
+                            />
+                            <span className="gtype">?</span>
+                            <span className="gid">{vmid}</span>
+                            <span className="gname">{t('dashboard.routeModal.guestGone')}</span>
+                          </div>
+                        ))}
                       </div>
                     )
                   })}
