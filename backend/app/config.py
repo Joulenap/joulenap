@@ -191,9 +191,11 @@ class PbsDevice(_Base):
 class RouteGuests(_Base):
     """Which guests of one source PVE a backup route covers."""
 
-    mode: Literal["all", "include"] = "all"
-    # A newly created VM/CT is backed up automatically in "all" mode but NOT in "include"
-    # mode — that list is explicit, so add new guests to it yourself.
+    mode: Literal["all", "include", "exclude"] = "all"
+    # ``list`` holds the vmids the mode talks about: the ones to back up in "include" mode,
+    # the ones to skip in "exclude" mode, and nothing in "all" mode.
+    # A newly created VM/CT is backed up automatically in "all" and "exclude" mode but NOT
+    # in "include" mode: that list is explicit, so add new guests to it yourself.
     # ``typing.List`` (not ``list[int]``) avoids the field name shadowing the builtin
     # during Python 3.14 deferred annotation eval.
     list: List[int] = Field(default_factory=list)  # noqa: UP006

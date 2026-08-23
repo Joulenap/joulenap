@@ -222,13 +222,16 @@ function badgeStyle(status: string) {
 function routeDetail(route: Route, t: (k: string, o?: Record<string, unknown>) => string): string {
   const parts: string[] = []
   if (route.kind === 'backup') {
-    const explicit = route.sources.filter((s) => s.guests.mode === 'include')
+    // A mixed-mode route can only come from a hand-edited config; the first narrowed source
+    // names the line, the same way the editor picks its switch.
+    const narrowed = route.sources.filter((s) => s.guests.mode !== 'all')
+    const count = narrowed.reduce((sum, s) => sum + s.guests.list.length, 0)
     parts.push(
-      explicit.length
-        ? t('dashboard.guestsSelected', {
-            count: explicit.reduce((sum, s) => sum + s.guests.list.length, 0),
-          })
-        : t('dashboard.guestsAll'),
+      narrowed.length === 0
+        ? t('dashboard.guestsAll')
+        : narrowed[0].guests.mode === 'exclude'
+          ? t('dashboard.guestsExcluded', { count })
+          : t('dashboard.guestsSelected', { count }),
     )
   } else if (route.kind === 'sync') {
     parts.push(t(`dashboard.sync_${route.sync_direction}`))

@@ -151,6 +151,7 @@ class PveClient:
         *,
         vmids: list[int] | None = None,
         all_guests: bool = False,
+        exclude: list[int] | None = None,
         mode: str = "snapshot",
         prune_backups: str | None = None,
         bwlimit: int = 0,
@@ -158,9 +159,10 @@ class PveClient:
     ) -> str:
         """Start a vzdump backup; returns the task UPID to poll with :meth:`wait_task`.
 
-        Either pass ``vmids`` (explicit selection) or ``all_guests=True``. ``node`` picks the
-        cluster node to run it on (a backup route starts one task per node); it defaults to
-        the client's own node.
+        Either pass ``vmids`` (explicit selection) or ``all_guests=True``. ``exclude`` narrows
+        an ``all_guests`` run down and is ignored without it, which is the PVE API's own rule
+        (``--exclude`` assumes ``--all``). ``node`` picks the cluster node to run it on (a
+        backup route starts one task per node); it defaults to the client's own node.
         """
         # PVE fills the backup's Notes only when asked to: the GUI's backup-job form defaults
         # to "{{guestname}}", a bare API call defaults to nothing. Send it ourselves so a
@@ -173,6 +175,8 @@ class PveClient:
         }
         if all_guests:
             params["all"] = 1
+            if exclude:
+                params["exclude"] = ",".join(str(v) for v in exclude)
         elif vmids:
             params["vmid"] = ",".join(str(v) for v in vmids)
         if prune_backups:

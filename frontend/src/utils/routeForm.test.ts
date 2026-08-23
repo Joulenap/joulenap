@@ -11,7 +11,9 @@ import {
   draftToRoute,
   guestTally,
   inferKind,
+  isExcluded,
   isPicked,
+  orphanVmids,
   pveSources,
   retentionOverlaps,
   saveErrors,
@@ -157,6 +159,35 @@ test('a PVE whose listing has not arrived contributes nothing rather than a wron
   assert.deepEqual(guestTally(['pve:pve-alpha'], [], {}), { total: 0, chosen: 0 })
 })
 
+test('nothing is excluded until the source has a list naming the guest', () => {
+  assert.equal(isExcluded({}, 'pve-alpha', 100), false)
+  assert.equal(isExcluded({ 'pve-alpha': [101] }, 'pve-alpha', 100), false)
+  assert.equal(isExcluded({ 'pve-alpha': [101] }, 'pve-alpha', 101), true)
+})
+
+test('ticking the first guest in Exclude mode excludes only that one', () => {
+  // The empty seed is what makes Exclude the mirror of Selection: an untouched source skips
+  // nothing, so the first tick must not be read as "all the others".
+  const sel = toggleGuest({}, 'pve-alpha', 101, [])
+  assert.deepEqual(sel, { 'pve-alpha': [101] })
+  assert.equal(isExcluded(sel, 'pve-alpha', 100), false)
+})
+
+test('the Exclude counter counts the skipped guests, not the covered ones', () => {
+  const g = groups({ 'pve-alpha': [100, 101, 102] })
+  const tally = guestTally(['pve:pve-alpha'], g, { 'pve-alpha': [101] }, 'exclude')
+  assert.deepEqual(tally, { total: 3, chosen: 1 })
+})
+
+test('a stored vmid the PVE no longer lists is reported as gone', () => {
+  assert.deepEqual(orphanVmids({ 'pve-alpha': [101, 999] }, 'pve-alpha', [100, 101]), [999])
+})
+
+test('nothing is called gone while the listing has not arrived', () => {
+  // An unreachable PVE contributes no guests; every stored vmid would otherwise look stale.
+  assert.deepEqual(orphanVmids({ 'pve-alpha': [101, 999] }, 'pve-alpha', []), [])
+})
+
 test('per-source group headers appear only from the second PVE source on', () => {
   assert.equal(showsGuestGroups(['pve:pve-alpha']), false)
   assert.equal(showsGuestGroups(['pve:pve-alpha', 'pbs:pbs-01']), false)
@@ -229,6 +260,25 @@ test('switching back to All drops the recorded lists', () => {
   ])
 })
 
+test('an exclude-list route round-trips through the draft unchanged', () => {
+  const original = route('lab', {
+    sources: [{ pve: 'pve-lab', guests: { mode: 'exclude', list: [12] } }],
+  })
+  const d = draftFromRoute(original, [])
+  assert.equal(d.guestMode, 'exclude')
+  assert.deepEqual(d.selection, { 'pve-lab': [12] })
+  assert.deepEqual(draftToRoute(d, []).sources, original.sources)
+})
+
+test('an exclude list narrowed down to nothing saves as All', () => {
+  // An empty exclusion skips nothing, so saving it as "exclude" would claim a narrowing the
+  // route does not have.
+  const d = draft({ guestMode: 'exclude', sourceIds: ['pve:pve-alpha'], selection: { 'pve-alpha': [] } })
+  assert.deepEqual(draftToRoute(d, []).sources, [
+    { pve: 'pve-alpha', guests: { mode: 'all', list: [] } },
+  ])
+})
+
 test('a sync draft saves source_pbs and no sources', () => {
   const saved = draftToRoute(draft({ sourceIds: ['pbs:pbs-01'], target: 'pbs-02' }), [])
   assert.equal(saved.kind, 'sync')
@@ -267,8 +317,8 @@ test('a new route derives its id from the name and dodges the ones in use', () =
 const PVES = [pve('pve-alpha'), pve('pve-beta'), pve('pve-lab', {})]
 const PBSS = [pbs('pbs-01'), pbs('pbs-02')]
 
-const keys = (d: RouteDraft, pves = PVES, pbss = PBSS) =>
-  validateDraft(d, pves, pbss).map((e) => e.key)
+const keys = (d: RouteDraft, pves = PVES, pbss = PBSS, groups: PveGuests[] = []) =>
+  validateDraft(d, pves, pbss, groups).map((e) => e.key)
 
 test('a valid backup draft has nothing to report', () => {
   assert.deepEqual(keys(draft()), [])
@@ -562,4 +612,45 @@ test('the guest-selection check only applies to backup routes', () => {
     selection: { 'pve-alpha': [] },
   })
   assert.ok(keys(backup).includes('dashboard.routeModal.errNoGuests'))
+})
+
+test('excluding every listed guest is refused, like an empty Selection', () => {
+  const g = groups({ 'pve-alpha': [100, 101] })
+  const d = draft({
+    sourceIds: ['pve:pve-alpha'],
+    guestMode: 'exclude',
+    selection: { 'pve-alpha': [100, 101] },
+  })
+  assert.ok(keys(d, PVES, PBSS, g).includes('dashboard.routeModal.errAllExcluded'))
+})
+
+test('leaving one guest out of the exclusion saves fine', () => {
+  const g = groups({ 'pve-alpha': [100, 101] })
+  const d = draft({
+    sourceIds: ['pve:pve-alpha'],
+    guestMode: 'exclude',
+    selection: { 'pve-alpha': [100] },
+  })
+  assert.ok(!keys(d, PVES, PBSS, g).includes('dashboard.routeModal.errAllExcluded'))
+})
+
+test('a PVE whose listing has not arrived never blocks the save', () => {
+  // Otherwise an unreachable source would read as "everything is excluded" and lock the route
+  // out of being edited at all.
+  const d = draft({
+    sourceIds: ['pve:pve-alpha'],
+    guestMode: 'exclude',
+    selection: { 'pve-alpha': [100] },
+  })
+  assert.ok(!keys(d, PVES, PBSS, []).includes('dashboard.routeModal.errAllExcluded'))
+})
+
+test('one source still covered is enough, even if another is fully excluded', () => {
+  const g = groups({ 'pve-alpha': [100], 'pve-beta': [200] })
+  const d = draft({
+    sourceIds: ['pve:pve-alpha', 'pve:pve-beta'],
+    guestMode: 'exclude',
+    selection: { 'pve-alpha': [100] },
+  })
+  assert.ok(!keys(d, PVES, PBSS, g).includes('dashboard.routeModal.errAllExcluded'))
 })

@@ -74,11 +74,15 @@ export interface RouteDraft {
   target: string
   /** Only consulted when there are no sources at all. */
   onWake: 'external' | 'verify'
-  guestMode: 'all' | 'include'
+  guestMode: 'all' | 'include' | 'exclude'
   /**
-   * pve id -> the vmids that source covers. A missing entry means "not narrowed", i.e. every
-   * guest — which is exactly `guests.mode: 'all'`, so it needs no guest list to resolve and a
-   * PVE whose listing hasn't arrived yet can never be saved as "back up nothing".
+   * pve id -> the vmids the mode talks about, stored exactly as `guests.list` takes them:
+   * the guests to back up in `include` mode, the ones to skip in `exclude` mode. Nothing is
+   * ever inverted here, so the form needs no live guest list and a PVE whose listing hasn't
+   * arrived can never be saved as the wrong selection.
+   *
+   * A missing entry means "not narrowed", i.e. every guest, which is exactly
+   * `guests.mode: 'all'`, so it resolves without a guest list either.
    */
   selection: Record<string, number[]>
   time: string
@@ -122,25 +126,44 @@ export function sectionsFor(kind: RouteKind): SectionVisibility {
 
 // --- guest selection ---------------------------------------------------------
 
-/** Included unless the source has been narrowed and this vmid was left out. */
+/** Selection mode: included unless the source has been narrowed and this vmid was left out. */
 export function isPicked(selection: Record<string, number[]>, pve: string, vmid: number): boolean {
   const list = selection[pve]
   return list === undefined || list.includes(vmid)
 }
 
+/** Exclude mode: nothing is skipped until the source has a list naming this vmid. */
+export function isExcluded(selection: Record<string, number[]>, pve: string, vmid: number): boolean {
+  return selection[pve]?.includes(vmid) ?? false
+}
+
 /**
- * Flip one guest. `allVmids` is only consulted the first time a source is narrowed — until
- * then the source has no list, and unchecking one guest has to mean "all the others".
+ * Flip one guest. `seed` is only consulted the first time a source is narrowed, and says what
+ * an untouched source means: every vmid in Selection mode (unchecking one has to mean "all the
+ * others"), the empty list in Exclude mode (ticking one has to mean "only that one").
  */
 export function toggleGuest(
   selection: Record<string, number[]>,
   pve: string,
   vmid: number,
-  allVmids: number[],
+  seed: number[],
 ): Record<string, number[]> {
-  const list = selection[pve] ?? allVmids
+  const list = selection[pve] ?? seed
   const next = list.includes(vmid) ? list.filter((v) => v !== vmid) : [...list, vmid].sort((a, b) => a - b)
   return { ...selection, [pve]: next }
+}
+
+/** Stored vmids that the PVE's live listing doesn't know about: a guest deleted, migrated away
+ *  or turned into a template. Rendered so a stale entry can be seen and removed instead of
+ *  rotting in the config; an empty `known` means the listing hasn't arrived, so nothing is
+ *  called orphaned. */
+export function orphanVmids(
+  selection: Record<string, number[]>,
+  pve: string,
+  known: number[],
+): number[] {
+  if (known.length === 0) return []
+  return (selection[pve] ?? []).filter((v) => !known.includes(v))
 }
 
 /** The PVE sources of this draft as bare device ids, in chip order, ignoring PBS chips. */
@@ -149,21 +172,25 @@ export function pveSources(sourceIds: string[]): string[] {
 }
 
 /**
- * The `x/y selected` counter. `total` counts every guest of every PVE source; a source whose
- * listing failed or hasn't arrived contributes nothing rather than a wrong zero-of-zero.
+ * The counter above the guest list. `total` counts every guest of every PVE source; a source
+ * whose listing failed or hasn't arrived contributes nothing rather than a wrong zero-of-zero.
+ * `chosen` counts the guests the stored list names, which is the selected ones in Selection
+ * mode and the skipped ones in Exclude mode.
  */
 export function guestTally(
   sourceIds: string[],
   groups: PveGuests[],
   selection: Record<string, number[]>,
+  mode: RouteDraft['guestMode'] = 'include',
 ): { total: number; chosen: number } {
   let total = 0
   let chosen = 0
+  const names = mode === 'exclude' ? isExcluded : isPicked
   for (const pve of pveSources(sourceIds)) {
     const group = groups.find((g) => g.pve === pve)
     for (const guest of group?.guests ?? []) {
       total++
-      if (isPicked(selection, pve, guest.vmid)) chosen++
+      if (names(selection, pve, guest.vmid)) chosen++
     }
   }
   return { total, chosen }
@@ -198,9 +225,12 @@ export function draftFromRoute(route: Route | null, pbss: PbsDevice[]): RouteDra
     }
   }
   const selection: Record<string, number[]> = {}
+  let narrowed: 'include' | 'exclude' | null = null
   for (const source of route.sources) {
     // A source left on "all" gets no entry, which is how the draft spells "everything".
-    if (source.guests.mode === 'include') selection[source.pve] = [...source.guests.list]
+    if (source.guests.mode === 'all') continue
+    selection[source.pve] = [...source.guests.list]
+    narrowed ??= source.guests.mode
   }
   return {
     id: route.id,
@@ -217,9 +247,9 @@ export function draftFromRoute(route: Route | null, pbss: PbsDevice[]): RouteDra
     target: route.target,
     onWake: route.kind === 'verify' ? 'verify' : 'external',
     // A route mixing per-source modes can only come from a hand-edited config.yaml; the form
-    // has one switch, so anything narrowed anywhere reads as Selection and the untouched
+    // has one switch, so it takes the mode of the first narrowed source and the untouched
     // sources stay "all" until you narrow them too.
-    guestMode: Object.keys(selection).length ? 'include' : 'all',
+    guestMode: narrowed ?? 'all',
     selection,
     time: route.schedule.time,
     days: [...route.schedule.days],
@@ -254,8 +284,14 @@ export function draftToRoute(draft: RouteDraft, takenIds: readonly string[]): Ro
     kind === 'backup'
       ? pves.map((pve) => {
           const list = draft.selection[pve]
-          return draft.guestMode === 'include' && list !== undefined
-            ? { pve, guests: { mode: 'include' as const, list } }
+          // An empty exclude list skips nothing, so it collapses to "all" rather than saving a
+          // mode that reads as narrowed but isn't.
+          const narrowed =
+            draft.guestMode !== 'all' &&
+            list !== undefined &&
+            (draft.guestMode === 'include' || list.length > 0)
+          return narrowed
+            ? { pve, guests: { mode: draft.guestMode as 'include' | 'exclude', list } }
             : { pve, guests: { mode: 'all' as const, list: [] } }
         })
       : []
@@ -300,6 +336,10 @@ export function validateDraft(
   draft: RouteDraft,
   pves: PveDevice[],
   pbss: PbsDevice[],
+  /** The live guest lists, needed only by the Exclude check: telling "you excluded everything"
+   *  apart from "you excluded two of five" is impossible without knowing what is there. Left
+   *  empty the check is skipped, which is the safe direction. */
+  groups: PveGuests[] = [],
 ): FieldError[] {
   const kind = inferKind(draft.sourceIds, draft.onWake)
   const errors: FieldError[] = []
@@ -345,6 +385,20 @@ export function validateDraft(
     })
     if (sources.length && !covered) {
       errors.push({ field: 'guests', key: 'dashboard.routeModal.errNoGuests' })
+    }
+  }
+
+  if (kind === 'backup' && draft.guestMode === 'exclude') {
+    const sources = pveSources(draft.sourceIds)
+    // Same footgun as an empty Selection: the route wakes the PBS and aborts every run without
+    // ever backing anything up. A source whose listing has not arrived counts as covered, so an
+    // unreachable PVE blocks nothing.
+    const covered = sources.some((pve) => {
+      const listed = groups.find((g) => g.pve === pve)?.guests ?? []
+      return listed.length === 0 || listed.some((g) => !isExcluded(draft.selection, pve, g.vmid))
+    })
+    if (sources.length && !covered) {
+      errors.push({ field: 'guests', key: 'dashboard.routeModal.errAllExcluded' })
     }
   }
 

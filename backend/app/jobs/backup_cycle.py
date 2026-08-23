@@ -222,11 +222,14 @@ def _find_device(devices, device_id: str):
 def _guests_by_node(selection: RouteGuests, guests: list[Guest]) -> dict[str, list[int]]:
     """Group the guests this source wants by the cluster node holding them — a route runs
     one vzdump per node, and only on nodes that actually have something to back up."""
-    wanted = None if selection.mode == "all" else set(selection.list)
+    chosen = set(selection.list)
     picked: dict[str, list[int]] = {}
     for guest in guests:
-        if wanted is None or guest.vmid in wanted:
-            picked.setdefault(guest.node, []).append(guest.vmid)
+        if selection.mode == "include" and guest.vmid not in chosen:
+            continue
+        if selection.mode == "exclude" and guest.vmid in chosen:
+            continue
+        picked.setdefault(guest.node, []).append(guest.vmid)
     return picked
 
 
@@ -263,11 +266,15 @@ def _route_backup_source(
         guests = client.list_cluster_guests()
         names = {g.vmid: g.name for g in guests}
         per_node = _guests_by_node(source.guests, guests)
-        # "all" stays vzdump's own ``all`` flag rather than the vmids we just listed, so PVE
-        # keeps deciding: a guest marked *exclude from backup* is honoured, and one created
-        # since the listing is still covered.
-        all_guests = source.guests.mode == "all"
-        if not all_guests:
+        # "all" and "exclude" both stay on vzdump's own ``all`` flag rather than the vmids we
+        # just listed, so PVE keeps deciding: a guest marked *exclude from backup* is honoured,
+        # and one created since the listing is still covered. Only "include" spells the vmids
+        # out, because that is the whole point of the mode.
+        all_guests = source.guests.mode != "include"
+        excluded = source.guests.list if source.guests.mode == "exclude" else None
+        if source.guests.mode == "include":
+            # Only worth a warning for "include": there it means a guest you asked for is not
+            # being backed up. A stale entry in an "exclude" list just skips nothing.
             missing = sorted(set(source.guests.list) - {g.vmid for g in guests})
             if missing:
                 recorder.log(
@@ -284,6 +291,7 @@ def _route_backup_source(
                 node=node,
                 vmids=None if all_guests else vmids,
                 all_guests=all_guests,
+                exclude=excluded,
                 mode=route.options.mode,
                 prune_backups=prune,
                 bwlimit=route.options.bwlimit,
