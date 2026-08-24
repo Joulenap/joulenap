@@ -5,6 +5,24 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1]
+
+### Fixed
+
+- A sync route that pulls now tells PBS who owns the backups it fetches, namely the API token
+  Joulenap uses on the receiving server. Without that field PBS falls back to `root@pam`, and
+  the run fails on every group with "owner check failed" as soon as the target datastore
+  already holds backups owned by the token, which is the normal state of any datastore
+  Joulenap itself backs up to (#51). Push routes were never affected: pushed backups belong to
+  the account named in the remote configuration, whatever the job asks for.
+
+### Changed
+
+- A pull route that ran before this fix wrote its groups on the target as `root@pam`, so the
+  first run afterwards reports the same owner mismatch the other way round. Reassign those
+  groups once on the receiving server, from the datastore's Content tab with Change Owner or
+  with `proxmox-backup-client change-owner`, and the route carries on.
+
 ## [1.2.0]
 
 ### Added
@@ -680,7 +698,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/Joulenap/joulenap/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Joulenap/joulenap/compare/v1.1.3...v1.2.0
 [1.1.3]: https://github.com/Joulenap/joulenap/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/Joulenap/joulenap/compare/v1.1.1...v1.1.2

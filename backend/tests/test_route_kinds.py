@@ -125,6 +125,9 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
             "remote_store": "offsite",  # the peer's datastore
             "store": "backup",  # the executing side's own
             "direction": "pull",
+            # The executing side's own token, so the pulled groups belong to the identity
+            # that already owns everything on that datastore.
+            "owner": "root@pam!jn1",
             "transfer_last": 0,
             "remove_vanished": False,
         }
@@ -167,6 +170,7 @@ def test_push_sync_runs_the_job_on_the_source(temp_db):
         "remote_store": "backup",
         "store": "offsite",
         "direction": "push",
+        "owner": "root@pam!jn2",  # passed, but a push job never sends it on to PBS
         "transfer_last": 0,
         "remove_vanished": False,
     }

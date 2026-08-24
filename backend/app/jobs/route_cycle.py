@@ -149,6 +149,7 @@ def _sync_body(
                 remote_store=peer.datastore,
                 store=executor.datastore,
                 direction=route.sync_direction,
+                owner=executor.api_token_id,
                 transfer_last=route.options.transfer_last,
                 remove_vanished=route.options.remove_vanished,
             )
