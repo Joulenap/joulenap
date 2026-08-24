@@ -257,6 +257,7 @@ class PbsClient:
         remote_store: str,
         store: str,
         direction: str = "pull",
+        owner: str = "",
         transfer_last: int = 0,
         remove_vanished: bool = False,
     ) -> None:
@@ -267,7 +268,14 @@ class PbsClient:
         ``transfer_last`` > 0 copies only the newest N snapshots per group (PBS wants >= 1, so
         0 means "omit the parameter"); ``remove_vanished`` deletes on the receiving side what
         is gone from the sending side. Both are fields of the shared job schema, accepted for
-        pull and push alike."""
+        pull and push alike.
+
+        ``owner`` is pull-only. On a pull it is the auth-id the fetched groups end up owned by,
+        and PBS defaults it to ``root@pam``: leaving it out makes every run fail with "owner
+        check failed" as soon as the target datastore already holds groups owned by the token
+        Joulenap connects with, which is every datastore Joulenap itself backs up to. On a push
+        the receiving side owns the data as the remote's auth-id whatever the job says, and the
+        field only narrows which local groups may be read, so it is never sent."""
         data: dict[str, Any] = {
             "id": job_id,
             "store": store,
@@ -276,6 +284,8 @@ class PbsClient:
         }
         if direction == "push":
             data["sync-direction"] = "push"
+        elif owner:
+            data["owner"] = owner
         if transfer_last > 0:
             data["transfer-last"] = transfer_last
         if remove_vanished:

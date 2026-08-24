@@ -125,7 +125,11 @@ def test_pull_sync_job_omits_the_direction():
     handler, calls = _recorder({"sync": []})
 
     make_client(handler).ensure_sync_job(
-        "joulenap-r1", remote="joulenap-r1", remote_store="offsite", store="backup"
+        "joulenap-r1",
+        remote="joulenap-r1",
+        remote_store="offsite",
+        store="backup",
+        owner="root@pam!jn",
     )
 
     body = calls[-1][2]
@@ -133,6 +137,26 @@ def test_pull_sync_job_omits_the_direction():
     # Pull is PBS's default; omitting it keeps the call identical to what servers without
     # push support accept.
     assert "sync-direction" not in body
+    # Without an owner PBS assigns the fetched groups to root@pam, and the sync then fails
+    # per group against groups the token already owns.
+    assert "owner=root%40pam%21jn" in body
+
+
+def test_push_sync_job_never_sends_the_owner():
+    handler, calls = _recorder({"sync": []})
+
+    make_client(handler).ensure_sync_job(
+        "joulenap-r1",
+        remote="joulenap-r1",
+        remote_store="offsite",
+        store="backup",
+        direction="push",
+        owner="root@pam!jn",
+    )
+
+    # Pushed groups are owned by the remote's auth-id whatever the job says; the field would
+    # only narrow which local groups the job may read.
+    assert "owner" not in calls[-1][2]
 
 
 def test_push_sync_job_sends_the_direction_only_in_the_job_body():
