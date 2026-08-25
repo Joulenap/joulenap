@@ -21,7 +21,7 @@
   <a href="https://coveralls.io/github/Joulenap/joulenap?branch=main"><img src="https://coveralls.io/repos/github/Joulenap/joulenap/badge.svg?branch=main" alt="Coverage"></a>
   <a href="https://github.com/Joulenap/joulenap/releases/latest"><img src="https://img.shields.io/github/v/release/Joulenap/joulenap" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3"></a>
-  <a href="https://hub.docker.com/r/catubba/joulenap"><img src="https://img.shields.io/docker/pulls/catubba/joulenap?logo=docker&logoColor=white" alt="Docker pulls"></a>
+  <a href="https://hub.docker.com/r/catubba/joulenap"><img src="https://img.shields.io/docker/pulls/catubba/joulenap?logo=docker&logoColor=white&cacheSeconds=86400" alt="Docker pulls"></a>
 </p>
 
 Joulenap is a small self-hosted **web UI + scheduler** that runs automated Proxmox VE backups to **Proxmox Backup Servers (PBS) that stay powered off** most of the time. At the scheduled hour it wakes the backup server over the network (Wake-on-LAN), runs the job, applies retention and garbage collection, powers it back down, and notifies you — so you get deduplicated backups **without keeping a second machine running 24/7**.
