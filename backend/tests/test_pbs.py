@@ -453,3 +453,21 @@ def test_node_status_raises_when_the_node_returns_nothing():
 
     with pytest.raises(ApiError, match="node status"):
         make_client(handler).node_status()
+
+
+def test_sync_job_rate_limit_follows_the_direction():
+    """PBS names the knob after the direction, so the caller only says how fast."""
+    handler, calls = _recorder({"sync": []})
+    client = make_client(handler)
+
+    client.ensure_sync_job("j", remote="j", remote_store="a", store="b", direction="pull", rate=512)
+    pull = calls[-1][2]
+    client.ensure_sync_job("j", remote="j", remote_store="a", store="b", direction="push", rate=512)
+    push = calls[-1][2]
+    client.ensure_sync_job("j", remote="j", remote_store="a", store="b")
+    unlimited = calls[-1][2]
+
+    # The unit rides along: the field is a byte size, so a bare 512 would be 512 *bytes*/s.
+    assert "rate-in=512KiB" in pull and "rate-out" not in pull
+    assert "rate-out=512KiB" in push and "rate-in" not in push
+    assert "rate-in" not in unlimited and "rate-out" not in unlimited  # 0 = no limit at all

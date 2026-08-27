@@ -12,11 +12,20 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .errors import TaskCancelled, TaskError
+from .errors import ApiError, TaskCancelled, TaskError
 
 # One task-log line as returned by the tailer: (line number, text). The line number is
 # the task's own 1-based ``n``; the tailer uses it as the offset cursor for the next fetch.
 LogLine = tuple[int, str]
+
+# How long the poll loop keeps trying after it loses contact with the server, before it
+# gives up and fails the run (#53). A NIC that resets, a switch that reboots, a box that
+# briefly drops off the LAN: the remote task keeps running through all of those, so failing
+# on the first errored poll throws away a job that is still healthy, and reports a *false*
+# failure for one that goes on to succeed.
+# ponytail: one fixed window for every deployment. If a WAN-separated pair ever needs
+# longer, this becomes a per-device config knob.
+_ERROR_GRACE = 300.0
 
 
 def _human(seconds: float) -> str:
@@ -34,6 +43,7 @@ def poll_task(
     log_fn: Callable[[int], list[LogLine]] | None = None,
     on_lines: Callable[[list[LogLine]], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    on_error: Callable[[ApiError], None] | None = None,
 ) -> dict[str, Any]:
     """Poll ``status_fn(upid)`` until the task stops; return its final status.
 
@@ -52,9 +62,16 @@ def poll_task(
     lines: ``log_fn(offset)`` returns lines numbered greater than ``offset`` (empty once
     caught up) and ``on_lines`` is handed each new batch. The final poll (task stopped)
     drains the remaining tail, so no lines are lost.
+
+    Losing contact with the server is *not* a failure on its own: an :class:`ApiError` from
+    the status call starts a :data:`_ERROR_GRACE` window and the loop keeps trying, because
+    the remote task is still running and usually still fine (see #53). The first drop is
+    reported to ``on_error`` so the caller can say so in the run timeline; the original error
+    is re-raised unchanged if contact never comes back.
     """
     deadline = time.monotonic() + timeout
     seen = 0  # highest line number handed to on_lines so far (the fetch offset)
+    lost_at: float | None = None  # when contact dropped, None while the server is answering
 
     def drain() -> None:
         nonlocal seen, deadline
@@ -71,11 +88,29 @@ def poll_task(
     while True:
         if should_cancel is not None and should_cancel():
             # Drain first so the task-log panel keeps the last lines the task managed to
-            # write before we walked away.
-            drain()
+            # write before we walked away. Best effort, since the reason we are here may
+            # well be that the box stopped answering.
+            try:
+                drain()
+            except ApiError:
+                pass
             raise TaskCancelled(f"Wait for task {upid} cancelled")
-        status = status_fn(upid)
-        drain()  # pull whatever's been logged since the last tick (tail after stop)
+        try:
+            status = status_fn(upid)
+            drain()  # pull whatever's been logged since the last tick (tail after stop)
+        except ApiError as exc:
+            # Only transport/API failures are survivable here. Anything else (a DB error
+            # inside on_lines, a bug in the caller's callbacks) still ends the wait.
+            now = time.monotonic()
+            if lost_at is None:
+                lost_at = now
+                if on_error is not None:
+                    on_error(exc)
+            if now - lost_at >= _ERROR_GRACE:
+                raise
+            sleep(poll_interval)
+            continue
+        lost_at = None  # answered: whatever that was, it is over
         if status.get("status") == "stopped":
             exit_status = status.get("exitstatus")
             if exit_status != "OK":

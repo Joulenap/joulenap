@@ -672,14 +672,16 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
             <span className="help">{t('dashboard.routeModal.notifyHelp')}</span>
           </div>
 
-          {/* Advanced. Only the knobs this kind actually uses: mode/bwlimit/min-free are
-              vzdump's, GC and quick-verify run on any route that leaves a PBS awake with new
-              snapshots (M06: backup and sync), and reverify_days belongs to a Verify route. */}
+          {/* Advanced. Only the knobs this kind actually uses: mode/min-free are vzdump's,
+              bwlimit caps a backup (vzdump) and a sync (the job's rate-in/rate-out) alike, GC
+              and quick-verify run on any route that leaves a PBS awake with new snapshots
+              (M06: backup and sync), and reverify_days belongs to a Verify route. */}
           {kind !== 'external' && (
             <details className="adv">
               <summary>{t('dashboard.routeModal.advanced')}</summary>
-              {kind === 'backup' && (
+              {(kind === 'backup' || kind === 'sync') && (
                 <div className="adv-grid">
+                  {kind === 'backup' && (
                   <div className="field">
                     <label htmlFor="rm-mode">{t('dashboard.routeModal.mode')}</label>
                     <select
@@ -698,6 +700,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                       ))}
                     </select>
                   </div>
+                  )}
                   <div className="field">
                     <label htmlFor="rm-bw">{t('dashboard.routeModal.bwlimit')}</label>
                     <input
@@ -712,6 +715,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                     />
                     <span className="help">{t('dashboard.routeModal.bwlimitHelp')}</span>
                   </div>
+                  {kind === 'backup' && (
                   <div className="field">
                     <label htmlFor="rm-minfree">{t('dashboard.routeModal.minFree')}</label>
                     <input
@@ -729,6 +733,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                     />
                     <span className="help">{t('dashboard.routeModal.minFreeHelp')}</span>
                   </div>
+                  )}
                 </div>
               )}
               {kind === 'verify' && (

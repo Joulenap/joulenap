@@ -8,6 +8,7 @@ token header format (``PBSAPIToken=id:secret``) and its own endpoints. The stand
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,6 +19,19 @@ import httpx
 from ._http import ProxmoxApiClient
 from ._tasks import LogLine, poll_task
 from .errors import ApiError
+
+_UPID_ESCAPE = re.compile(r"\\x([0-9a-fA-F]{2})")
+
+
+def unescape_upid(upid: str) -> str:
+    """Decode the ``\\xNN`` escapes PBS puts in a UPID's worker id.
+
+    A sync job's UPID embeds its job id with every punctuation character escaped, so
+    ``joulenap-r1:store:...`` arrives as ``joulenap\\x2dr1\\x3astore\\x3a...`` and a plain
+    substring search for the job name finds nothing. Decoding is one line and survives
+    whatever else PBS decides to escape; re-implementing its escaper would not.
+    """
+    return _UPID_ESCAPE.sub(lambda m: chr(int(m.group(1), 16)), upid)
 
 
 @dataclass
@@ -185,11 +199,11 @@ class PbsClient:
     # address + credentials) plus a *sync job* referencing it, which you then run. Joulenap
     # owns both objects for a route and names them ``joulenap-<route_id>``.
 
-    def _replace(self, section: str, name: str, data: dict[str, Any]) -> None:
-        """Create ``/config/{section}/{name}``, replacing any object of that name.
+    def _config_names(self, section: str) -> set[str]:
+        """The names of everything in ``/config/{section}``.
 
-        Delete-then-create rather than PUT: the update endpoints take their own updater
-        schemas, and everything about the object is derived from the route on every run.
+        Remotes carry theirs as ``name`` and sync jobs as ``id``; both are read here so the
+        three callers below don't each have to know that.
 
         ``sync-direction`` is a field of the job *body* and nothing else. PBS rejects it as
         an unknown parameter on the delete (and run) calls, so neither sends it. Listing is
@@ -198,8 +212,23 @@ class PbsClient:
         follows fails with "job already exists" on every run after the first.
         """
         params = {"sync-direction": "all"} if section == "sync" else None
-        existing = self._api.request("GET", f"/config/{section}", params=params) or []
-        if any((e.get("name") or e.get("id")) == name for e in existing):
+        entries = self._api.request("GET", f"/config/{section}", params=params) or []
+        return {name for e in entries if (name := e.get("name") or e.get("id"))}
+
+    def sync_config_names(self) -> tuple[set[str], set[str]]:
+        """``(sync job ids, remote names)`` currently configured on this PBS.
+
+        For the caller that sweeps up what a run interrupted mid-sync could not remove.
+        """
+        return self._config_names("sync"), self._config_names("remote")
+
+    def _replace(self, section: str, name: str, data: dict[str, Any]) -> None:
+        """Create ``/config/{section}/{name}``, replacing any object of that name.
+
+        Delete-then-create rather than PUT: the update endpoints take their own updater
+        schemas, and everything about the object is derived from the route on every run.
+        """
+        if name in self._config_names(section):
             self._api.request("DELETE", f"/config/{section}/{name}")
         self._api.request("POST", f"/config/{section}", data=data)
 
@@ -233,8 +262,7 @@ class PbsClient:
         still points at ("remote 'x' is used by sync job 'y'"), so rebuilding the pair in the
         other order fails on every run after the first — for pull and push alike.
         """
-        existing = self._api.request("GET", "/config/sync", params={"sync-direction": "all"}) or []
-        if any(e.get("id") == job_id for e in existing):
+        if job_id in self._config_names("sync"):
             self._api.request("DELETE", f"/config/sync/{job_id}")
 
     def delete_remote(self, name: str) -> None:
@@ -245,8 +273,7 @@ class PbsClient:
         credential in Joulenap otherwise leaves a working copy of it on the peer. Call
         :meth:`delete_sync_job` first; PBS refuses to delete a remote a job still references.
         """
-        existing = self._api.request("GET", "/config/remote") or []
-        if any((e.get("name") or e.get("id")) == name for e in existing):
+        if name in self._config_names("remote"):
             self._api.request("DELETE", f"/config/remote/{name}")
 
     def ensure_sync_job(
@@ -260,6 +287,7 @@ class PbsClient:
         owner: str = "",
         transfer_last: int = 0,
         remove_vanished: bool = False,
+        rate: int = 0,
     ) -> None:
         """(Re)create a sync job between the local datastore ``store`` and ``remote_store``
         on ``remote``. ``direction`` says which way the data moves: ``pull`` (this PBS fetches)
@@ -275,7 +303,17 @@ class PbsClient:
         check failed" as soon as the target datastore already holds groups owned by the token
         Joulenap connects with, which is every datastore Joulenap itself backs up to. On a push
         the receiving side owns the data as the remote's auth-id whatever the job says, and the
-        field only narrows which local groups may be read, so it is never sent."""
+        field only narrows which local groups may be read, so it is never sent.
+
+        ``rate`` (KiB/s, 0 = unlimited) caps the transfer. PBS names the knob after the
+        direction, ``rate-in`` for a pull and ``rate-out`` for a push, so the caller doesn't
+        have to: it already said which way the data moves. The value is sent with its unit
+        because the field is a byte size ("B, KB (base 10), MB, ..., KiB (base 2), ..."), and
+        a bare number would be bytes per second, off by 1024.
+
+        This is the *only* place a sync can be rate-limited: PBS's Traffic Control rules
+        explicitly do not apply to sync jobs, and Joulenap rebuilds this job on every run, so
+        anything set by hand in the PBS UI is gone by the next one."""
         data: dict[str, Any] = {
             "id": job_id,
             "store": store,
@@ -290,6 +328,8 @@ class PbsClient:
             data["transfer-last"] = transfer_last
         if remove_vanished:
             data["remove-vanished"] = 1
+        if rate > 0:
+            data["rate-out" if direction == "push" else "rate-in"] = f"{rate}KiB"
         self._replace("sync", job_id, data)
 
     def start_prune(self, retention: dict[str, int]) -> str:
@@ -346,17 +386,19 @@ class PbsClient:
         *,
         on_log: Callable[[list[LogLine]], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
+        on_error: Callable[[ApiError], None] | None = None,
     ) -> dict[str, Any]:
         """Poll a task until it stops. Returns the final status; raises on non-OK exit.
 
         Pass ``on_log`` to also tail the task log — each new batch of ``(line_no, text)``
         pairs is handed to it as the task runs. ``should_cancel`` makes the wait
-        interruptible (raises ``TaskCancelled``); see :func:`poll_task`.
+        interruptible (raises ``TaskCancelled``), and ``on_error`` is called once when the
+        box stops answering, before the grace window; see :func:`poll_task`.
         """
         log_fn = (lambda start: self.task_log(upid, start)) if on_log else None
         return poll_task(
             self.task_status, upid, poll_interval, timeout, sleep,
-            log_fn=log_fn, on_lines=on_log, should_cancel=should_cancel,
+            log_fn=log_fn, on_lines=on_log, should_cancel=should_cancel, on_error=on_error,
         )
 
     def close(self) -> None:

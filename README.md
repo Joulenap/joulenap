@@ -65,7 +65,7 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 ## Status
 
-**v1.2.1.** Built around routes over any number of PVE and PBS devices: backup, PBS→PBS sync,
+**v1.3.0.** Built around routes over any number of PVE and PBS devices: backup, PBS→PBS sync,
 external-schedule watching and verification, driven by a run queue and a per-server power lease
 so a box is woken once and slept once no matter how many routes need it. Packaged as a Docker
 image, with transport hardening (per-device PBS TLS pinning + SSH host-key verification) and auth

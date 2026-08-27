@@ -1342,7 +1342,10 @@ details.adv[open] summary::before {
 }
 .adv-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  /* auto-fill, not auto-fit: with a single field (a Sync route's bandwidth limit, a Verify
+     route's re-verify window) auto-fit collapses its empty tracks and stretches that one
+     input across the whole modal, which reads as a text field rather than a number. */
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 14px 22px;
   padding: 12px 0 2px;
 }

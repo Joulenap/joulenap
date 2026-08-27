@@ -130,6 +130,7 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
             "owner": "root@pam!jn1",
             "transfer_last": 0,
             "remove_vanished": False,
+            "rate": 0,  # the route's bwlimit, 0 = no rate-in/rate-out on the job
         }
     }
     # The run call carries no direction (PBS resolves the job by id); the direction lives in
@@ -173,6 +174,7 @@ def test_push_sync_runs_the_job_on_the_source(temp_db):
         "owner": "root@pam!jn2",  # passed, but a push job never sends it on to PBS
         "transfer_last": 0,
         "remove_vanished": False,
+        "rate": 0,
     }
     assert pbs2.sync_runs == [{"id": "joulenap-r1"}]
     assert pbs2.remotes == {} and pbs2.sync_jobs == {}  # torn down after the run
@@ -541,3 +543,115 @@ def test_a_failed_sync_leaves_both_boxes_on(temp_config, temp_db):
     assert box.poweroffs == []  # left on for inspection, both of them
     with session_scope() as session:
         assert session.scalars(select(Run)).one().status == RunStatus.FAILURE
+
+
+# --- sync cleanup: what an interrupted run leaves on the box (#53) ------------
+#
+# A PBS remote stores the *peer's* API token secret in cleartext, so anything that leaves one
+# behind parks a working credential for one backup server on another.
+
+
+class _Brittle:
+    """A PBS whose config deletes fail the first ``fails`` times, then work."""
+
+    def __init__(self, fails: int):
+        self.fails = fails
+        self.attempts = 0
+
+    def delete_sync_job(self, _job_id: str) -> None:
+        self.attempts += 1
+        if self.attempts <= self.fails:
+            raise ConnectorError("GET /config/sync failed: [Errno 113] No route to host")
+
+    def delete_remote(self, _name: str) -> None:
+        pass
+
+
+def test_cleanup_retries_a_box_that_blips_at_the_end_of_a_sync(temp_db):
+    from app.jobs.route_cycle import _drop_sync_config
+
+    pbs = _Brittle(fails=3)
+    with RunRecorder(RunKind.SYNC, RunTrigger.MANUAL) as rec:
+        _drop_sync_config(pbs, "joulenap-r1", rec, sleep=lambda _s: None, clock=time.monotonic)
+        run_id = rec.run_id
+
+    assert pbs.attempts == 4  # three refusals, then it goes through
+    assert _messages(run_id, LogLevel.WARN) == []  # nothing to tell the user about
+
+
+def test_cleanup_that_never_succeeds_warns_about_the_credential(temp_db):
+    from app.jobs.route_cycle import _drop_sync_config
+
+    ticks = iter([0.0, 0.0, 61.0])  # start, first check, then past the deadline
+    pbs = _Brittle(fails=99)
+    with RunRecorder(RunKind.SYNC, RunTrigger.MANUAL) as rec:
+        _drop_sync_config(pbs, "joulenap-r1", rec, sleep=lambda _s: None, clock=lambda: next(ticks))
+        run_id = rec.run_id
+
+    warning = _messages(run_id, LogLevel.WARN)[0]
+    assert "could not remove sync config 'joulenap-r1'" in warning
+    assert "API token" in warning  # says *why* it matters, not just that it failed
+
+
+def test_a_sync_sweeps_up_what_an_earlier_run_abandoned(temp_db):
+    """End to end: the leftover is gone by the time the route's own pair is built."""
+    config = _config("sync", sync_direction="pull")
+    pbs1 = FakePbs()
+    # A previous run of a route that no longer exists died with the box unreachable.
+    pbs1.remotes["joulenap-gone"] = {"host": "192.0.2.99"}
+    pbs1.sync_jobs["joulenap-gone"] = {"store": "backup"}
+    deps, pbs1, _pbs2, _pve = _deps(pbs1=pbs1)
+
+    run_id = _run(config, deps)
+
+    assert _load(run_id)[0] == RunStatus.SUCCESS
+    assert pbs1.remotes == {} and pbs1.sync_jobs == {}  # both the leftover and its own pair
+    assert "removed leftover sync config 'joulenap-gone'" in _messages(run_id)
+
+
+def test_the_sweep_spares_a_name_a_running_task_is_using(temp_db):
+    """The #53 shape: PBS kept working for two minutes after Joulenap stopped watching."""
+    from app.jobs.route_cycle import _sweep_sync_config
+
+    pbs = FakePbs(active_tasks_seq=[[{
+        "upid": r"UPID:pbs:0000026D:0000068B:00000000:6A8EA3A0:syncjob:"
+                r"joulenap\x2dbusy\x3astore\x3a\x3ajoulenap\x2dbusy:root@pam!jn:",
+    }]])
+    pbs.remotes = {"joulenap-busy": {}, "joulenap-idle": {}}
+    pbs.sync_jobs = {"joulenap-busy": {}, "joulenap-idle": {}}
+
+    with RunRecorder(RunKind.SYNC, RunTrigger.MANUAL) as rec:
+        _sweep_sync_config(pbs, "joulenap-r1", rec)
+        run_id = rec.run_id
+
+    # The escaped job id inside the UPID still has to match the plain name.
+    assert set(pbs.remotes) == {"joulenap-busy"} and set(pbs.sync_jobs) == {"joulenap-busy"}
+    assert "removed leftover sync config 'joulenap-idle'" in _messages(run_id)
+
+
+def test_the_sweep_never_touches_what_joulenap_does_not_own(temp_db):
+    from app.jobs.route_cycle import _sweep_sync_config
+
+    pbs = FakePbs()
+    pbs.remotes = {"offsite-dr": {}, "some-other-tool": {}}
+    pbs.sync_jobs = {"nightly-mirror": {}}
+
+    with RunRecorder(RunKind.SYNC, RunTrigger.MANUAL) as rec:
+        _sweep_sync_config(pbs, "joulenap-r1", rec)
+
+    assert set(pbs.remotes) == {"offsite-dr", "some-other-tool"}
+    assert set(pbs.sync_jobs) == {"nightly-mirror"}
+
+
+def test_a_routes_bandwidth_limit_reaches_the_sync_job(temp_db):
+    """One knob for both kinds: vzdump's --bwlimit on a backup, the job's rate on a sync.
+
+    It is also the only way to throttle a sync at all. PBS Traffic Control rules do not apply
+    to sync jobs, and Joulenap rebuilds the job every run, so setting it by hand never sticks.
+    """
+    config = _config("sync", options={"bwlimit": 30_000})
+    deps, pbs1, *_ = _deps()
+
+    _run(config, deps)
+
+    assert pbs1.sync_jobs_created["joulenap-r1"]["rate"] == 30_000

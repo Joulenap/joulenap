@@ -174,6 +174,9 @@ class FakePbs:
         self.remotes[name] = kwargs
         self.remotes_created[name] = kwargs
 
+    def sync_config_names(self) -> tuple[set[str], set[str]]:
+        return set(self.sync_jobs), set(self.remotes)
+
     def delete_sync_job(self, job_id: str) -> None:
         self.sync_calls.append("delete_sync_job")
         self.sync_jobs.pop(job_id, None)

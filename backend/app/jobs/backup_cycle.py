@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from ..config import Config, PbsDevice, PbsExternalConfig, Route, RouteGuests, RouteSource
-from ..connectors.errors import TaskCancelled
+from ..connectors.errors import ApiError, TaskCancelled
 from ..connectors.pbs import DatastoreStatus
 from ..connectors.pve import Guest, build_prune_string
 from ..db import session_scope
@@ -126,13 +126,25 @@ def _wait_or_stop(
     Joulenap considers itself idle, and the next run would collide with it. The stop is
     best-effort — if the API refuses, the run still ends cancelled and the reason is logged,
     because leaving the lock held would be the worse failure (that is the whole point of 11.2).
+
+    Losing contact mid-task is not a failure and does not end the wait (see ``poll_task``);
+    it only puts a line in the timeline, so a run that sits still for minutes explains itself.
     """
+
+    def lost_contact(exc: ApiError) -> None:
+        recorder.log(
+            LogLevel.WARN,
+            f"lost contact with {source.upper()} while waiting for task {upid}: {exc} "
+            "(the task is still running, retrying)",
+        )
+
     try:
         client.wait_task(
             upid,
             poll_interval=_TAIL_INTERVAL,
             on_log=_tailer(recorder, step, source, watch),
             should_cancel=deps.cancelled,
+            on_error=lost_contact,
         )
     except TaskCancelled as exc:
         try:

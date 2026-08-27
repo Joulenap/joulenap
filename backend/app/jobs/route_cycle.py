@@ -11,11 +11,12 @@ the call, so a cycle starts with the box awake and ends without putting it to sl
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 
 from ..config import Config, PbsDevice, Route
 from ..connectors.errors import TaskError
-from ..connectors.pbs import DatastoreStatus, PbsClient
+from ..connectors.pbs import DatastoreStatus, PbsClient, unescape_upid
 from ..db.models import LogLevel, RunKind, RunStatus, StepName
 from ..notify.messages import LocalizedError, RunContext, render_detail
 from .backup_cycle import (
@@ -44,6 +45,13 @@ RUN_KINDS: dict[str, RunKind] = {
     "external": RunKind.MONITOR,
     "verify": RunKind.VERIFY,
 }
+
+#: How long the post-sync cleanup keeps trying to remove the remote + job, and how long it
+#: waits between attempts. Short on purpose: the run is already over, and what it is racing
+#: is a network blip, not an outage. A box that is really gone is handled by the sweep at
+#: the start of the next sync instead.
+_CLEANUP_DEADLINE = 60.0
+_CLEANUP_INTERVAL = 5.0
 
 
 def _require_pbs(config: Config, pbs_id: str, route: Route) -> PbsDevice:
@@ -76,7 +84,14 @@ def _task_reason(pbs, upid: str) -> str:
     return ""
 
 
-def _drop_sync_config(pbs: PbsClient, name: str, recorder: RunRecorder) -> None:
+def _drop_sync_config(
+    pbs: PbsClient,
+    name: str,
+    recorder: RunRecorder,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
     """Remove the remote and its sync job from the executing PBS once the sync is over.
 
     A PBS remote stores the **peer's API token, id and secret**, in the executing box's
@@ -85,14 +100,66 @@ def _drop_sync_config(pbs: PbsClient, name: str, recorder: RunRecorder) -> None:
     another — one that survives changing the token in Joulenap, and that anyone with root on
     that box, or a copy of its ``/etc``, can read.
 
+    So it *retries*: the common way this fails is the box dropping off the network for a few
+    seconds at the end of a long sync (#53), and one attempt at exactly the wrong moment used
+    to be enough to leave the credential behind until that same route happened to run again.
+
     Job before remote: PBS refuses to delete a remote a job still references. Best-effort and
     never fatal — it runs in a ``finally``, so raising here would mask the run's real failure.
     """
+    deadline = clock() + _CLEANUP_DEADLINE
+    while True:
+        try:
+            pbs.delete_sync_job(name)
+            pbs.delete_remote(name)
+            return
+        except Exception as exc:  # noqa: BLE001 - cleanup must never replace the real outcome
+            if clock() >= deadline:
+                recorder.log(
+                    LogLevel.WARN,
+                    f"could not remove sync config '{name}': {exc}. It holds an API token "
+                    "for the other PBS. The next sync clears it; remove it by hand "
+                    "(Configuration > Sync Jobs, then Remotes) if that box is gone for good",
+                )
+                return
+            sleep(_CLEANUP_INTERVAL)
+
+
+def _sweep_sync_config(pbs: PbsClient, keep: str, recorder: RunRecorder) -> None:
+    """Drop ``joulenap-*`` remotes and sync jobs an earlier run could not clean up.
+
+    :func:`_drop_sync_config` gives up eventually, and a route that is deleted before its
+    leftovers are collected would strand the credential for good. Every sync therefore starts
+    by clearing the executor of anything Joulenap owns and no longer needs, which is safe
+    because these objects are disposable by construction: each run rebuilds its own pair from
+    the route, and runs are serialised (``jobs.service``), so nothing here is in use by a
+    sibling run.
+
+    Except by a task that outlived the run that started it: the exact shape of #53, where PBS
+    kept syncing for two minutes after Joulenap stopped watching. Anything a running task
+    names is left alone, ``keep`` (this run's own pair, handled by the caller) included.
+    """
     try:
-        pbs.delete_sync_job(name)
-        pbs.delete_remote(name)
-    except Exception as exc:  # noqa: BLE001 - cleanup must never replace the real outcome
-        recorder.log(LogLevel.WARN, f"could not remove sync config '{name}': {exc}")
+        jobs, remotes = pbs.sync_config_names()
+        stale = {n for n in jobs | remotes if n.startswith("joulenap-")}
+        if not stale:
+            return
+        busy = " ".join(unescape_upid(str(t.get("upid") or "")) for t in pbs.active_tasks())
+        if keep in busy:
+            recorder.log(
+                LogLevel.WARN,
+                f"a PBS task is still running for '{keep}', left behind by an earlier run",
+            )
+        for name in sorted(stale - {keep}):
+            if name in busy:
+                continue
+            if name in jobs:
+                pbs.delete_sync_job(name)
+            if name in remotes:
+                pbs.delete_remote(name)
+            recorder.log(LogLevel.INFO, f"removed leftover sync config '{name}'")
+    except Exception as exc:  # noqa: BLE001 - housekeeping must never fail the sync
+        recorder.log(LogLevel.WARN, f"could not check for leftover sync config: {exc}")
 
 
 def _route_prune_step(
@@ -132,6 +199,7 @@ def _sync_body(
             f"(job on {executor.id} as '{name}')",
         )
         with deps.connect_pbs(executor) as pbs:
+            _sweep_sync_config(pbs, name, recorder)
             # Order matters: the job has to go before the remote it references, or PBS
             # refuses the remote's delete and the route breaks on its second run.
             pbs.delete_sync_job(name)
@@ -152,6 +220,7 @@ def _sync_body(
                 owner=executor.api_token_id,
                 transfer_last=route.options.transfer_last,
                 remove_vanished=route.options.remove_vanished,
+                rate=route.options.bwlimit,
             )
             try:
                 upid = pbs.run_sync_job(name)
