@@ -2,7 +2,9 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import type { Route, RunDetail, RunSummary, TaskLogLine } from '../../api/types'
+import { copyToClipboard } from '../../utils/clipboard'
 import { fmtDT, fmtDuration } from '../../utils/format'
+import { runAsText } from '../../utils/runExport'
 import { runKindLabelKey, runStatusStyle, runDurationMs } from '../../utils/status'
 
 interface RunHistoryProps {
@@ -242,6 +244,26 @@ function RunDetailBody({
 
   return (
     <>
+      {/* Actions first: a failed sync's timeline, error and task log can run for hundreds of
+          lines, and putting the buttons underneath meant scrolling past all of it to reach
+          the one control you opened the row for (#58). */}
+      <div className="drow-actions">
+        <CopyRunButton text={() => runAsText(run, detail, shown)} />
+        {live && (
+          <button
+            type="button"
+            className="btn btn-outline-danger"
+            onClick={(e) => {
+              e.stopPropagation()
+              onStop(run)
+            }}
+          >
+            ■ {t('dashboard.stopRun')}
+          </button>
+        )}
+      </div>
+      {live && <div className="runbar" aria-hidden="true" />}
+
       {detail && detail.steps.length > 0 && (
         <div className="steps">
           {detail.steps.map((step, i) => {
@@ -275,24 +297,40 @@ function RunDetailBody({
         !live && lines !== null && <div className="tasklog-empty">{t('dashboard.noTaskLog')}</div>
       )}
 
-      {live && (
-        <>
-          <div className="runbar" aria-hidden="true" />
-          <div className="drow-actions">
-            <button
-              type="button"
-              className="btn btn-outline-danger"
-              onClick={(e) => {
-                e.stopPropagation()
-                onStop(run)
-              }}
-            >
-              ■ {t('dashboard.stopRun')}
-            </button>
-          </div>
-        </>
-      )}
     </>
+  )
+}
+
+/** Puts the whole expanded row on the clipboard, so reporting a run is one click (#58).
+ *
+ * The text is built on click rather than on render: an expanded row re-renders on every poll
+ * of a live run, and nobody needs a fresh copy of the log they have not asked for yet.
+ */
+function CopyRunButton({ text }: { text: () => string }) {
+  const { t } = useTranslation()
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const label =
+    state === 'copied'
+      ? t('dashboard.copiedRun')
+      : state === 'failed'
+        ? t('dashboard.copyRunFailed')
+        : t('dashboard.copyRun')
+  return (
+    <button
+      type="button"
+      className="btn"
+      // The what-to-do-instead is a tooltip, not the label: a button that grows to a full
+      // sentence when it fails shoves the Stop button off the end of a live row.
+      title={state === 'failed' ? t('dashboard.copyRunFailedHint') : undefined}
+      onClick={async (e) => {
+        e.stopPropagation() // the row header toggles the row; this button must not collapse it
+        const ok = await copyToClipboard(text())
+        setState(ok ? 'copied' : 'failed')
+        setTimeout(() => setState('idle'), ok ? 1500 : 4000)
+      }}
+    >
+      {label}
+    </button>
   )
 }
 

@@ -688,6 +688,10 @@
 .step .sdetail {
   color: var(--jn-text-faint);
   min-width: 0;
+  /* A step detail is one message, not command output: a UPID or an API error carries no
+     spaces, so without this it refuses to break and runs off the row instead of using the
+     width it has (#58). The task log below keeps its horizontal scroll on purpose. */
+  overflow-wrap: anywhere;
 }
 
 /* task-log tail */
@@ -703,6 +707,13 @@
 .tasklog .tl-err {
   color: var(--jn-red);
 }
+/* The run's own error is a sentence, not a log line, so it wraps rather than scrolling off
+   to the right the way the task-log block deliberately does (#58). */
+.tasklog.tl-err {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: visible;
+}
 .tasklog .tl-warn {
   color: var(--jn-amber);
 }
@@ -716,7 +727,8 @@
   border-radius: 2px;
   overflow: hidden;
   background: var(--jn-input-bg);
-  margin-top: 10px;
+  /* Sits between the actions and the run's content, where it doubles as their separator. */
+  margin-bottom: 12px;
 }
 .runbar::after {
   content: '';
@@ -737,8 +749,11 @@
 }
 .drow-actions {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
+  /* Left, not right: the row's controls sit above its content now, and an action pinned to
+     the far edge of a panel this wide is a long way from the row you just clicked (#58). */
+  justify-content: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 /* ---- Guest last-backup panel -------------------------------------------------- */
