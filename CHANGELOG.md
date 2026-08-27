@@ -5,6 +5,50 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0]
+
+### Added
+
+- Sync routes gained the **Bandwidth limit** field that backup routes already had, under
+  Advanced. It caps the transfer on the PBS doing the work, as `rate-in` on a pull and
+  `rate-out` on a push, so which of the two applies stays Joulenap's business. Until now a
+  sync could not be throttled at all: Proxmox Backup Server's Traffic Control rules
+  explicitly do not cover sync jobs, and the one setting that does, on the job itself, was
+  wiped on every run because Joulenap rebuilds that job from the route each time. Worth
+  reaching for when a sync saturates a link, or when the network card at one end misbehaves
+  under sustained load (#53).
+- Every run in the history has a **Copy run** button, at the top of the row it belongs to. It
+  puts the whole run on the clipboard as plain text, the timeline with each step's detail, the
+  error, the activity lines and the task output, so reporting a problem is one click instead of
+  selecting across three blocks and a log that scrolls sideways (#58).
+
+### Fixed
+
+- A run no longer fails because the server stopped answering for a moment. A single failed
+  status request used to end the whole run, even though the backup, sync or GC behind it was
+  still running perfectly well on the other side: a network card that drops off the LAN for a
+  few seconds, a switch that reboots, a box that briefly goes unreachable. Joulenap now keeps
+  trying for five minutes, notes the loss of contact in the run timeline, and carries on as
+  soon as the server answers again. Only a real outage ends the run. This was reported as a
+  sync aborting after two minutes; the same run was reported as failed while PBS went on to
+  finish that sync successfully (#53).
+- A sync no longer risks leaving a working credential on the server that ran it. Joulenap
+  creates a temporary *remote* on the executing PBS for the duration of a sync, and a PBS
+  remote stores the other server's API token, id and secret, in cleartext in
+  `/etc/proxmox-backup/remote.cfg`. Removing it afterwards used to be a single attempt, so a
+  network hiccup at exactly that moment left both the remote and its sync job behind, and a
+  route deleted before the next run stranded them for good. The removal now retries, and every
+  sync starts by clearing the server of anything an earlier run abandoned, leaving alone only
+  what a still-running task needs (#53).
+- In the run history, a step's detail and a run's error now wrap instead of running off the
+  side of the panel. A Proxmox UPID or an API error carries no spaces, so the line refused to
+  break and the end of it, which is the part that says what went wrong, was unreadable without
+  scrolling sideways (#58). The task output below them keeps its horizontal scroll on purpose:
+  those are command lines, and wrapping a 400-character one turns a log into a wall.
+- In the route dialog, an Advanced section holding a single field no longer stretches that
+  field across the full width of the dialog. Verify routes have looked like this since the
+  re-verify window was added.
+
 ## [1.2.1]
 
 ### Fixed
@@ -698,7 +742,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Joulenap/joulenap/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/Joulenap/joulenap/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Joulenap/joulenap/compare/v1.1.3...v1.2.0
 [1.1.3]: https://github.com/Joulenap/joulenap/compare/v1.1.2...v1.1.3

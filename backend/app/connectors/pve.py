@@ -16,6 +16,7 @@ import httpx
 
 from ._http import ProxmoxApiClient
 from ._tasks import LogLine, poll_task
+from .errors import ApiError
 
 # vzdump prune-backups keys, in the order PVE expects them.
 _RETENTION_KEYS = ("keep_last", "keep_daily", "keep_weekly", "keep_monthly", "keep_yearly")
@@ -238,17 +239,19 @@ class PveClient:
         *,
         on_log: Callable[[list[LogLine]], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
+        on_error: Callable[[ApiError], None] | None = None,
     ) -> dict[str, Any]:
         """Poll a task until it stops. Returns the final status; raises on non-OK exit.
 
         Pass ``on_log`` to also tail the task log — each new batch of ``(line_no, text)``
         pairs is handed to it as the task runs. ``should_cancel`` makes the wait
-        interruptible (raises ``TaskCancelled``); see :func:`poll_task`.
+        interruptible (raises ``TaskCancelled``), and ``on_error`` is called once when the
+        node stops answering, before the grace window; see :func:`poll_task`.
         """
         log_fn = (lambda start: self.task_log(upid, start)) if on_log else None
         return poll_task(
             self.task_status, upid, poll_interval, timeout, sleep,
-            log_fn=log_fn, on_lines=on_log, should_cancel=should_cancel,
+            log_fn=log_fn, on_lines=on_log, should_cancel=should_cancel, on_error=on_error,
         )
 
     def close(self) -> None:

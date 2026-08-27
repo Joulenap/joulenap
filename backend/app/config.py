@@ -245,12 +245,15 @@ class RouteSchedule(_Base):
 
 
 class RouteOptions(_Base):
-    """Per-route tuning. The first three apply to backup routes; gc/verify_after to any
-    route that leaves the PBS awake (they run before power-off); reverify_days to verify
-    routes; the last two to sync routes."""
+    """Per-route tuning. mode/min_free_percent apply to backup routes; bwlimit to backup and
+    sync; gc/verify_after to any route that leaves the PBS awake (they run before power-off);
+    reverify_days to verify routes; the last two to sync routes."""
 
     mode: Literal["snapshot", "suspend", "stop"] = "snapshot"
-    bwlimit: int = Field(default=0, ge=0)  # KiB/s, 0 = unlimited
+    # KiB/s, 0 = unlimited. vzdump's --bwlimit on a backup route, and the sync job's
+    # rate-in/rate-out on a sync route (see connectors.pbs.ensure_sync_job): one knob, because
+    # "how fast may this route move data" is the same question either way.
+    bwlimit: int = Field(default=0, ge=0)
     # Pre-flight guard: abort before vzdump if the target datastore has less than this
     # percentage free (0 = disabled). Avoids backing up onto a near-full datastore.
     min_free_percent: int = Field(default=0, ge=0, le=100)
@@ -294,8 +297,9 @@ class Route(_Base):
 
     @model_validator(mode="after")
     def _check_kind(self) -> Route:
-        # options.mode/bwlimit/min_free_percent are inert on non-backup kinds and are left
-        # alone rather than rejected, so the UI's single route form can post one shape.
+        # options.mode/min_free_percent are inert on non-backup kinds (bwlimit is not: it also
+        # caps a sync) and are left alone rather than rejected, so the UI's single route form
+        # can post one shape.
         if self.kind == "backup":
             if not self.sources:
                 raise ValueError(
