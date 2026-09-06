@@ -281,6 +281,43 @@ def test_a_failing_node_task_fails_only_its_source(temp_db):
     assert steps["gc"] == "success"  # the PBS is awake and the other source's data is real
 
 
+def test_a_vzdump_that_only_warned_is_a_success(temp_db):
+    # PVE 9 ends the task with "WARNINGS: n" when every guest finished but a line warned
+    # (the EFI certificate notice, #61); only "job errors" means a guest was lost.
+    beta = FakePve(
+        guests=list(BETA_GUESTS),
+        fail_task=True,
+        fail_exit_status="WARNINGS: 2",
+        log_lines=[
+            "WARN: EFI disk without 'ms-cert=2023k' option",
+            "INFO: Finished Backup of VM 500",
+        ],
+    )
+    deps, _alpha, _beta, _pbs = _deps(beta=beta)
+    run_id = _run(_config(), deps)
+
+    status, steps = _load(run_id)
+
+    assert status == RunStatus.SUCCESS
+    assert steps["backup:pve-beta"] == "success"
+    assert any("WARNINGS: 2" in line for line in _logs(run_id, LogLevel.WARN))
+
+
+def test_a_warned_vzdump_that_also_lost_a_guest_still_fails(temp_db):
+    beta = FakePve(
+        guests=list(BETA_GUESTS),
+        fail_task=True,
+        fail_exit_status="WARNINGS: 1",
+        log_lines=["ERROR: Backup of VM 500 failed - boom"],
+    )
+    deps, _alpha, _beta, _pbs = _deps(beta=beta)
+
+    status, steps = _load(_run(_config(), deps))
+
+    assert status == RunStatus.FAILURE
+    assert steps["backup:pve-beta"] == "failure"
+
+
 # --- guest tally --------------------------------------------------------------
 
 
@@ -588,7 +625,9 @@ def test_cancel_after_the_sources_skips_gc(temp_db):
     pbs = FakePbs()
     # Cancelled the moment both sources have run, which is exactly the gap before GC.
     deps, *_ = _deps(
-        alpha=alpha, beta=beta, pbs=pbs,
+        alpha=alpha,
+        beta=beta,
+        pbs=pbs,
         cancelled=lambda: bool(alpha.vzdump_calls) and bool(beta.vzdump_calls),
     )
 

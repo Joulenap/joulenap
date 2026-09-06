@@ -35,9 +35,11 @@ class FakePve:
         fail_task: bool = False,
         log_lines: list[str] | None = None,
         pbs_storages: list[dict] | None = None,
+        fail_exit_status: str = "job errors",
     ):
         self.guests = guests or []
         self.fail_task = fail_task
+        self.fail_exit_status = fail_exit_status
         self.log_lines = log_lines or []
         # Raw PVE `type=pbs` storage rows, as /storage?type=pbs returns them.
         self.pbs_storages = pbs_storages if pbs_storages is not None else []
@@ -97,7 +99,7 @@ class FakePve:
         if should_cancel is not None and should_cancel():
             raise TaskCancelled(f"Wait for task {upid} cancelled")
         if self.fail_task:
-            raise TaskError("vzdump failed", exit_status="job errors")
+            raise TaskError("vzdump failed", exit_status=self.fail_exit_status)
         return {"status": "stopped", "exitstatus": "OK"}
 
     def stop_task(self, upid: str) -> None:
