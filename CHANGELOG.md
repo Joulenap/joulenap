@@ -5,6 +5,20 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1]
+
+### Fixed
+
+- A backup run is no longer marked failed when `vzdump` finished every guest but warned along
+  the way. Proxmox VE ends such a task with the status `WARNINGS: n` rather than `OK`, and
+  PVE 9 warns on every VM whose EFI disk does not yet carry the 2023 Microsoft certificates,
+  so a route with a couple of UEFI guests was reported as failed, and notified as such, while
+  every backup on the server was fine (#61). Joulenap now treats a warned task as a success,
+  notes the warning count in the run timeline with a pointer to the task log, and still fails
+  the source when a guest was actually lost: `vzdump` reports that as `job errors`, and a
+  guest failure line in the log wins over the warning status either way. PBS sync tasks are
+  unaffected: there `WARNINGS` means groups were not synced, and the run keeps failing.
+
 ## [1.3.0]
 
 ### Added
@@ -743,6 +757,7 @@ Backup Server, all from a web UI.
   redacted from API responses.
 
 [Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.3.0...HEAD
+[1.3.1]: https://github.com/Joulenap/joulenap/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Joulenap/joulenap/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/Joulenap/joulenap/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Joulenap/joulenap/compare/v1.1.3...v1.2.0

@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from ..config import Config, PbsDevice, PbsExternalConfig, Route, RouteGuests, RouteSource
-from ..connectors.errors import ApiError, TaskCancelled
+from ..connectors.errors import ApiError, TaskCancelled, TaskError
 from ..connectors.pbs import DatastoreStatus
 from ..connectors.pve import Guest, build_prune_string
 from ..db import session_scope
@@ -313,15 +313,28 @@ def _route_backup_source(
             # Counted before the wait: a task that dies still set out to back these up.
             summary.total += len(vmids)
             done_before = summary.ok
-            _wait_or_stop(
-                client,
-                upid,
-                recorder,
-                deps,
-                step_name,
-                "pve",
-                _guest_watcher(summary, names),
-            )
+            failed_before = len(summary.failed)
+            try:
+                _wait_or_stop(
+                    client,
+                    upid,
+                    recorder,
+                    deps,
+                    step_name,
+                    "pve",
+                    _guest_watcher(summary, names),
+                )
+            except TaskError as exc:
+                # vzdump ends with "WARNINGS: n" when every guest finished but some line
+                # warned (PVE 9 EFI certificate notice, #61); a lost guest is "job errors".
+                warned = (exc.exit_status or "").startswith("WARNINGS")
+                if not warned or len(summary.failed) > failed_before:
+                    raise
+                recorder.log(
+                    LogLevel.WARN,
+                    f"vzdump on node '{node}' finished with status '{exc.exit_status}': "
+                    "all guests backed up, see the task log for the warnings",
+                )
             # The task exited OK, so every guest it covered was backed up whatever the log
             # parse made of it — a vzdump wording change must never report "0/14" on a good
             # run. Only on success, so a failed node doesn't advertise guests as backed up.
