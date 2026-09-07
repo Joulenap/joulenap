@@ -301,6 +301,14 @@ scrape_configs:
 A 60s `scrape_interval` is plenty — nothing here changes faster than a
 backup cycle.
 
+### Grafana dashboard
+
+[`docs/grafana/joulenap-overview.json`](grafana/joulenap-overview.json) is a ready-made dashboard
+covering everything above — build/version, scheduler and job state, per-backup-server health,
+datastore usage, route run status and each guest's last backup time. See
+[`docs/grafana/README.md`](grafana/README.md) for import steps and prerequisites (it needs
+Grafana 12.2+, since it uses Grafana's newer dashboard schema rather than the classic one).
+
 ### Metric reference
 
 All metrics are gauges prefixed `joulenap_`. **Almost everything is labelled**:
