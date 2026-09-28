@@ -9,8 +9,8 @@ Only the latest release line receives security fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 1.0.x   | ✅        |
-| < 1.0   | ❌        |
+| 1.3.x   | ✅        |
+| < 1.3   | ❌        |
 
 ## Reporting a vulnerability
 
@@ -46,11 +46,12 @@ Joulenap is designed to run on a trusted LAN/VPN, not on the public internet.
   than regenerating one, since a new key would silently lock Joulenap out of the servers already
   configured.
 - **A backup-server token provisioned by the wizard also carries the two `/remote` roles a sync
-  route needs** (`RemoteAdmin` and `RemoteSyncPushOperator`), whether or not you ever create one.
+  route needs** (`RemoteAdmin` and `RemoteDatastoreAdmin`), whether or not you ever create one.
   They are granted at provisioning time because PBS refuses ACL writes from a token, so they cannot
   be added later without another root login — Settings → Devices → *Grant sync permissions* is that
   login, for a server set up before 1.0. The practical effect is that a leaked token can also
-  enumerate and modify remotes on that server. If you want a narrower token, create it yourself and
+  create and change remotes and sync jobs on that server, including push jobs that write to and
+  prune the datastores those remotes reach. If you want a narrower token, create it yourself and
   paste it in rather than using root-mode provisioning.
 
 ### What a sync route puts on your other server

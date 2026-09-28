@@ -652,8 +652,11 @@ def enforce_server_managed(merged: dict[str, Any], current: Config) -> dict[str,
     """Force server-owned secrets to their stored values, ignoring whatever the client sent.
 
     ``app.secret_key`` (session-signing key), ``app.api_key`` (dashboard integration), and
-    ``app.auth.password_hash`` (owned solely by PUT /api/account) must never be set or
-    cleared through PUT /api/config. Mutates and returns ``merged``.
+    ``app.auth.password_hash`` and ``app.auth.username`` (owned solely by PUT /api/account,
+    which asks for the current password) must never be set or cleared through
+    PUT /api/config. The username matters as much as the hash: the settings pages save the
+    whole config they loaded, so a stale copy would otherwise undo a rename. Mutates and
+    returns ``merged``.
     """
     app = merged.get("app")
     if isinstance(app, dict):
@@ -662,6 +665,7 @@ def enforce_server_managed(merged: dict[str, Any], current: Config) -> dict[str,
         auth = app.get("auth")
         if isinstance(auth, dict):
             auth["password_hash"] = current.app.auth.password_hash
+            auth["username"] = current.app.auth.username
     return merged
 
 

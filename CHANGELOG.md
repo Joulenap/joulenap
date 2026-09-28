@@ -5,6 +5,57 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2]
+
+### Fixed
+
+- A route whose `schedule.cron` names a range or a step of weekdays now runs on the right
+  days. Cron counts weekdays from Sunday and the scheduler underneath counts from Monday, and
+  only single days were translated between the two: `0 2 * * 1-5` ran Tuesday to Saturday,
+  `5-7` was refused so the route never ran at all, and steps such as `*/2` landed a day off.
+  Configs migrated from 0.9 keep such ranges verbatim, so they were affected too.
+- On a PVE cluster, a node whose backup task failed (a guest that would not freeze, say) no
+  longer stops the backup of the nodes after it. Each node now gets its turn, the source still
+  fails with the first error once all have run, and the guests backed up on the other nodes
+  keep their last-backup date in the dashboard.
+- A run that cannot send its Wake-on-LAN packet at all, because of a malformed MAC or a host
+  name that does not resolve, is now notified like any other failed run, and the boxes it had
+  already woken are released. Adding or editing a backup server now also rejects a malformed
+  MAC straight away, as saving the whole config already did, instead of leaving it to fail at
+  the next wake.
+- The Add PBS and Add PVE wizards no longer reach their last step without creating the device
+  when its final check fails, for example a managed-power PBS with no MAC. The wizard stays on
+  the form, and the Add PBS wizard goes back to the step that shows the problem.
+- A change of admin username can no longer be undone by a later settings save: after a
+  rename, one click on the theme toggle put the old name back and the next sign-in with the new
+  one failed. The username can now only be changed from Account, where the current password is
+  asked for, and the new name shows after a page reload instead of the old one.
+- Settings saves (theme, language and timezone, notifications, advanced) now send only the
+  section they change. They used to send back the whole configuration the page had loaded, so
+  a device or a storage mapping the server had changed in the meantime, such as a PBS created
+  by a wizard that failed half way, was silently reverted.
+- In the route editor, clicking the guest mode that is already selected no longer clears the
+  guest list. A route narrowed to a few guests was saved as backing up all of them, and a
+  second click on Exclude dropped the exclusions.
+- Escape on a confirmation now closes only that confirmation, not the dialog under it: the
+  route editor behind "Delete route?", or a whole wizard behind its token prompt.
+- When the configuration cannot be loaded, the dashboard and the settings pages show an error
+  with a Retry button instead of staying blank.
+
+### Changed
+
+- When an ntfy notification fails and the server is given by name, the failure now says
+  whether that name could not be resolved from the Joulenap container, and suggests the IP
+  address. A name published only in a LAN resolver, or filtered by a router's DNS rebind
+  protection, used to fail with the same "connection error" as a refused port. The install
+  guide has a short section on it.
+- `schedule.cron` needs both the day-of-month and the day-of-week field to match when both are
+  set, unlike classic cron, which runs when either does. The example config and the
+  architecture notes now say so.
+- `SECURITY.md` and the example config name the sync role the wizard really grants the PBS
+  token, `RemoteDatastoreAdmin`, and describe what a leaked token can do with it. The
+  supported versions table moves to the 1.3 line.
+
 ## [1.3.1]
 
 ### Fixed

@@ -43,8 +43,9 @@ function Banner({ tone, children }: { tone: 'red' | 'amber'; children: ReactNode
 function ShellInner() {
   const { t } = useTranslation()
   const { logout } = useAuth()
-  const { config, loading } = useConfig()
+  const { config, loading, reload } = useConfig()
   const { status, refresh, stale } = useStatus()
+  const [retrying, setRetrying] = useState(false)
   const { guard } = useUnsavedGuard()
   const [view, setView] = useState<View>('main')
   const [settingsTab, setSettingsTab] = useState<Tab>('devices')
@@ -108,6 +109,25 @@ function ShellInner() {
             <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
               <Spinner size={26} />
             </div>
+          ) : !config ? (
+            // Loading finished without a config: GET /config failed. Rendering the pages
+            // here would leave them blank with no hint why, so say it and offer a retry.
+            <Banner tone="red">
+              <span style={{ flex: 1 }}>⚠ {t('common.configLoadFailed')}</span>
+              <button
+                type="button"
+                className="btn"
+                disabled={retrying}
+                onClick={() => {
+                  setRetrying(true)
+                  reload()
+                    .catch(() => {})
+                    .finally(() => setRetrying(false))
+                }}
+              >
+                {retrying ? <Spinner /> : t('common.retry')}
+              </button>
+            </Banner>
           ) : view === 'main' ? (
             <Dashboard status={status} refreshStatus={refresh} />
           ) : (

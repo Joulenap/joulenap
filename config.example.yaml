@@ -86,7 +86,7 @@ pbss: []
 #     # its API token then travels over TLS nothing has checked. The wizard fills it in.
 #     # Token privileges: DatastoreAdmin on the datastore (status, GC, verify) plus Audit on
 #     # /system (read-only node CPU/RAM/network for the dashboard). A PBS taking part in a
-#     # sync route also needs RemoteAdmin AND RemoteSyncPushOperator on /remote — PBS refuses
+#     # sync route also needs RemoteAdmin AND RemoteDatastoreAdmin on /remote: PBS refuses
 #     # ACL writes from a token, so those must be granted on the box itself or by the wizard's
 #     # root mode (see docs/CONFIG-WIZARD.md).
 #     # The wizard names a backup server's token after its datastore, so a second datastore on
@@ -138,7 +138,10 @@ routes: []
 #                                                          # true (pause with enabled: false)
 #       # Escape hatch for a schedule time+days cannot express (a day-of-month or month
 #       # pattern, a step value, a weekday range). A 5-field crontab string; when set it
-#       # wins over time/days, and the UI shows it read-only.
+#       # wins over time/days, and the UI shows it read-only. One difference from classic
+#       # cron: if both day-of-month and day-of-week are restricted, BOTH must match
+#       # ("0 4 1 * 1" runs only on a 1st that is a Monday, not on every 1st and every
+#       # Monday). For "either", use two routes.
 #       # cron: "0 4 1 * *"
 #     retention:              # applied on the target
 #       keep_last: 0

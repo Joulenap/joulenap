@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -61,6 +62,8 @@ PRUNE_HOUR, PRUNE_MINUTE = 3, 30
 # silently shifts every weekday by one. We translate to APScheduler's day names instead so a
 # "Sundays off" schedule actually skips Sunday.
 _CRON_DOW_NAME = {0: "sun", 1: "mon", 2: "tue", 3: "wed", 4: "thu", 5: "fri", 6: "sat", 7: "sun"}
+# A numeric day-of-week token: "*", "3" or "1-5", optionally with a "/step".
+_CRON_DOW_TOKEN = re.compile(r"^(\*|\d+(?:-\d+)?)(?:/(\d+))?$")
 
 
 def _build_trigger(schedule: str, tz: tzinfo) -> CronTrigger:
@@ -97,13 +100,33 @@ def validate_cron(schedule: str) -> None:
 
 
 def _translate_dow(dow: str) -> str:
-    """Map a cron day-of-week field (e.g. ``1,2,3,4,5,6``) to APScheduler names
-    (``mon,tue,wed,thu,fri,sat``). ``*`` and any non-numeric token pass through."""
+    """Map a cron day-of-week field to APScheduler day names (``1-5`` -> ``mon,...,fri``).
+
+    Every numeric token (a day, a range, a step, ``*/n``) is expanded in *cron* numbering and
+    emitted as names: CronTrigger reads digits Monday-first, so passing a range or a step
+    through unchanged fired "1-5" on Tue-Sat and refused "5-7". Name tokens (``mon-fri``) are
+    already unambiguous and pass through for APScheduler to validate. Raises ``ValueError``
+    for a day outside 0-7.
+    """
     if dow == "*":
         return "*"
-    out = []
+    out: list[str] = []
     for token in dow.split(","):
-        out.append(_CRON_DOW_NAME.get(int(token), token) if token.isdigit() else token)
+        match = _CRON_DOW_TOKEN.match(token)
+        if not match:
+            out.append(token)
+            continue
+        span, step = match.group(1), int(match.group(2) or 1)
+        if span == "*":
+            first, last = 0, 7
+        else:
+            start, _, end = span.partition("-")
+            first, last = int(start), int(end or start)
+        if not 0 <= first <= last <= 7 or step < 1:
+            raise ValueError(f"invalid day of week {token!r}: days run 0-7, 0 and 7 are Sunday")
+        for day in range(first, last + 1, step):
+            if _CRON_DOW_NAME[day] not in out:
+                out.append(_CRON_DOW_NAME[day])
     return ",".join(out)
 
 

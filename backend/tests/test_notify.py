@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import socket
 import threading
 import time
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fakes import make_deps
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -34,6 +36,17 @@ from app.notify.messages import (
 )
 
 # --- fake Apprise engine -----------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _dns_resolves(monkeypatch):
+    """Every hostname resolves, so a failed ntfy send never depends on this machine's DNS.
+
+    The tests of the DNS hint re-patch ``getaddrinfo`` to fail.
+    """
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [])
+
+
 
 
 class FakeApprise:
@@ -852,6 +865,56 @@ def test_failure_without_a_logged_reason_yields_no_error_text():
     ntfy = next(r for r in report.results if r.channel == "ntfy")
     assert ntfy.ok is False
     assert ntfy.error is None
+
+
+def _unresolvable(monkeypatch) -> list[str]:
+    looked_up: list[str] = []
+
+    def fail(host, *a, **kw):
+        looked_up.append(host)
+        raise socket.gaierror(-2, "Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fail)
+    return looked_up
+
+
+def test_ntfy_failure_names_an_unresolvable_host(monkeypatch):
+    # The container's resolver cannot see a LAN-only name: say so instead of Apprise's
+    # "Connection error", which reads the same for a refused port.
+    looked_up = _unresolvable(monkeypatch)
+    fake = FakeApprise(
+        fail_urls={"ntfys://ntfy.sh/homelab": "A Connection error occurred sending ntfy."}
+    )
+    report = NotificationService(apprise_factory=lambda: fake).send_test(
+        _notifications_config()
+    )
+    ntfy = next(r for r in report.results if r.channel == "ntfy")
+    assert ntfy.ok is False
+    assert "cannot resolve 'ntfy.sh'" in ntfy.error
+    assert "IP address" in ntfy.error
+    assert looked_up == ["ntfy.sh"]  # only the failed channel was looked up
+
+
+def test_ntfy_failure_on_an_ip_address_skips_the_lookup(monkeypatch):
+    looked_up = _unresolvable(monkeypatch)
+    cfg = _notifications_config()
+    cfg.notifications.ntfy.url = "http://192.168.1.9:8080"
+    fake = FakeApprise(
+        fail_urls={"ntfy://192.168.1.9:8080/homelab": "A Connection error occurred."}
+    )
+    report = NotificationService(apprise_factory=lambda: fake).send_test(cfg)
+    ntfy = next(r for r in report.results if r.channel == "ntfy")
+    assert ntfy.error == "A Connection error occurred."
+    assert looked_up == []
+
+
+def test_a_working_ntfy_is_never_looked_up(monkeypatch):
+    looked_up = _unresolvable(monkeypatch)
+    report = NotificationService(apprise_factory=FakeApprise).send_test(
+        _notifications_config()
+    )
+    assert report.sent is True
+    assert looked_up == []
 
 
 def test_rejected_url_is_reported_without_sending():

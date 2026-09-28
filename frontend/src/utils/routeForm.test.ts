@@ -9,6 +9,7 @@ import {
   type RouteDraft,
   draftFromRoute,
   draftToRoute,
+  guestModePatch,
   guestTally,
   inferKind,
   isExcluded,
@@ -653,4 +654,20 @@ test('one source still covered is enough, even if another is fully excluded', ()
     selection: { 'pve-alpha': [100] },
   })
   assert.ok(!keys(d, PVES, PBSS, g).includes('dashboard.routeModal.errAllExcluded'))
+})
+
+test('picking the guest mode already selected keeps the selection', () => {
+  // Clicking "Selection" again used to clear the list, and an empty Selection means every
+  // guest: a route narrowed to 2 of 3 guests was saved as "all".
+  const narrowed = draft({ guestMode: 'include', selection: { 'pve-1': [100, 101] } })
+  assert.deepEqual(guestModePatch(narrowed, 'include'), {})
+  const excluding = draft({ guestMode: 'exclude', selection: { 'pve-1': [102] } })
+  assert.deepEqual(guestModePatch(excluding, 'exclude'), {})
+})
+
+test('switching to another guest mode starts from an empty selection', () => {
+  // The two lists mean opposite things: carrying one into the other would invert the backup.
+  const narrowed = draft({ guestMode: 'include', selection: { 'pve-1': [100, 101] } })
+  assert.deepEqual(guestModePatch(narrowed, 'exclude'), { guestMode: 'exclude', selection: {} })
+  assert.deepEqual(guestModePatch(narrowed, 'all'), { guestMode: 'all', selection: {} })
 })

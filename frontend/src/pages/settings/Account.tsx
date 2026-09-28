@@ -174,7 +174,7 @@ function Localization() {
     setBusy(true)
     setErr(null)
     try {
-      await save({ ...config, app: { ...config.app, language: lang, timezone: tz } })
+      await save({ app: { language: lang, timezone: tz } })
       setNote(true)
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : t('common.saveFailed'))

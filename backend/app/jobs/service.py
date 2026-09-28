@@ -339,7 +339,13 @@ class JobService:
                     for device in devices:
                         self._acquire_step(device, recorder, multi=multi)
                         held.append(device)
-                except PbsUnreachableError as exc:
+                except Exception as exc:
+                    # Anything that keeps a box from coming up ends the run here: a PBS that
+                    # never answered, and just as much a magic packet that could not be sent
+                    # (a malformed MAC, a host that does not resolve), which used to unwind
+                    # past the notification below. Only the expected case skips the trace.
+                    if not isinstance(exc, PbsUnreachableError):
+                        log.exception("Could not bring up the PBS for route '%s'", item.route_id)
                     # A cancel abandons the wake wait the same way a timeout does, so say
                     # which one it was rather than filing every stopped run as a failure.
                     cancelled = self._cancel.is_set()

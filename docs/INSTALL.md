@@ -309,6 +309,22 @@ collection and verification after the run — live in the **Advanced section of 
 because each route sets them for itself. Wake timeout, Wake-on-LAN retries and the external-watch
 timeouts belong to a backup server, and live on its device card.
 
+### Self-hosted ntfy on a local hostname
+
+If your ntfy server has a name that only your LAN knows (published in Pi-hole, AdGuard or the
+router's local DNS), Joulenap has to resolve that name itself, and it does so with the DNS of the
+machine it runs on: the LXC in Option A, the Docker host in Option B. When that DNS doesn't know
+the name, **Send test** reports `cannot resolve '<host>' from the Joulenap container`. Either fix
+works:
+
+- **Use the IP address** in the ntfy field, e.g. `http://192.168.1.20`. No lookup is involved.
+- **Point that machine at a DNS server that knows the name.** For an LXC, set it in Proxmox under
+  the container's **DNS** tab and restart the container.
+
+If the name still fails while your PC resolves it, check the router's **DNS rebind protection**
+(FRITZ!Box has it on by default): it drops answers that point at a private address, so add the
+ntfy hostname to its exception list.
+
 ## Updating
 
 Your `config.yaml` and data live in the mounted `data/` directory (or your native data dir), so they

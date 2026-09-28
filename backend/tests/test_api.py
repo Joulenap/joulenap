@@ -711,6 +711,34 @@ def test_resolve_datastore_offline_uses_that_devices_cache(temp_db):
     assert resolve_datastore(other, None) is None  # not one shared row for every box
 
 
+# --- saving one section ------------------------------------------------------
+
+_NEW_PBS = {
+    "id": "pbs-new",
+    "host": "192.0.2.40",
+    "datastore": "store",
+    "api_token_id": "root@pam!joulenap",
+    "api_token_secret": "s3cret",
+    "managed_power": False,
+}
+
+
+def test_saving_only_the_changed_section_keeps_a_device_created_meanwhile(
+    app_ctx, temp_config
+):
+    # The contract the settings pages rely on: PUT /api/config merges a partial body, so a
+    # page that sends only what it edits cannot undo a device the server created after the
+    # page loaded (lists are replaced whole, so a full stale copy would delete it).
+    client, _app = app_ctx
+    assert client.post("/api/devices/pbss", json=_NEW_PBS).status_code == 201
+
+    assert client.put("/api/config", json={"app": {"theme": "light"}}).status_code == 200
+
+    saved = load_config(temp_config)
+    assert "pbs-new" in [p.id for p in saved.pbss]
+    assert saved.app.theme == "light"
+
+
 # --- account -----------------------------------------------------------------
 
 
@@ -728,6 +756,41 @@ def test_account_update_changes_username_and_password(app_ctx, temp_config):
     client.post("/api/logout")
     login = client.post("/api/login", json={"username": "newadmin", "password": "freshpass"})
     assert login.status_code == 200
+
+
+def test_a_stale_config_save_does_not_undo_a_username_change(app_ctx, temp_config):
+    # The settings pages PUT the whole config they loaded, which still carries the old
+    # username after a rename (the theme toggle did it with one click). The username is
+    # owned by PUT /api/account, like the password hash, so that copy must not win.
+    client, _app = app_ctx
+    stale = client.get("/api/config").json()
+    r = client.put(
+        "/api/account", json={"current_password": "secret12", "username": "newadmin"}
+    )
+    assert r.status_code == 200
+
+    stale["app"]["theme"] = "light"
+    assert client.put("/api/config", json=stale).status_code == 200
+
+    assert load_config(temp_config).app.auth.username == "newadmin"
+
+
+def test_a_renamed_admin_is_named_right_after_a_page_reload(app_ctx):
+    # The session carries the username that /auth/status reports on every page load, and
+    # was only re-issued when the password changed: a rename alone left the old name in
+    # the header and in the Account form until the next sign-in.
+    client, _app = app_ctx
+    client.put("/api/account", json={"current_password": "secret12", "username": "newadmin"})
+    assert client.get("/api/auth/status").json()["username"] == "newadmin"
+
+
+def test_the_username_cannot_be_changed_through_put_config(app_ctx, temp_config):
+    # SECURITY.md: changing the username needs the current password, which only
+    # PUT /api/account asks for.
+    client, _app = app_ctx
+    r = client.put("/api/config", json={"app": {"auth": {"username": "intruder"}}})
+    assert r.status_code == 200
+    assert load_config(temp_config).app.auth.username == "admin"
 
 
 def test_account_update_empty_password_keeps_current(app_ctx, temp_config):

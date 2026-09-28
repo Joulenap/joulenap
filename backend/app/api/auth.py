@@ -173,8 +173,8 @@ def update_account(
             cfg.app.auth.password_hash = password_hash
 
     store.update(apply)
-    # Re-issue the acting session's cookie with the new hash so this admin stays logged
-    # in; other pre-existing sessions still carry the old pwv and are now revoked.
-    if password_hash is not None:
-        security.login_session(request, body.username, password_hash)
+    # Re-issue the acting session's cookie with the new name and hash, so this admin stays
+    # logged in and /auth/status reports the new name; after a password change, other
+    # pre-existing sessions still carry the old pwv and are now revoked.
+    security.login_session(request, body.username, store.config.app.auth.password_hash)
     return UserInfo(username=body.username)

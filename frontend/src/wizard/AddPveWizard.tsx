@@ -189,7 +189,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
    * storages map that points at it. That order matters — the map has to name a device that
    * already exists for the config to make sense on the very next read.
    */
-  async function save(pbsToken: { id: string; secret: string } | null) {
+  async function save(pbsToken: { id: string; secret: string } | null): Promise<boolean> {
     const lines: string[] = []
     const map = { ...linked }
 
@@ -199,7 +199,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       if (problems.length) {
         setErrors(problems)
         setStep(2)
-        return
+        return false
       }
       // Skip the half that already landed. The PBS is created before the PVE (the storages
       // map has to name a device that exists), so a PVE failure used to strand the pair: the
@@ -208,6 +208,9 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       if (landed.current.pbsId === null) {
         await api.createDevice('pbss', device as unknown as Record<string, unknown>)
         landed.current.pbsId = device.id
+        // Stored now, whatever happens to the PVE below: if that fails and the wizard is
+        // closed, the app's copy must still know this PBS exists.
+        await reload()
       }
       map[device.id] = chosen.storage
       lines.push(t('wizard.report.pbsConfigured', { id: device.id }))
@@ -218,7 +221,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
     if (problems.length) {
       setErrors(problems)
       setStep(0)
-      return
+      return false
     }
     await api.createDevice('pves', device as unknown as Record<string, unknown>)
     lines.unshift(t('wizard.report.pveApi', { id: device.id }))
@@ -228,6 +231,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
     await reload()
     setSaved(true)
     setReport(lines)
+    return true
   }
 
   async function advance(dir: 1 | -1) {
@@ -268,7 +272,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       // `!saved` cannot mask a changed decision: Back is disabled once the devices exist
       // (`done` below), so there is exactly one way into the last step. It is here only so a
       // re-render mid-flight can never post the same device twice.
-      if (dir === 1 && target === 3 && !saved) await save(pbsToken)
+      if (dir === 1 && target === 3 && !saved && !(await save(pbsToken))) return
       setStep(target)
     } catch (e) {
       // 409 = the token name is taken on whichever box we were provisioning. Only the user

@@ -16,6 +16,8 @@
     },
     "schedulerPaused": "Scheduler paused — no route will run until you switch it back on in Settings → Advanced.",
     "configError": "Your old configuration could not be converted, so Joulenap started with no devices and no routes. Don't save anything until it's fixed. {{reason}}",
+    "configLoadFailed": "Couldn't load the configuration, so there is nothing to show yet. Check that Joulenap is running and try again.",
+    "retry": "Retry",
     "close": "Close",
     "remove": "Remove",
     "unsavedChanges": "Unsaved changes"

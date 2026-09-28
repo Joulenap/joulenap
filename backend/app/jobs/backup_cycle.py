@@ -253,12 +253,15 @@ def _route_backup_source(
     deps: CycleDeps,
     summary: GuestSummary,
     step,
-) -> set[int]:
+    covered: set[int],
+) -> None:
     """Back up one source PVE onto the route's target: one vzdump per cluster node.
 
-    Returns the vmids this source covered, so the last-backup cache can attribute each guest
-    to the PVE it came from. Raises on failure — the caller records that against this
-    source's step and moves on to the next source.
+    Adds the vmids each successful node backed up to ``covered``, so the last-backup cache
+    can attribute each guest to the PVE it came from, even when another node of the same
+    source failed. Each node is its own task and gets its turn whatever happened on the
+    others; if any failed, the first failure is raised once all have run, and the caller
+    records it against this source's step and moves on to the next source.
     """
     pve = _find_device(config.pves, source.pve)
     if pve is None:
@@ -270,7 +273,7 @@ def _route_backup_source(
     prune = build_prune_string(route.retention.model_dump())
     step_name = f"{StepName.BACKUP.value}:{source.pve}"
     upids: list[str] = []
-    covered: set[int] = set()
+    node_errors: list[Exception] = []
 
     with deps.connect_pve(pve) as client:
         # One cluster-wide listing feeds all three needs: the per-node grouping, the guest
@@ -298,49 +301,63 @@ def _route_backup_source(
             raise CycleAbort("no_guests", pve=pve.id)
 
         for node, vmids in per_node.items():
-            upid = client.vzdump(
-                storage,
-                node=node,
-                vmids=None if all_guests else vmids,
-                all_guests=all_guests,
-                exclude=excluded,
-                mode=route.options.mode,
-                prune_backups=prune,
-                bwlimit=route.options.bwlimit,
-            )
-            upids.append(upid)
-            step.detail = ", ".join(upids)
-            # Counted before the wait: a task that dies still set out to back these up.
+            # The waits check a cancel themselves; this covers the gap between nodes, now
+            # that a failed node no longer ends the loop.
+            if deps.cancelled():
+                raise CycleCancelled("Run cancelled")
+            # Counted before the task: a node that fails still set out to back these up.
             summary.total += len(vmids)
             done_before = summary.ok
             failed_before = len(summary.failed)
             try:
-                _wait_or_stop(
-                    client,
-                    upid,
-                    recorder,
-                    deps,
-                    step_name,
-                    "pve",
-                    _guest_watcher(summary, names),
+                upid = client.vzdump(
+                    storage,
+                    node=node,
+                    vmids=None if all_guests else vmids,
+                    all_guests=all_guests,
+                    exclude=excluded,
+                    mode=route.options.mode,
+                    prune_backups=prune,
+                    bwlimit=route.options.bwlimit,
                 )
-            except TaskError as exc:
-                # vzdump ends with "WARNINGS: n" when every guest finished but some line
-                # warned (PVE 9 EFI certificate notice, #61); a lost guest is "job errors".
-                warned = (exc.exit_status or "").startswith("WARNINGS")
-                if not warned or len(summary.failed) > failed_before:
-                    raise
-                recorder.log(
-                    LogLevel.WARN,
-                    f"vzdump on node '{node}' finished with status '{exc.exit_status}': "
-                    "all guests backed up, see the task log for the warnings",
-                )
+                upids.append(upid)
+                step.detail = ", ".join(upids)
+                try:
+                    _wait_or_stop(
+                        client,
+                        upid,
+                        recorder,
+                        deps,
+                        step_name,
+                        "pve",
+                        _guest_watcher(summary, names),
+                    )
+                except TaskError as exc:
+                    # vzdump ends with "WARNINGS: n" when every guest finished but some line
+                    # warned (PVE 9 EFI certificate notice, #61); a lost guest is "job errors".
+                    warned = (exc.exit_status or "").startswith("WARNINGS")
+                    if not warned or len(summary.failed) > failed_before:
+                        raise
+                    recorder.log(
+                        LogLevel.WARN,
+                        f"vzdump on node '{node}' finished with status '{exc.exit_status}': "
+                        "all guests backed up, see the task log for the warnings",
+                    )
+            except CycleCancelled:
+                raise
+            except Exception as exc:
+                # Each node is its own task: one that failed (a guest that would not freeze,
+                # a node that is down) must not cost the rest of the cluster its backup.
+                recorder.log(LogLevel.ERROR, f"vzdump on node '{node}' failed: {exc}")
+                node_errors.append(exc)
+                continue
             # The task exited OK, so every guest it covered was backed up whatever the log
-            # parse made of it — a vzdump wording change must never report "0/14" on a good
+            # parse made of it: a vzdump wording change must never report "0/14" on a good
             # run. Only on success, so a failed node doesn't advertise guests as backed up.
             summary.ok = done_before + len(vmids)
             covered |= set(vmids)
-    return covered
+        if node_errors:
+            raise node_errors[0]
 
 
 def _route_preflight(
@@ -486,9 +503,12 @@ def run_route_backup(
             if deps.cancelled():
                 raise CycleCancelled("Run cancelled")
             try:
+                # Filled node by node, so a source that failed on one node still claims
+                # the guests its other nodes backed up.
+                covered[source.pve] = set()
                 with recorder.step(StepName.BACKUP, label=source.pve) as step:
-                    covered[source.pve] = _route_backup_source(
-                        config, route, source, recorder, deps, guests, step
+                    _route_backup_source(
+                        config, route, source, recorder, deps, guests, step, covered[source.pve]
                     )
             except CycleCancelled:
                 raise
