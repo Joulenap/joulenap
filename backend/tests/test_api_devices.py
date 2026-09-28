@@ -87,6 +87,24 @@ def test_create_rejects_managed_power_without_the_means_to_use_it(app_ctx):
     assert r.status_code == 422
 
 
+def test_create_rejects_a_malformed_mac(app_ctx):
+    # The device endpoints used to skip the MAC check PUT /api/config does, so a typo was
+    # only found at the next wake, by a run that could not send its magic packet.
+    client, _app = app_ctx
+    r = client.post("/api/devices/pbss", json={**NEW_PBS, "mac": "00:11:22:33:44"})
+    assert r.status_code == 422
+    assert "invalid mac" in r.json()["detail"]
+
+
+def test_update_rejects_a_malformed_mac(app_ctx, temp_config):
+    client, _app = app_ctx
+    device = client.get("/api/devices").json()["pbss"][0]
+    device["mac"] = "zz:zz:zz:zz:zz:zz"
+    r = client.put("/api/devices/pbss/pbs-01", json=device)
+    assert r.status_code == 422
+    assert load_config(temp_config).pbss[0].mac != "zz:zz:zz:zz:zz:zz"
+
+
 def test_create_rejects_an_unknown_kind(app_ctx):
     client, _app = app_ctx
     assert client.post("/api/devices/nases", json=NEW_PBS).status_code == 404

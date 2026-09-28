@@ -17,6 +17,8 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 
 from ..config import Config
+from ..connectors.errors import WolError
+from ..connectors.wol import normalize_mac
 from ..core.config_store import ConfigStore
 from ..core.scheduler import Scheduler, validate_cron
 
@@ -56,6 +58,7 @@ def save_section(
         # 422 mirrors FastAPI's own body-validation responses.
         raise validation_error(exc) from exc
     check_route_crons(new_config, store.config)
+    check_pbs_macs(new_config, store.config)
     try:
         store.replace(new_config)
     except OSError as exc:
@@ -85,4 +88,25 @@ def check_route_crons(new_config: Config, old_config: Config) -> None:
             raise HTTPException(
                 status_code=422,
                 detail=f"route '{route.id}': invalid schedule.cron {cron!r}: {exc}",
+            ) from exc
+
+
+def check_pbs_macs(new_config: Config, old_config: Config) -> None:
+    """Reject a newly-set malformed WoL MAC before it reaches disk (BE-C2).
+
+    Uses the exact WoL parser, so "fails at save" == "fails at wake time". Changed-only and
+    non-empty: an empty MAC is the wizard's unconfigured state, and a legacy bad MAC already
+    on disk stays saveable through an unrelated edit (failing later at wake) rather than
+    locking the user out of Settings. Not a pydantic validator, so it never runs at load time
+    and can't brick startup (the BE-B1 lesson).
+    """
+    old = {p.id: p.mac for p in old_config.pbss}
+    for pbs in new_config.pbss:
+        if not pbs.mac or pbs.mac == old.get(pbs.id):
+            continue
+        try:
+            normalize_mac(pbs.mac)
+        except WolError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"pbs '{pbs.id}': invalid mac {pbs.mac!r}: {exc}"
             ) from exc

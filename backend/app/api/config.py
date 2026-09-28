@@ -21,10 +21,8 @@ from ..config import (
     redacted_dict,
     restore_secrets,
 )
-from ..connectors.errors import WolError
-from ..connectors.wol import normalize_mac
 from ..core.config_store import ConfigStore
-from ._config_edit import check_route_crons, validation_error
+from ._config_edit import check_pbs_macs, check_route_crons, validation_error
 from .deps import Scheduler, get_config_store, get_scheduler, require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)], tags=["config"])
@@ -72,22 +70,7 @@ def _apply_config(
     # route would silently never fire, which is the failure mode hardest to notice.
     old = store.config
     check_route_crons(new_config, old)
-
-    # Reject a newly-set malformed WoL MAC before persisting (BE-C2), reusing the exact
-    # WoL parser so "fails at save" == "fails at wake time". Changed-only + non-empty: an
-    # empty MAC is the wizard's unconfigured state, and a legacy bad MAC on disk carried
-    # through an unrelated edit stays saveable (failing later at wake, as today) rather than
-    # locking the user out of Settings. Not a pydantic validator, so it never runs at load
-    # time and can't brick startup (the BE-B1 lesson).
-    old_macs = {p.id: p.mac for p in old.pbss}
-    for pbs in new_config.pbss:
-        if pbs.mac and pbs.mac != old_macs.get(pbs.id):
-            try:
-                normalize_mac(pbs.mac)
-            except WolError as exc:
-                raise HTTPException(
-                    status_code=422, detail=f"pbs '{pbs.id}': invalid mac {pbs.mac!r}: {exc}"
-                ) from exc
+    check_pbs_macs(new_config, old)
 
     try:
         store.replace(new_config)

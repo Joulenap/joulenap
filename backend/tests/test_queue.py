@@ -10,6 +10,7 @@ from fakes import FakeBox, make_deps
 from sqlalchemy import select
 
 from app.config import PbsDevice, PveDevice, Route, RouteSource
+from app.connectors.errors import WolError
 from app.core.config_store import ConfigStore
 from app.db import session_scope
 from app.db.models import Run, RunKind, RunStatus, RunTrigger, StepName, StepStatus
@@ -292,6 +293,31 @@ def test_an_unreachable_pbs_fails_the_run_without_running_the_job(temp_config, t
     assert len(seen) == 1
     assert seen[0].run.status == RunStatus.FAILURE
     assert seen[0].route is not None and seen[0].route.id == "r1"
+
+
+def test_a_magic_packet_that_cannot_be_sent_fails_the_run_and_notifies(temp_config, temp_db):
+    # A malformed MAC or a PBS host that does not resolve means no packet ever leaves: the
+    # same "the backup server never came up" failure, and it must not be a silent one.
+    service, box = make_service(FakeBox(reachable=False))
+
+    def refuse(_pbs) -> None:
+        raise WolError("Invalid MAC address: 'zz'")
+
+    service.lease._deps.send_wol = refuse
+    ran: list[int] = []
+    seen: list[RunContext] = []
+    service.deps.notify = seen.append
+
+    enqueue(service, "r1", lambda *_a: ran.append(1), trigger=RunTrigger.SCHEDULED)
+    drain(service)
+
+    assert ran == []
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        assert run.status == RunStatus.FAILURE
+        assert "Invalid MAC" in (run.error or "")
+    assert len(seen) == 1
+    assert seen[0].run.status == RunStatus.FAILURE
 
 
 def test_a_sync_route_releases_the_box_that_did_wake_when_the_other_does_not(
