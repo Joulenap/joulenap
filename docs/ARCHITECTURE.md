@@ -43,7 +43,7 @@ Guests are selected **per source** (`sources[].guests`), because vmids collide b
 
 The per-guest last-backup cache is filled by listing the target datastore's snapshots, and that listing covers the datastore's **root namespace only** — no `ns` parameter is sent, and a PBS namespace is configured on the Proxmox storage entry, where Joulenap never sees it. A namespaced setup therefore backs up, prunes and collects garbage correctly while every one of its guests reads *never backed up*. PBS groups are `ct/<vmid>` / `vm/<vmid>` with no record of which host wrote them, so two PVEs sharing a datastore and a vmid also share a group and prune each other's snapshots — use non-overlapping vmid ranges across hosts.
 
-A route's `schedule` is a time plus seven weekday flags. `schedule.cron` is an escape hatch for anything richer (day-of-month, steps, ranges) and **wins over `time`/`days`** when set; the UI then shows it read-only.
+A route's `schedule` is a time plus seven weekday flags. `schedule.cron` is an escape hatch for anything richer (day-of-month, steps, ranges) and **wins over `time`/`days`** when set; the UI then shows it read-only. Weekdays are numbered as in cron (0 and 7 are Sunday). Unlike classic cron, when both day-of-month and day-of-week are restricted **both must match**: `0 4 1 * 1` runs only on a 1st that falls on a Monday. For "either", use two routes.
 
 `options` carries the per-route knobs: `mode` / `bwlimit` / `min_free_percent` (backup only, they are vzdump's), `gc` and `verify_after` (run on the target after the data lands), and `reverify_days` for a verify route. `retention` is vzdump's `prune-backups`, per route.
 

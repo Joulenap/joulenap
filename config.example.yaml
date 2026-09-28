@@ -138,7 +138,10 @@ routes: []
 #                                                          # true (pause with enabled: false)
 #       # Escape hatch for a schedule time+days cannot express (a day-of-month or month
 #       # pattern, a step value, a weekday range). A 5-field crontab string; when set it
-#       # wins over time/days, and the UI shows it read-only.
+#       # wins over time/days, and the UI shows it read-only. One difference from classic
+#       # cron: if both day-of-month and day-of-week are restricted, BOTH must match
+#       # ("0 4 1 * 1" runs only on a 1st that is a Monday, not on every 1st and every
+#       # Monday). For "either", use two routes.
 #       # cron: "0 4 1 * *"
 #     retention:              # applied on the target
 #       keep_last: 0
