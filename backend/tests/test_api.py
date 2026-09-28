@@ -711,6 +711,34 @@ def test_resolve_datastore_offline_uses_that_devices_cache(temp_db):
     assert resolve_datastore(other, None) is None  # not one shared row for every box
 
 
+# --- saving one section ------------------------------------------------------
+
+_NEW_PBS = {
+    "id": "pbs-new",
+    "host": "192.0.2.40",
+    "datastore": "store",
+    "api_token_id": "root@pam!joulenap",
+    "api_token_secret": "s3cret",
+    "managed_power": False,
+}
+
+
+def test_saving_only_the_changed_section_keeps_a_device_created_meanwhile(
+    app_ctx, temp_config
+):
+    # The contract the settings pages rely on: PUT /api/config merges a partial body, so a
+    # page that sends only what it edits cannot undo a device the server created after the
+    # page loaded (lists are replaced whole, so a full stale copy would delete it).
+    client, _app = app_ctx
+    assert client.post("/api/devices/pbss", json=_NEW_PBS).status_code == 201
+
+    assert client.put("/api/config", json={"app": {"theme": "light"}}).status_code == 200
+
+    saved = load_config(temp_config)
+    assert "pbs-new" in [p.id for p in saved.pbss]
+    assert saved.app.theme == "light"
+
+
 # --- account -----------------------------------------------------------------
 
 

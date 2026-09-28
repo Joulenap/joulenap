@@ -124,14 +124,12 @@ function Application() {
     setErr(null)
     try {
       await save({
-        ...config,
         app: {
-          ...config.app,
           port: draft.port,
           update_check: draft.update_check,
           session: { max_age_days: draft.session_days, https_only: draft.https_only },
         },
-        maintenance: { ...config.maintenance, history: { retention_days: draft.history_days } },
+        maintenance: { history: { retention_days: draft.history_days } },
       })
       setSaved(true)
     } catch (e) {

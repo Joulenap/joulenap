@@ -1127,6 +1127,21 @@ const ROUTES: Record<string, unknown> = {
   'POST /config/api-key': { api_key: 'jn_r0d94q7km2c8vt1zx5w3nbhy6f41c' },
 }
 
+/** The backend's `deep_merge`: objects merge key by key, anything else (lists too) replaces.
+ *  The settings pages send only the section they edit, so a shallow assign would wipe the
+ *  rest of that section. */
+function mergeInto(base: Record<string, unknown>, patch: Record<string, unknown>): void {
+  for (const [k, v] of Object.entries(patch)) {
+    const cur = base[k]
+    const isObj = (x: unknown) => x !== null && typeof x === 'object' && !Array.isArray(x)
+    if (isObj(v) && isObj(cur)) {
+      mergeInto(cur as Record<string, unknown>, v as Record<string, unknown>)
+    } else {
+      base[k] = v
+    }
+  }
+}
+
 const realFetch = globalThis.fetch.bind(globalThis)
 
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1155,7 +1170,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // The real backend persists and echoes the config it just saved; the static CONFIG would
   // silently undo edits (e.g. the theme toggle reverting on the PUT response / next GET).
   if (key === 'PUT /config' && typeof init?.body === 'string') {
-    Object.assign(CONFIG, JSON.parse(init.body))
+    mergeInto(CONFIG as unknown as Record<string, unknown>, JSON.parse(init.body))
     body = CONFIG
   }
   // Read through to the live lists rather than the table's snapshot, which route and device

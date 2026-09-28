@@ -365,6 +365,19 @@ export interface Config {
   notifications: NotificationsConfig
 }
 
+/**
+ * A PUT /config body: only the parts being changed. The backend merges objects key by key
+ * and replaces lists whole, so a page sends just the section it edits. Sending the whole
+ * config it loaded would write back stale copies of everything else, including a device
+ * list the server has changed since.
+ */
+export type ConfigPatch = {
+  [K in keyof Config]?: Config[K] extends unknown[] ? Config[K] : DeepPartial<Config[K]>
+}
+type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends unknown[] ? T[K] : T[K] extends object ? DeepPartial<T[K]> : T[K]
+}
+
 // --- wizard ------------------------------------------------------------------
 
 export interface WizardNode {

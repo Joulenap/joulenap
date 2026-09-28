@@ -208,6 +208,9 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       if (landed.current.pbsId === null) {
         await api.createDevice('pbss', device as unknown as Record<string, unknown>)
         landed.current.pbsId = device.id
+        // Stored now, whatever happens to the PVE below: if that fails and the wizard is
+        // closed, the app's copy must still know this PBS exists.
+        await reload()
       }
       map[device.id] = chosen.storage
       lines.push(t('wizard.report.pbsConfigured', { id: device.id }))

@@ -38,7 +38,7 @@ export function Header({ status, view, onToggleView, onLogout }: HeaderProps) {
     applyTheme(next)
     setTheme(next)
     // Persist as app.theme; if config never loaded the toggle still works for this session.
-    if (config) save({ ...config, app: { ...config.app, theme: next } }).catch(() => {})
+    if (config) save({ app: { theme: next } }).catch(() => {})
   }
 
   return (

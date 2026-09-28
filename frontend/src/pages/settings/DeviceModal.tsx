@@ -4,6 +4,7 @@ import { ApiError, api } from '../../api/client'
 import type { PbsDevice, PveDevice } from '../../api/types'
 import { Modal } from '../../components/Modal'
 import { Toggle } from '../../components/Toggle'
+import { useConfig } from '../../config/ConfigContext'
 import { useWolInterfaces } from '../../hooks/useWolInterfaces'
 import {
   type DeviceError,
@@ -31,6 +32,7 @@ interface DeviceModalProps {
  */
 export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps) {
   const { t } = useTranslation()
+  const { reload } = useConfig()
   const [draft, setDraft] = useState(() => structuredClone(device))
   const [busy, setBusy] = useState(false)
   // Errors only after the first Save attempt: complaining about a form the user has not tried
@@ -63,6 +65,9 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
     try {
       const out = await api.refreshPveStorages(device.id)
       patch({ storages: out.storages })
+      // Already stored, so the app's copy must follow even if this dialog is cancelled: the
+      // route editor reads the storages map from it.
+      await reload()
       const n = Object.keys(out.storages).length
       setRereadNote({ ok: true, text: t(`${ns}.storagesRereadOk`, { count: n }) })
     } catch (e) {

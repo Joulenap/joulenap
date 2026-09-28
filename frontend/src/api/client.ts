@@ -3,6 +3,7 @@
 import type {
   AuthStatus,
   Config,
+  ConfigPatch,
   DashboardResponse,
   DeviceKind,
   DeviceLists,
@@ -150,7 +151,7 @@ export const api = {
   // works too). Not what the UI polls — that's /status.
   dashboard: () => req<DashboardResponse>('GET', '/dashboard'),
   getConfig: () => req<Config>('GET', '/config'),
-  putConfig: (config: Config) => req<Config>('PUT', '/config', config),
+  putConfig: (patch: ConfigPatch) => req<Config>('PUT', '/config', patch),
   // Raw config.yaml (redacted) for the Advanced tab's editor; PUT goes through the same
   // validation as putConfig, so a rejected document leaves the stored config untouched.
   getConfigYaml: () => req<{ yaml: string }>('GET', '/config/yaml'),

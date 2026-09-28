@@ -62,7 +62,7 @@ export function Notifications() {
     setBusy(true)
     setSaveErr(null)
     try {
-      await save({ ...config, notifications: draft! })
+      await save({ notifications: draft! })
       setSaved(true)
     } catch (e) {
       setSaveErr(e instanceof ApiError ? e.message : t('common.saveFailed'))
