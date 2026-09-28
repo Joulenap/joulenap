@@ -281,6 +281,27 @@ def test_a_failing_node_task_fails_only_its_source(temp_db):
     assert steps["gc"] == "success"  # the PBS is awake and the other source's data is real
 
 
+def test_a_failed_cluster_node_does_not_stop_the_other_nodes(temp_db):
+    # Each node is its own vzdump task: one guest that would not freeze on n1 must not cost
+    # n2 and n3 their backup, nor drop their guests from the tally and the last-backup cache.
+    alpha = FakePve(guests=list(ALPHA_GUESTS), fail_nodes={"n1"})
+    deps, *_ = _deps(alpha=alpha, pbs=FakePbs(snapshots={200: 1_700_000_000, 300: 1_700_000_100}))
+
+    run_id = _run(_config(), deps)
+    status, steps = _load(run_id)
+
+    assert [c["node"] for c in alpha.vzdump_calls] == ["n1", "n2", "n3"]
+    assert status == RunStatus.FAILURE
+    assert steps["backup:pve-alpha"] == "failure"
+    assert steps["backup:pve-beta"] == "success"
+    guests = _ctx[-1].guests
+    assert (guests.ok, guests.total) == (3, 5)  # n2 + n3 + beta, out of alpha's 4 + beta's 1
+    assert any("node 'n1'" in line for line in _logs(run_id, LogLevel.ERROR))
+    with session_scope() as session:
+        rows = {(r.pve_id, r.vmid) for r in session.scalars(select(GuestBackup))}
+    assert {("pve-alpha", 200), ("pve-alpha", 300)} <= rows
+
+
 def test_a_vzdump_that_only_warned_is_a_success(temp_db):
     # PVE 9 ends the task with "WARNINGS: n" when every guest finished but a line warned
     # (the EFI certificate notice, #61); only "job errors" means a guest was lost.
@@ -345,7 +366,10 @@ def test_failed_guests_are_named_across_sources(temp_db):
     alpha = FakePve(
         guests=list(ALPHA_GUESTS),
         fail_task=True,
-        log_lines=["INFO: Finished Backup of VM 100", "ERROR: Backup of VM 101 failed - boom"],
+        # 100 and 101 live on n1, so only n1's task log names them.
+        log_lines={
+            "n1": ["INFO: Finished Backup of VM 100", "ERROR: Backup of VM 101 failed - boom"]
+        },
     )
     seen, _alpha, _beta, _pbs = _summary(_config(), {"alpha": alpha})
 
@@ -573,8 +597,9 @@ def test_a_cache_failure_never_fails_the_run(temp_db):
 def test_cancel_stops_the_running_vzdump_and_aborts(temp_db):
     config = _config()
     notified: list[object] = []
-    # False at the between-sources check, then True from inside the first task's wait.
-    answers = iter([False])
+    # False at the between-sources and between-nodes checks, then True from inside the
+    # first task's wait.
+    answers = iter([False, False])
     deps, alpha, beta, _pbs = _deps(cancelled=lambda: next(answers, True))
     _ctx.clear()
 

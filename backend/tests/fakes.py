@@ -33,12 +33,15 @@ class FakePve:
         self,
         guests: list[Guest] | None = None,
         fail_task: bool = False,
-        log_lines: list[str] | None = None,
+        log_lines: list[str] | dict[str, list[str]] | None = None,
         pbs_storages: list[dict] | None = None,
         fail_exit_status: str = "job errors",
+        fail_nodes: set[str] | None = None,
     ):
         self.guests = guests or []
         self.fail_task = fail_task
+        # Fail only the tasks running on these cluster nodes (the UPID names the node).
+        self.fail_nodes = fail_nodes or set()
         self.fail_exit_status = fail_exit_status
         self.log_lines = log_lines or []
         # Raw PVE `type=pbs` storage rows, as /storage?type=pbs returns them.
@@ -92,13 +95,17 @@ class FakePve:
     def wait_task(
         self, upid: str, poll_interval=None, on_log=None, should_cancel=None, **_
     ) -> dict:
-        if on_log and self.log_lines:
-            on_log(list(enumerate(self.log_lines, start=1)))
+        # A dict gives each cluster node its own task log, as on a real cluster where a
+        # node's vzdump only names the guests on that node.
+        node = upid.split(":")[1]
+        lines = self.log_lines.get(node, []) if isinstance(self.log_lines, dict) else self.log_lines
+        if on_log and lines:
+            on_log(list(enumerate(lines, start=1)))
         # Mirror poll_task: the cancel probe is checked before reporting a result, so a
         # cycle test can cancel mid-task exactly like the real client would.
         if should_cancel is not None and should_cancel():
             raise TaskCancelled(f"Wait for task {upid} cancelled")
-        if self.fail_task:
+        if self.fail_task or node in self.fail_nodes:
             raise TaskError("vzdump failed", exit_status=self.fail_exit_status)
         return {"status": "stopped", "exitstatus": "OK"}
 
