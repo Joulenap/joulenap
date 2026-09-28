@@ -11,13 +11,16 @@ would be sent without hitting any real service.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
+import socket
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import apprise
 
@@ -130,6 +133,35 @@ def _scrub(message: str, secrets: list[str]) -> str:
     if len(message) > _MAX_ERROR_LEN:
         message = message[: _MAX_ERROR_LEN - 1] + "…"
     return message
+
+
+def _dns_hint(channel: Channel) -> str | None:
+    """Name the cause when a failed ntfy send was the container failing to resolve the host.
+
+    Apprise reports a DNS failure and a refused port with the same "Connection error"
+    wording. A self-hosted ntfy is often published only in a LAN resolver (Pi-hole, a
+    router's local DNS) that the container does not use, or that a router's DNS-rebind
+    protection filters, so the name resolves on the user's PC but not in here. Checked only
+    after a failure, so a working channel pays nothing.
+    """
+    if channel.name != "ntfy":
+        return None
+    host = urlparse(channel.url).hostname
+    if not host:
+        return None
+    try:
+        ipaddress.ip_address(host)
+        return None  # an IP address needs no lookup
+    except ValueError:
+        pass
+    try:
+        socket.getaddrinfo(host, None)
+    except OSError:
+        return (
+            f"cannot resolve '{host}' from the Joulenap container: use the ntfy server's "
+            "IP address, or give the container a DNS server that knows this name"
+        )
+    return None
 
 
 class NotificationService:
@@ -254,5 +286,5 @@ class NotificationService:
         return ChannelResult(
             channel=channel.name,
             ok=False,
-            error=_scrub(reason, channel_secrets) if reason else None,
+            error=_dns_hint(channel) or (_scrub(reason, channel_secrets) if reason else None),
         )
