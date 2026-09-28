@@ -126,6 +126,19 @@ export function sectionsFor(kind: RouteKind): SectionVisibility {
 
 // --- guest selection ---------------------------------------------------------
 
+/**
+ * What clicking a guest-mode button changes. A different mode starts from an empty selection,
+ * because the two lists mean opposite things and carrying one into the other would invert the
+ * backup. The mode already selected changes nothing: clearing there turned a narrowed
+ * Selection into "every guest", since an untouched source means all of them.
+ */
+export function guestModePatch(
+  draft: RouteDraft,
+  mode: RouteDraft['guestMode'],
+): Partial<RouteDraft> {
+  return mode === draft.guestMode ? {} : { guestMode: mode, selection: {} }
+}
+
 /** Selection mode: included unless the source has been narrowed and this vmid was left out. */
 export function isPicked(selection: Record<string, number[]>, pve: string, vmid: number): boolean {
   const list = selection[pve]

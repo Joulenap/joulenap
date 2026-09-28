@@ -16,6 +16,7 @@ import {
   type RouteField,
   draftFromRoute,
   draftToRoute,
+  guestModePatch,
   guestTally,
   inferKind,
   isExcluded,
@@ -473,9 +474,7 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                   <SegButton
                     key={m}
                     on={draft.guestMode === m}
-                    // Always clear the selection: the two lists mean opposite things, so
-                    // carrying one into the other would silently change what gets backed up.
-                    onClick={() => patch({ guestMode: m, selection: {} })}
+                    onClick={() => patch(guestModePatch(draft, m))}
                     label={t(key)}
                   />
                 ))}
