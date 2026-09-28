@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
 from apscheduler.triggers.cron import CronTrigger
 from conftest import with_devices
 
@@ -19,6 +20,7 @@ from app.core.scheduler import (
     _translate_dow,
     resolve_timezone,
     route_cron,
+    validate_cron,
 )
 
 
@@ -273,6 +275,43 @@ def test_build_trigger_excludes_sunday_when_off():
     sat = datetime(2026, 6, 27, 5, 0, tzinfo=UTC)  # Saturday 05:00, after 04:00 fire
     nxt = trigger.get_next_fire_time(None, sat)
     assert nxt.weekday() == 0  # Monday (not Sunday=6)
+
+
+def _fire_days(cron: str) -> set[str]:
+    """The weekdays a crontab fires on over two weeks, as ``Mon``..``Sun``."""
+    trigger = _build_trigger(cron, UTC)
+    now, days = datetime(2026, 9, 28, tzinfo=UTC), set()  # a Monday, midnight
+    for _ in range(14):
+        now = trigger.get_next_fire_time(None, now)
+        if now > datetime(2026, 10, 12, tzinfo=UTC):
+            break
+        days.add(now.strftime("%a"))
+        now += timedelta(minutes=1)
+    return days
+
+
+@pytest.mark.parametrize(
+    ("dow", "expected"),
+    [
+        # Ranges and steps are counted in cron's Sunday-first numbering. APScheduler reads the
+        # same digits Monday-first, so an untranslated "1-5" fired Tue-Sat.
+        ("1-5", {"Mon", "Tue", "Wed", "Thu", "Fri"}),
+        ("5-7", {"Fri", "Sat", "Sun"}),  # 7 is Sunday too; APScheduler rejected it outright
+        ("0-6", {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}),
+        ("*/2", {"Sun", "Tue", "Thu", "Sat"}),  # 0,2,4,6
+        ("1-5/2", {"Mon", "Wed", "Fri"}),
+        ("1,3-5", {"Mon", "Wed", "Thu", "Fri"}),
+        ("mon-fri", {"Mon", "Tue", "Wed", "Thu", "Fri"}),  # names were always unambiguous
+    ],
+)
+def test_weekday_ranges_and_steps_use_cron_numbering(dow, expected):
+    assert _fire_days(f"0 2 * * {dow}") == expected
+
+
+@pytest.mark.parametrize("dow", ["8", "1-8", "5-1", "*/0"])
+def test_out_of_range_weekdays_are_rejected(dow):
+    with pytest.raises(ValueError):
+        validate_cron(f"0 2 * * {dow}")
 
 
 # --- timezone (the container-defaults-to-UTC footgun) -------------------------
