@@ -13,6 +13,7 @@ import {
   nextLabelKey,
   nextStep,
   pbsDeviceFrom,
+  pbsErrorStep,
   pveDeviceFrom,
   slugifyId,
   tokenConflictVictims,
@@ -421,4 +422,15 @@ test('an emptied SSH user falls back to root rather than to nothing', () => {
   )
 
   assert.equal(device.ssh_user, 'root')
+})
+
+test('pbsErrorStep sends a failed final save back to the step that shows the field', () => {
+  // The MAC is on the wake-up step and the SSH key on the power-off step; going back to the
+  // connection step left those errors on a page the user could not see.
+  assert.equal(pbsErrorStep([{ field: 'mac', key: 'k' }]), 1)
+  assert.equal(pbsErrorStep([{ field: 'ssh_key_path', key: 'k' }]), 2)
+  assert.equal(pbsErrorStep([{ field: 'id', key: 'k' }]), 0)
+  // Several at once: the earliest step first, so they are fixed in the order they are asked.
+  assert.equal(pbsErrorStep([{ field: 'ssh_user', key: 'k' }, { field: 'mac', key: 'k' }]), 1)
+  assert.equal(pbsErrorStep([{ key: 'k' }]), 0)
 })

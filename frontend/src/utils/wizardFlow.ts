@@ -392,6 +392,17 @@ export function validateConnectStep(
 
 /** The full device rules, right before the POST. Reuses `validateDevice` rather than
  *  re-deriving `config.py`'s rules a third time; the id is the part it does not cover. */
+/**
+ * The Add-PBS step to send a failed final save back to: the earliest one showing a failing
+ * field. The MAC lives on the wake-up step and the SSH key on the power-off step, so going
+ * back to the connection step would leave their errors where the user cannot see them.
+ */
+export function pbsErrorStep(errors: DeviceError[]): number {
+  const stepOf = (field?: string) =>
+    field === 'mac' ? 1 : field === 'ssh_user' || field === 'ssh_key_path' ? 2 : 0
+  return errors.length ? Math.min(...errors.map((e) => stepOf(e.field))) : 0
+}
+
 export function validateFinalDevice(
   device: PveDevice | PbsDevice,
   existing: string[],

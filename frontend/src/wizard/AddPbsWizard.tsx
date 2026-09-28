@@ -10,6 +10,7 @@ import {
   isOrphanPbs,
   nextStep,
   pbsDeviceFrom,
+  pbsErrorStep,
   validateConnectStep,
   validateFinalDevice,
 } from '../utils/wizardFlow'
@@ -112,14 +113,15 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
     return true
   }
 
-  /** Entering the last step: create the device and report what happened. */
-  async function save() {
+  /** Entering the last step: create the device and report what happened. Returns false,
+   *  with the user sent back to the step that shows the problem, when the device is invalid. */
+  async function save(): Promise<boolean> {
     const device = pbsDeviceFrom(draft, token ?? { id: '', secret: '' })
     const problems = validateFinalDevice(device, existing)
     if (problems.length) {
       setErrors(problems)
-      setStep(0)
-      return
+      setStep(pbsErrorStep(problems))
+      return false
     }
     await api.createDevice('pbss', device as unknown as Record<string, unknown>)
     await reload()
@@ -133,6 +135,7 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
           ]
         : [t('wizard.report.unmanaged')]),
     ])
+    return true
   }
 
   async function advance(dir: 1 | -1) {
@@ -164,7 +167,7 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
       if (dir === 1 && step === 2 && !(await installKey())) return
       // See AddPveWizard: Back is disabled once the device exists, so this guard only stops a
       // re-render mid-flight from posting twice — it can never swallow a changed decision.
-      if (dir === 1 && target === 3 && !saved) await save()
+      if (dir === 1 && target === 3 && !saved && !(await save())) return
       setStep(target)
     } catch (e) {
       // 409 is the one refusal the user can overrule: the token name is taken, and only
