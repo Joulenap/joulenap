@@ -1,5 +1,25 @@
 import { useEffect, useRef, type RefObject } from 'react'
 
+// Open dialogs, most recent last. Every open dialog listens on the document, so without this
+// Escape on a confirm also closed the dialog under it (the route editor, a whole wizard).
+const openDialogs: symbol[] = []
+
+export function pushDialog(): symbol {
+  const id = Symbol('dialog')
+  openDialogs.push(id)
+  return id
+}
+
+export function popDialog(id: symbol): void {
+  const i = openDialogs.indexOf(id)
+  if (i >= 0) openDialogs.splice(i, 1)
+}
+
+/** Only the dialog on top answers Escape and Tab. */
+export function isTopDialog(id: symbol): boolean {
+  return openDialogs[openDialogs.length - 1] === id
+}
+
 /**
  * The keyboard and focus half of a modal dialog: Escape closes, Tab cycles inside it, focus
  * starts somewhere safe and returns to whatever opened it.
@@ -23,6 +43,7 @@ export function useDialogKeys(
 
   useEffect(() => {
     if (!open) return
+    const id = pushDialog()
     const previouslyFocused = document.activeElement as HTMLElement | null
 
     const focusables = () =>
@@ -39,6 +60,7 @@ export function useDialogKeys(
     ;(initialRef.current?.current ?? focusables()[0])?.focus()
 
     const onKey = (e: KeyboardEvent) => {
+      if (!isTopDialog(id)) return
       if (e.key === 'Escape') {
         e.preventDefault()
         onCloseRef.current()
@@ -58,6 +80,7 @@ export function useDialogKeys(
     }
     document.addEventListener('keydown', onKey)
     return () => {
+      popDialog(id)
       document.removeEventListener('keydown', onKey)
       previouslyFocused?.focus?.()
     }
