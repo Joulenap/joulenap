@@ -177,6 +177,9 @@ routes: []
 #       transfer_last: 0      # copy only the newest N snapshots per group (0 = all)
 #       remove_vanished: false  # DELETE on the target what disappeared from the source.
 #                               # Off = the target only grows (minus its own retention).
+#       worker_threads: 1     # sync this many groups in parallel (1-32). Above 1 needs
+#                             # PBS 4.2+ on the box that runs the job; helps on slow,
+#                             # high-latency links and S3 datastores.
 
 # --- Maintenance ---
 # GC and post-backup verify are per-route (routes[].options.gc / .verify_after), and a

@@ -100,6 +100,7 @@ const OPTIONS = {
   reverify_days: 30,
   transfer_last: 0,
   remove_vanished: false,
+  worker_threads: 1,
 }
 const EVERY_DAY = [true, true, true, true, true, true, true]
 const SATURDAYS = [false, false, false, false, false, true, false]
@@ -823,11 +824,11 @@ function demoRoute(key: string, search: URLSearchParams, init?: RequestInit): un
     // The stub's "-stub" marker and its pending-update badge are dev affordances; a public
     // demo should look like a current, healthy install.
     case 'GET /health':
-      return { status: 'ok', version: '1.3.2' }
+      return { status: 'ok', version: '1.4.0' }
     case 'GET /update':
       return {
-        current: '1.3.2',
-        latest: '1.3.2',
+        current: '1.4.0',
+        latest: '1.4.0',
         update_available: false,
         url: 'https://github.com/Joulenap/joulenap/releases',
       }
@@ -1082,10 +1083,10 @@ const WIZARD_WOL_TEST: { sent: boolean; mac: string; broadcast: string } = {
 }
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '1.3.2-stub' },
+  'GET /health': { status: 'ok', version: '1.4.0-stub' },
   'GET /update': {
-    current: '1.3.2-stub',
-    latest: '1.3.2',
+    current: '1.4.0-stub',
+    latest: '1.4.0',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },

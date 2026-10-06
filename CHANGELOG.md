@@ -5,6 +5,20 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0]
+
+### Added
+
+- Sync routes gained a **Groups synced in parallel** field, next to "Transfer only the last N
+  snapshots". It sets the `worker-threads` property that Proxmox Backup Server 4.2 added to
+  sync jobs, so up to 32 backup groups are copied at once instead of one after the other. A
+  sync over a high-latency link, or to an S3-backed datastore, otherwise sits at one request
+  in flight and runs far below the line speed. As with the bandwidth limit, the setting could
+  not be made by hand in PBS, because Joulenap rebuilds the job from the route on every run.
+  The default of 1 leaves the job exactly as before; values above 1 need PBS 4.2 or later on
+  the box that runs the job, the target for a pull and the source for a push. Thanks to
+  @techfixpros for the report and the patch (#72).
+
 ## [1.3.2]
 
 ### Fixed
@@ -807,7 +821,9 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/Joulenap/joulenap/compare/v1.3.2...v1.4.0
+[1.3.2]: https://github.com/Joulenap/joulenap/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/Joulenap/joulenap/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Joulenap/joulenap/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/Joulenap/joulenap/compare/v1.2.0...v1.2.1

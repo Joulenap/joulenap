@@ -221,6 +221,7 @@ def _sync_body(
                 transfer_last=route.options.transfer_last,
                 remove_vanished=route.options.remove_vanished,
                 rate=route.options.bwlimit,
+                worker_threads=route.options.worker_threads,
             )
             try:
                 upid = pbs.run_sync_job(name)

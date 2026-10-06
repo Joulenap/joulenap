@@ -131,6 +131,7 @@ def test_pull_sync_runs_the_job_on_the_target(temp_db):
             "transfer_last": 0,
             "remove_vanished": False,
             "rate": 0,  # the route's bwlimit, 0 = no rate-in/rate-out on the job
+            "worker_threads": 1,
         }
     }
     # The run call carries no direction (PBS resolves the job by id); the direction lives in
@@ -175,6 +176,7 @@ def test_push_sync_runs_the_job_on_the_source(temp_db):
         "transfer_last": 0,
         "remove_vanished": False,
         "rate": 0,
+        "worker_threads": 1,
     }
     assert pbs2.sync_runs == [{"id": "joulenap-r1"}]
     assert pbs2.remotes == {} and pbs2.sync_jobs == {}  # torn down after the run
@@ -241,14 +243,15 @@ def test_sync_with_all_zero_retention_skips_the_prune(temp_db):
     assert _load(run_id)[1][StepName.PRUNE] == StepStatus.SKIPPED
 
 
-def test_sync_passes_transfer_last_and_remove_vanished_to_the_job(temp_db):
-    config = _config("sync", options={"transfer_last": 3, "remove_vanished": True})
+def test_sync_passes_transfer_last_remove_vanished_and_worker_threads_to_the_job(temp_db):
+    options = {"transfer_last": 3, "remove_vanished": True, "worker_threads": 4}
+    config = _config("sync", options=options)
     deps, pbs1, *_ = _deps()
 
     _run(config, deps)
 
     job = pbs1.sync_jobs_created["joulenap-r1"]
-    assert (job["transfer_last"], job["remove_vanished"]) == (3, True)
+    assert (job["transfer_last"], job["remove_vanished"], job["worker_threads"]) == (3, True, 4)
 
 
 def test_sync_without_maintenance_skips_both_steps(temp_db):

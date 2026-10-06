@@ -240,6 +240,8 @@
       "syncHelp": "Both PBS are woken; each is powered back off once its tasks are done.",
       "transferLast": "Transfer only the last N snapshots per group",
       "transferLastHelp": "0 = every snapshot. Older ones are simply not copied; they are not deleted from the target.",
+      "workerThreads": "Groups synced in parallel",
+      "workerThreadsHelp": "1 = one group at a time. Raise it (up to 32) when a slow, high-latency link or an S3 datastore caps the transfer. Above 1 needs PBS 4.2 or later on the PBS that runs the job: the target for a pull, the source for a push.",
       "removeVanished": "Mirror deletions to the target",
       "removeVanishedHelp": "Snapshots that no longer exist on the source are DELETED on the target. Off = the target only ever grows, minus its own retention. Leave off for a true off-site safety net.",
       "retention": "Retention on the target",

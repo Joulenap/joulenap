@@ -288,6 +288,7 @@ class PbsClient:
         transfer_last: int = 0,
         remove_vanished: bool = False,
         rate: int = 0,
+        worker_threads: int = 1,
     ) -> None:
         """(Re)create a sync job between the local datastore ``store`` and ``remote_store``
         on ``remote``. ``direction`` says which way the data moves: ``pull`` (this PBS fetches)
@@ -311,6 +312,10 @@ class PbsClient:
         because the field is a byte size ("B, KB (base 10), MB, ..., KiB (base 2), ..."), and
         a bare number would be bytes per second, off by 1024.
 
+        ``worker_threads`` > 1 syncs that many groups in parallel (PBS 4.2+, max 32). 1 is
+        PBS's default and is omitted, so a PBS older than 4.2 never sees a parameter it would
+        reject.
+
         This is the *only* place a sync can be rate-limited: PBS's Traffic Control rules
         explicitly do not apply to sync jobs, and Joulenap rebuilds this job on every run, so
         anything set by hand in the PBS UI is gone by the next one."""
@@ -330,6 +335,8 @@ class PbsClient:
             data["remove-vanished"] = 1
         if rate > 0:
             data["rate-out" if direction == "push" else "rate-in"] = f"{rate}KiB"
+        if worker_threads > 1:
+            data["worker-threads"] = worker_threads
         self._replace("sync", job_id, data)
 
     def start_prune(self, retention: dict[str, int]) -> str:

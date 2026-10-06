@@ -273,6 +273,11 @@ class RouteOptions(_Base):
     # retention). Opt-in on purpose: an off-site copy that mirrors deletions is no longer
     # a safety net against a fat-fingered prune on the source.
     remove_vanished: bool = False
+    # Sync routes only. PBS ``worker-threads`` (PBS 4.2+ on the box that runs the job): sync
+    # that many backup groups in parallel, which lifts the one-request-at-a-time ceiling on
+    # high-latency links and S3 datastores. 1 = PBS's own default, so it is never sent and
+    # older PBS keeps working.
+    worker_threads: int = Field(default=1, ge=1, le=32)
 
 
 class Route(_Base):
