@@ -497,6 +497,7 @@ test('a new route runs GC, does not verify, and does not remove vanished snapsho
     reverify_days: 30,
     transfer_last: 0,
     remove_vanished: false, // never delete on the target unless asked
+    worker_threads: 1, // PBS's own default, so older PBS never sees the parameter
   })
 })
 

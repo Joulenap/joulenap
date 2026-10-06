@@ -32,6 +32,7 @@ const route = (id: string, over: Partial<Route> = {}): Route => ({
     reverify_days: 30,
     transfer_last: 0,
     remove_vanished: false,
+    worker_threads: 1,
   },
   ...over,
 })

@@ -59,6 +59,7 @@ def test_route_defaults():
     assert route.options.mode == "snapshot" and route.options.gc is True
     # Sync knobs default to PBS's own defaults, so a 1.0 YAML without them changes nothing.
     assert route.options.transfer_last == 0 and route.options.remove_vanished is False
+    assert route.options.worker_threads == 1
     assert route.sources[0].guests.mode == "all"
 
 
@@ -100,12 +101,14 @@ def test_sync_route_options_are_validated():
         {"id": "pbs-02", "host": "192.0.2.21", "mac": "00:11:22:33:44:66"},
     ]
     sync = dict(id="offsite", kind="sync", sources=[], source_pbs="pbs-01", target="pbs-02")
-    options = {"transfer_last": 3, "remove_vanished": True}
+    options = {"transfer_last": 3, "remove_vanished": True, "worker_threads": 8}
     cfg = _cfg(pbss=pbss, routes=[_route(**sync, options=options)])
     assert cfg.routes[0].options.transfer_last == 3
     assert cfg.routes[0].options.remove_vanished is True
-    with pytest.raises(ValidationError):
-        _cfg(pbss=pbss, routes=[_route(**sync, options={"transfer_last": -1})])
+    assert cfg.routes[0].options.worker_threads == 8
+    for bad in ({"transfer_last": -1}, {"worker_threads": 0}, {"worker_threads": 33}):
+        with pytest.raises(ValidationError):
+            _cfg(pbss=pbss, routes=[_route(**sync, options=bad)])
 
 
 def test_sync_route_rejects_pve_sources():

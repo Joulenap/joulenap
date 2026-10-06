@@ -100,6 +100,7 @@ const OPTIONS = {
   reverify_days: 30,
   transfer_last: 0,
   remove_vanished: false,
+  worker_threads: 1,
 }
 const EVERY_DAY = [true, true, true, true, true, true, true]
 const SATURDAYS = [false, false, false, false, false, true, false]

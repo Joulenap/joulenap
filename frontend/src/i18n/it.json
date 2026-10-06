@@ -240,6 +240,8 @@
       "syncHelp": "Entrambi i PBS vengono accesi; ognuno viene rispento quando i suoi task sono finiti.",
       "transferLast": "Trasferisci solo gli ultimi N snapshot per gruppo",
       "transferLastHelp": "0 = tutti gli snapshot. I più vecchi semplicemente non vengono copiati; non vengono cancellati dalla destinazione.",
+      "workerThreads": "Gruppi sincronizzati in parallelo",
+      "workerThreadsHelp": "1 = un gruppo alla volta. Alzalo (fino a 32) quando un link lento ad alta latenza o un datastore S3 limitano il trasferimento. Sopra 1 serve PBS 4.2 o successivo sul PBS che esegue il job: la destinazione per un pull, la sorgente per un push.",
       "removeVanished": "Replica le cancellazioni sulla destinazione",
       "removeVanishedHelp": "Gli snapshot che non esistono più sulla sorgente vengono CANCELLATI sulla destinazione. Spento = la destinazione può solo crescere, al netto della sua retention. Lascialo spento se vuoi una vera rete di sicurezza off-site.",
       "retention": "Retention sulla destinazione",

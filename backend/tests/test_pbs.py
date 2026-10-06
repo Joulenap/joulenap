@@ -183,7 +183,7 @@ def test_push_sync_job_sends_the_direction_only_in_the_job_body():
     assert upid.startswith("UPID:")
 
 
-def test_sync_job_sends_transfer_last_and_remove_vanished_only_when_set():
+def test_sync_job_sends_transfer_last_remove_vanished_and_worker_threads_only_when_set():
     handler, calls = _recorder({"sync": []})
     client = make_client(handler)
 
@@ -191,15 +191,18 @@ def test_sync_job_sends_transfer_last_and_remove_vanished_only_when_set():
     bare = calls[-1][2]
     client.ensure_sync_job(
         "j", remote="j", remote_store="a", store="b", direction="push",
-        transfer_last=3, remove_vanished=True,
+        transfer_last=3, remove_vanished=True, worker_threads=4,
     )
     full = calls[-1][2]
 
     # PBS's transfer-last has minimum 1, so 0 means "leave the parameter out"; and an
     # omitted remove-vanished is PBS's own default (false), so a bare job stays byte-for-byte
-    # what it was before these options existed.
+    # what it was before these options existed. worker-threads only exists from PBS 4.2, so
+    # its default of 1 must stay off the wire too, or an older PBS would refuse the job.
     assert "transfer-last" not in bare and "remove-vanished" not in bare
+    assert "worker-threads" not in bare
     assert "transfer-last=3" in full and "remove-vanished=1" in full
+    assert "worker-threads=4" in full
     assert "sync-direction=push" in full  # both fields ride the same job schema as push
 
 

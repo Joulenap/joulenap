@@ -47,6 +47,7 @@ export const DEFAULT_OPTIONS: RouteOptions = {
   reverify_days: 30,
   transfer_last: 0,
   remove_vanished: false,
+  worker_threads: 1,
 }
 
 /**

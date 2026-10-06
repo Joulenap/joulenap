@@ -614,6 +614,29 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                 </div>
               </div>
               <span className="help">{t('dashboard.routeModal.transferLastHelp')}</span>
+              <label className="lab" htmlFor="rm-workers">
+                {t('dashboard.routeModal.workerThreads')}
+              </label>
+              <div className="retention-row">
+                <div className="r">
+                  <input
+                    id="rm-workers"
+                    type="number"
+                    min={1}
+                    max={32}
+                    value={draft.options.worker_threads}
+                    onChange={(e) =>
+                      patch({
+                        options: {
+                          ...draft.options,
+                          worker_threads: Math.min(32, Math.max(1, num(e.target.value))),
+                        },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <span className="help">{t('dashboard.routeModal.workerThreadsHelp')}</span>
               <label className="tglrow">
                 <Toggle
                   size="sm"
