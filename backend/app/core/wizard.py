@@ -26,6 +26,7 @@ from ..connectors.pve import PveClient
 from ..connectors.sshkey import (
     authorized_keys_line,
     generate_keypair,
+    install_command,
     install_public_key,
     public_key_from,
 )
@@ -253,6 +254,8 @@ def _key_result(public_key: str, key_path: Path, *, created: bool) -> dict[str, 
     return {
         "public_key": public_key,
         "authorized_keys_line": authorized_keys_line(public_key),
+        # The same command the auto-install runs, for the user to paste into the PBS Shell.
+        "install_command": install_command(public_key),
         "key_path": str(key_path),
         "created": created,
     }

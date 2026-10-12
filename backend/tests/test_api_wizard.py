@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.connectors.errors import ApiError, TokenExistsError
+from app.connectors.errors import ApiError, SshPasswordRefusedError, TokenExistsError
 from app.connectors.provision import pbs_token_name
 from app.core import wizard
 from app.main import create_app
@@ -199,9 +199,11 @@ def test_ssh_keygen_generates_real_key(client):
     assert body["public_key"].startswith("ssh-ed25519 ")
     assert body["key_path"].endswith("id_ed25519")
     assert body["created"] is True
-    # The restricted line to paste/install locks the key to poweroff only.
-    assert body["authorized_keys_line"].startswith('command="systemctl poweroff",')
+    # The restricted line to paste/install locks the key to poweroff/suspend only.
+    assert body["authorized_keys_line"].startswith('command="case $SSH_ORIGINAL_COMMAND in ')
     assert body["authorized_keys_line"].endswith(body["public_key"])
+    # ...and the command to paste into the PBS Shell installs exactly that line.
+    assert body["authorized_keys_line"] in body["install_command"]
 
 
 def test_ssh_keygen_reuses_an_existing_key(client):
@@ -245,6 +247,21 @@ def test_ssh_install_passes_through(client, monkeypatch):
     )
     assert r.json() == {"installed": True}
     assert captured["host"] == "pbs.local" and captured["user"] == "root"
+
+
+def test_ssh_install_flags_a_refused_password_with_a_code(client, monkeypatch):
+    # The wizard keys on the code to switch to the paste-it-yourself path, so it must survive
+    # the trip through the 502 rather than being flattened into a plain message.
+    def refuse(**_kwargs):
+        raise SshPasswordRefusedError("root@pbs.local refused password login over SSH")
+
+    monkeypatch.setattr(wizard, "ssh_install", refuse)
+    r = client.post(
+        "/api/wizard/ssh/install",
+        json={"host": "pbs.local", "password": "pw", "public_key": "ssh-ed25519 AAAA"},
+    )
+    assert r.status_code == 502
+    assert r.json()["detail"]["code"] == "ssh_password_refused"
 
 
 def test_wol_test_sends_a_packet_for_a_mac_not_yet_saved(client, monkeypatch):

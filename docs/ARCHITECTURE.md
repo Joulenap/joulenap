@@ -20,7 +20,7 @@
   - `pve` — PVE API client (list guests, trigger `vzdump`, read task status).
   - `pbs` — PBS API client (datastore status, GC, verify, remotes and sync jobs). TLS-pinned per device to the fingerprint stored at setup (rejects a changed cert).
   - `wol` — sends the Wake-on-LAN magic packet on the LAN.
-  - `power` — SSH to a PBS for `poweroff`, verified against `data/known_hosts` (host key confirmed in the wizard).
+  - `power`: SSH to a PBS for `systemctl poweroff` or `systemctl suspend` (the device's `power_action`), verified against `data/known_hosts` (host key confirmed in the wizard).
   - `notify` — Apprise / Telegram / ntfy / Discord / email senders.
   - `update` — asks GitHub once a day whether a newer release exists (opt-in via `app.update_check`; no outbound call when off).
 - **Store**: `config.yaml` for settings; a small SQLite DB (`data/`) for run history and logs.
@@ -65,6 +65,7 @@ The release records a `poweroff` step whose detail says what actually happened:
 | Outcome | Meaning |
 |---|---|
 | `powered off` | last holder, nothing queued needs it, run succeeded → SSH poweroff |
+| `suspended` | the same, on a box whose `power_action` is `suspend` |
 | `left on: still needed by another run` | a queued run needs this box |
 | `left on: Joulenap does not manage this box's power` | `managed_power: false` |
 | `left powered on` | the run failed (left up for inspection), the user asked to keep it on, or the box was busy |
@@ -163,7 +164,7 @@ Everything is served under `/api`. Auth is a signed **session cookie** started b
 | POST | `/api/devices/{kind}/{device_id}/test` | live connection test (502 with the reason on failure) |
 | GET | `/api/devices/pves/{pve_id}/storages` | this PVE's PBS-backed storages as it reports them, nothing written (502 on a connector failure) |
 | POST | `/api/devices/pves/{pve_id}/storages` | re-read them and relink to registered devices, replacing the map (502 on a connector failure; 422 if the result would orphan a route) |
-| POST | `/api/devices/pbss/{pbs_id}/power` | `{action: "wake" \| "poweroff"}` |
+| POST | `/api/devices/pbss/{pbs_id}/power` | `{action: "wake" \| "poweroff"}`; `poweroff` runs the box's `power_action`, so it suspends a box set to suspend |
 | POST | `/api/devices/pbss/{pbs_id}/gc` | queue an ad-hoc GC on this box (optional `{keep_on}`) |
 | POST | `/api/devices/pbss/{pbs_id}/verify` | queue an ad-hoc verification on this box |
 
@@ -230,4 +231,4 @@ Per device — each PVE and each PBS gets its own token.
 - **PVE token**: `VM.Audit` (list guests) + `VM.Backup` + `Datastore.Audit` + `Datastore.AllocateSpace` **and `Datastore.Allocate`** on the PBS-backed storage (the last is required for vzdump's retention/prune, which deletes old backups). Root-mode setup creates a `Joulenap` role with exactly these privileges (`connectors/provision.py`).
 - **PBS token**: `DatastoreAdmin` on the datastore (status, GC, verify) plus `Audit` on `/system` (read-only node CPU/RAM/network for the dashboard). PBS has no API to create custom roles, so root-mode setup grants these built-ins scoped by path. The token is named **`joulenap-<datastore>`**: a device is a *(host, datastore)* pair, so one machine can hold two, and a shared name would mean provisioning the second deleted and recreated the first one's token. Deleting a token also drops its ACL entries, so that would have left the first device unable to connect *and* unable to be repaired by re-entering a secret.
 - **PBS token, additionally, for sync routes**: `RemoteAdmin` **and** `RemoteDatastoreAdmin` on `/remote`, so Joulenap can create the remote and the sync job (push, and push with `remove_vanished`, need the `Remote.Datastore*` privileges of the second; 1.0 granted `RemoteSyncPushOperator`, which lacks `Remote.DatastorePrune` — re-run the grant before enabling `remove_vanished` on a push route). PBS refuses ACL writes from a token, so these can only be granted from a root login — the wizard does it while it still holds the root ticket, and a box set up before 1.0 gets them from the device editor's **Grant sync permissions** action (`POST /api/wizard/pbs/grant-sync`), which asks for root once and stores nothing. See [`CONFIG-WIZARD.md`](CONFIG-WIZARD.md#sync-routes-need-one-extra-grant).
-- **SSH to a PBS**: one dedicated key, shared by every managed box, ideally installed with a forced command that only allows `poweroff`.
+- **SSH to a PBS**: one dedicated key, shared by every managed box, installed with a forced command that only allows `systemctl poweroff` and `systemctl suspend` (see [`SECURITY.md`](../SECURITY.md)).

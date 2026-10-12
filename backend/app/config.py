@@ -169,6 +169,9 @@ class PbsDevice(_Base):
     # Before powering off, wait up to this many seconds for any running PBS task to finish
     # so a clean shutdown never interrupts it (0 = power off immediately, no guard).
     poweroff_task_wait: int = Field(default=600, ge=0)
+    # What "put it back to sleep" means over SSH. "suspend" is for boxes whose NIC only keeps
+    # Wake-on-LAN alive from sleep. Missing from configs written before 1.5.0, hence poweroff.
+    power_action: Literal["poweroff", "suspend"] = "poweroff"
     ssh_user: str = "root"
     ssh_key_path: str = "/app/data/id_ed25519"
     external: PbsExternalConfig = Field(default_factory=PbsExternalConfig)

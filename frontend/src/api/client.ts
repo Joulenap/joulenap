@@ -254,6 +254,7 @@ export const api = {
     req<{
       public_key: string
       authorized_keys_line: string
+      install_command: string
       key_path: string
       created: boolean
     }>('POST', '/wizard/ssh/keygen'),

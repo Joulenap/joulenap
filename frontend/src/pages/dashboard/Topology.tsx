@@ -306,6 +306,13 @@ function PbsCard({
   const ds = state?.datastore
   const runningRoute = routes.find((r) => r.id === status?.running?.route_id)
   const working = busy && !!runningRoute && routePbss(runningRoute).includes(pbs.id)
+  const powerLabel = busy
+    ? t('dashboard.powerLocked')
+    : !online
+      ? t('dashboard.powerOn')
+      : pbs.power_action === 'suspend'
+        ? t('dashboard.suspend')
+        : t('dashboard.powerOff')
 
   return (
     <div className={`device${className}`} ref={(el) => setCard(pbsNodeId(pbs.id), el)}>
@@ -322,20 +329,8 @@ function PbsCard({
             className="pwr"
             disabled={busy}
             onClick={() => onPower(pbs, online)}
-            title={
-              busy
-                ? t('dashboard.powerLocked')
-                : online
-                  ? t('dashboard.powerOff')
-                  : t('dashboard.powerOn')
-            }
-            aria-label={
-              busy
-                ? t('dashboard.powerLocked')
-                : online
-                  ? t('dashboard.powerOff')
-                  : t('dashboard.powerOn')
-            }
+            title={powerLabel}
+            aria-label={powerLabel}
           >
             ⏻
           </button>

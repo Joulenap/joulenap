@@ -17,10 +17,11 @@ from .errors import PowerError
 
 log = logging.getLogger("joulenap.power")
 
-# The single command Joulenap runs on the PBS. It's both the default command this client
-# sends and the forced command the SSH key is locked to (see sshkey._FORCED_COMMAND), so it
-# lives here once and both paths stay in sync.
-POWEROFF_COMMAND = "systemctl poweroff"
+# The only commands Joulenap ever runs on the PBS, keyed by ``PbsDevice.power_action``. The
+# forced command the SSH key is locked to (see sshkey._FORCED_COMMAND) accepts exactly these
+# and nothing else, so they live here once and both paths stay in sync.
+POWER_COMMANDS = {"poweroff": "systemctl poweroff", "suspend": "systemctl suspend"}
+POWEROFF_COMMAND = POWER_COMMANDS["poweroff"]
 
 
 class PbsPower:
@@ -72,20 +73,20 @@ class PbsPower:
     def test_connection(self) -> None:
         """Verify the key is accepted by opening (and closing) an authenticated SSH session.
 
-        Deliberately does **not** run a command: the key is installed with a forced
-        ``poweroff`` command, so any exec would shut the PBS down. A successful
+        Deliberately does **not** run a command: on a line installed before 1.5.0 the forced
+        command is a bare ``poweroff``, so any exec would shut the PBS down. A successful
         authentication is the most we can check without actually powering it off.
         Raises :class:`PowerError` on failure."""
         client = self._connect()
         client.close()
 
     def poweroff(self) -> None:
-        """Issue the poweroff command. Fire-and-forget: the host drops the connection
-        as it shuts down, so we don't wait for an exit status."""
+        """Issue the power command (poweroff or suspend). Fire-and-forget: the host drops
+        the connection as it goes down, so we don't wait for an exit status."""
         client = self._connect()
         try:
             client.exec_command(self.poweroff_command, timeout=self.timeout)
-            log.info("Sent poweroff command to %s", self.host)
+            log.info("Sent '%s' to %s", self.poweroff_command, self.host)
         except Exception as exc:
             raise PowerError(f"Poweroff command on {self.host} failed: {exc}") from exc
         finally:

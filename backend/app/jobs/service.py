@@ -472,9 +472,13 @@ class JobService:
                 continue
             with recorder.step(StepName.POWEROFF, label=device.id if multi else None) as step:
                 outcome = self.lease.release(device, power_off=power_off)
-                set_detail(step, outcome.key)
                 if outcome is ReleaseOutcome.POWERED_OFF:
+                    # Same outcome either way (the box is down and not burning power); only
+                    # the timeline's word differs, so it says what actually happened.
+                    suspended = device.power_action == "suspend"
+                    set_detail(step, "suspended" if suspended else outcome.key)
                     continue
+                set_detail(step, outcome.key)
                 # Not a failure: leaving the box on is the *correct* outcome after a failed
                 # run, for an unmanaged device, or while another route still needs it — the
                 # detail says which. Only LEFT_ON costs the user power with nobody left to

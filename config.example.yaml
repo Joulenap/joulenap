@@ -104,8 +104,9 @@ pbss: []
 #                                       # each waiting up to wait_timeout
 #     # Power-off (no PBS API for this -> SSH)
 #     poweroff_task_wait: 600           # wait up to N s for a running PBS task to finish before power-off (0 = no wait)
+#     power_action: poweroff            # poweroff | suspend (for a NIC that only wakes from sleep)
 #     ssh_user: root
-#     ssh_key_path: /app/data/id_ed25519  # dedicated key; ideally restricted to a poweroff command on PBS
+#     ssh_key_path: /app/data/id_ed25519  # dedicated key; restricted on PBS to the poweroff/suspend commands
 #     # How long External routes onto this PBS wait — i.e. how slow this box is.
 #     # Both are worst-case timeouts, not fixed delays.
 #     external:

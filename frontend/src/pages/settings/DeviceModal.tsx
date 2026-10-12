@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../../api/client'
 import type { PbsDevice, PveDevice } from '../../api/types'
@@ -12,6 +12,7 @@ import {
   deviceSaveErrors,
   validateDevice,
 } from '../../utils/deviceForm'
+import { InstallCommand, type KeyInfo, PowerActionField } from '../../wizard/pbsSetup'
 
 interface DeviceModalProps {
   kind: DeviceKind
@@ -44,6 +45,18 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
   const pve = draft as PveDevice
   const ns = 'settings.devices'
   const ifaces = useWolInterfaces(isPbs ? pbs.wol_broadcast_iface : '')
+
+  // Switching an existing box to suspend: a key installed before 1.5.0 is locked to a bare
+  // poweroff, so the user may need to refresh its line once. There is no way to ask the PBS
+  // which line it holds (on an old line, any command powers it off), so the command is shown
+  // whenever the choice changes to suspend. Only when the device uses the app's own key: the
+  // command installs that one, and would be wrong for a key the user brought.
+  const toSuspend =
+    isPbs && pbs.power_action === 'suspend' && (device as PbsDevice).power_action !== 'suspend'
+  const [key, setKey] = useState<KeyInfo | null>(null)
+  useEffect(() => {
+    if (toSuspend && !key) api.wizardKeygen().then(setKey, () => {})
+  }, [toSuspend, key])
 
   // Sync grants: root credentials that are used once and never stored, so they live outside
   // the draft entirely (see the section's own comment below).
@@ -408,7 +421,18 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
                     (n) => patch({ poweroff_task_wait: n }),
                     { help: t(`${ns}.poweroffWaitHint`) },
                   )}
+                  <PowerActionField
+                    id="dev-power_action"
+                    value={pbs.power_action}
+                    onChange={(v) => patch({ power_action: v })}
+                  />
                 </div>
+                {toSuspend && key && key.key_path === pbs.ssh_key_path && (
+                  <div className="field">
+                    <span className="help">{t(`${ns}.suspendLineWarn`)}</span>
+                    <InstallCommand command={key.install_command} />
+                  </div>
+                )}
 
                 <span className="msec">{t(`${ns}.secExternal`)}</span>
                 <div className="frow">

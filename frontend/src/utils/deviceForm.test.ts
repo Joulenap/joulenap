@@ -40,6 +40,7 @@ const pbs = (id: string, over: Partial<PbsDevice> = {}): PbsDevice => ({
   wait_timeout: 180,
   wol_retries: 2,
   poweroff_task_wait: 600,
+  power_action: 'poweroff',
   ssh_user: 'root',
   ssh_key_path: '/app/data/id_ed25519',
   external: { first_task_wait: 900, idle_wait: 300 },

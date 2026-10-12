@@ -20,7 +20,10 @@
     "retry": "Riprova",
     "close": "Chiudi",
     "remove": "Rimuovi",
-    "unsavedChanges": "Modifiche non salvate"
+    "unsavedChanges": "Modifiche non salvate",
+    "copy": "Copia",
+    "copied": "Copiato",
+    "copyFailed": "Copia automatica non riuscita. Seleziona il testo e copialo manualmente."
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
@@ -68,6 +71,7 @@
   "dashboard": {
     "powerOn": "Accendi PBS",
     "powerOff": "Spegni PBS",
+    "suspend": "Sospendi PBS",
     "neverRun": "mai eseguito",
     "noRecentRuns": "Nessuna esecuzione recente",
     "lastBackupTitle": "Ultimo backup per guest",
@@ -120,6 +124,9 @@
       "offTitle": "Spegnere il PBS?",
       "offMsg": "Il PBS verrà spento ora. Lo scheduler lo riattiverà automaticamente per il prossimo backup pianificato.",
       "offYes": "Spegni PBS",
+      "suspendTitle": "Sospendere il PBS?",
+      "suspendMsg": "Il PBS verrà messo in sospensione ora. Lo scheduler lo riattiverà automaticamente per il prossimo backup pianificato.",
+      "suspendYes": "Sospendi PBS",
       "routeYes": "Esegui",
       "runRouteTitle": "Esegui route · {{name}}",
       "gcNote": "Se il PBS è spento viene acceso prima della GC.",
@@ -381,7 +388,8 @@
       "autoInstall": "Installa automaticamente con le credenziali root (temporanee)",
       "hostKeyWhy": "Conferma la host key del PBS prima che venga inviata la password di root; viene poi salvata in known_hosts.",
       "hostKeyTrusted": "Host key salvata",
-      "manualHint": "Aggiungi la riga qui sotto a /root/.ssh/authorized_keys sul PBS, poi segna come installata.",
+      "manualHint": "Apri la Shell del PBS (Amministrazione → Shell nella sua interfaccia web), incolla questo comando e premi Invio. Installa la riga qui sotto, sostituendo un'eventuale riga Joulenap più vecchia.",
+      "manualLine": "Oppure aggiungi tu questa riga a /root/.ssh/authorized_keys sul PBS:",
       "scanning": "Rilevamento…",
       "scanHostKey": "Rileva host key",
       "confirmHostKey": "Conferma e fidati"
@@ -392,7 +400,7 @@
       "pbsApi": "API raggiungibile · datastore {{datastore}} ok",
       "wake": "Wake-on-LAN pronto · MAC {{mac}}",
       "sshInstalled": "Chiave SSH installata · host key salvata",
-      "sshManual": "Chiave SSH pronta — incolla la riga qui sopra nell'authorized_keys del PBS",
+      "sshManual": "Chiave SSH pronta · lancia il comando di installazione nella Shell del PBS, se non l'hai già fatto",
       "unmanaged": "PBS sempre acceso: Joulenap non lo accende né lo spegne mai",
       "linked": "Storage PVE collegati: {{list}}"
     },
@@ -404,6 +412,7 @@
       "tokenRequired": "Servono sia il token ID sia il secret.",
       "installNeedsRoot": "L'installazione automatica della chiave richiede le credenziali root. Passa a root temporaneo, oppure disattiva l'opzione e incolla la riga a mano.",
       "hostKeyNotTrusted": "Conferma prima la host key del PBS — la password di root viene inviata solo su una connessione la cui host key è stata verificata.",
+      "sshPasswordRefused": "Il PBS non accetta il login root con password via SSH. È il default di Debian e va bene lasciarlo così. Installa tu la chiave: incolla il comando qui sotto nella Shell del PBS, poi continua.",
       "pbsUnreachable": "Il PBS non è raggiungibile a quell'host e porta. Verifica che sia acceso e che l'indirizzo sia corretto, poi riprova.",
       "macNotDetected": "Impossibile rilevare automaticamente l'indirizzo MAC — inseriscilo manualmente.",
       "alreadyRegistered": "Questo indirizzo è già registrato come «{{id}}». Modifica quel dispositivo invece di aggiungerlo di nuovo: ne sostituiresti il token API lasciando l’originale senza accesso."
@@ -475,9 +484,6 @@
       "regenerate": "Rigenera chiave",
       "disable": "Disattiva",
       "keyShownOnce": "La chiave completa è visibile solo subito dopo la generazione. Rigenerarla invalida la precedente.",
-      "copy": "Copia",
-      "copied": "Copiata",
-      "copyFailed": "Copia automatica non riuscita — seleziona il testo e copialo manualmente.",
       "snippetHint": "Incollalo nella configurazione della tua dashboard mantenendo l'indentazione. Con le route la risposta è una lista: una voce per route e una per backup server.",
       "dashboardLabel": "Widget dashboard",
       "regenerateConfirmTitle": "Rigenerare la chiave API?",
@@ -604,6 +610,11 @@
       "sshKey": "Chiave",
       "poweroffWait": "Attesa dei task prima dello spegnimento (s)",
       "poweroffWaitHint": "A un task PBS in corso viene concesso questo tempo per finire, così lo spegnimento non lo interrompe mai. 0 spegne subito.",
+      "powerAction": "A fine lavoro",
+      "powerPoweroff": "Spegni",
+      "powerSuspend": "Sospendi",
+      "powerActionHint": "La sospensione serve per le macchine la cui scheda di rete si risveglia solo dalla sospensione. Provala prima una volta a mano: lancia systemctl suspend sul PBS e verifica che il Wake-on-LAN lo riaccenda.",
+      "suspendLineWarn": "Se questo PBS è stato configurato prima di Joulenap 1.5.0, la sua chiave permette ancora solo lo spegnimento. Aggiornala una volta: apri la Shell del PBS (Amministrazione → Shell nella sua interfaccia web), incolla questo comando e premi Invio.",
       "firstTaskWait": "Attesa del primo task (s)",
       "firstTaskWaitHint": "Quanto attendere che compaia il primo task dopo il risveglio.",
       "idleWait": "Silenzio prima dello spegnimento (s)",

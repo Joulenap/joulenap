@@ -17,6 +17,7 @@ Pick the path that fits you:
 - [Option B — Docker Compose](#option-b--docker-compose) *(existing Docker host, or to pre-edit config)*
 - [Option C — Native install, no Docker](#option-c--native-install-no-docker) *(advanced)*
 - [First run: create the account, add your devices, draw a route](#first-run) — same for every path
+- [Switching an existing PBS to suspend](#switching-an-existing-pbs-to-suspend) *(for a box that only wakes from sleep)*
 - [Updating](#updating)
 - [Timezone](#timezone)
 
@@ -29,7 +30,8 @@ Pick the path that fits you:
   itself. Without it, Joulenap can't wake the box. **Confirm it actually wakes from a magic packet
   before relying on it** — the wizard has a Test button that sends one. (A backup server you keep
   powered on all the time needs none of this: turn its "Joulenap manages this box's power" switch
-  off and it's treated as always available.)
+  off and it's treated as always available.) Some machines keep Wake-on-LAN alive only from sleep,
+  not from a full shutdown: Joulenap can [suspend them instead](#switching-an-existing-pbs-to-suspend).
 - Joulenap on the **same LAN/broadcast domain** as the backup servers (so the WoL packet reaches
   them), on a host that stays on. Wake-on-LAN is a layer-2 broadcast — it does **not** cross subnets
   or routers.
@@ -324,6 +326,27 @@ works:
 If the name still fails while your PC resolves it, check the router's **DNS rebind protection**
 (FRITZ!Box has it on by default): it drops answers that point at a private address, so add the
 ntfy hostname to its exception list.
+
+## Switching an existing PBS to suspend
+
+Joulenap powers a backup server off at the end of a run by default. On some hardware (older Mac
+minis and some network cards among them) Wake-on-LAN only works from sleep, so a powered-off box
+never wakes up again. For those, Joulenap can **suspend** the box instead.
+
+1. **Check that it wakes from sleep.** On the PBS, run `systemctl suspend`, then send a magic
+   packet (the wizard's Test button, or the ⏻ button on the dashboard). On Linux the network card
+   usually also needs `ethtool -s <iface> wol g`, made persistent, to stay armed during sleep.
+2. **Pick suspend** in **Settings → Devices → Edit** on that PBS: *When done → Suspend*. A PBS added
+   with the wizard from 1.5.0 on can pick it there instead.
+3. **Update the key line once, if the PBS was set up before 1.5.0.** Its SSH key is locked to a
+   bare `poweroff`, so it would keep powering the box off whatever Joulenap asks. When you switch to
+   suspend, the edit dialog shows a command: open the PBS **Shell** (Administration → Shell in the
+   PBS web interface), paste it and press Enter. It replaces the old Joulenap line and leaves your
+   other keys alone. A PBS set up with 1.5.0 or later already has the new line.
+
+A box that still has the old line is harmless, just not suspended: it keeps powering off, as
+before. Updating Joulenap changes nothing by itself: every existing PBS stays on power off until
+you switch it.
 
 ## Updating
 

@@ -383,6 +383,23 @@ def test_stopping_a_run_mid_wake_still_powers_the_woken_box_off(temp_config, tem
         assert step.detail_key == ReleaseOutcome.POWERED_OFF.key
 
 
+def test_a_suspended_box_says_so_in_the_timeline(temp_config, temp_db):
+    """Suspend is the same outcome as a power-off (the box is down, nothing to warn about);
+    only the step's word changes, so the history shows what actually happened."""
+    service, box = make_service()
+    service._store.config.pbss[0].power_action = "suspend"
+    enqueue(service, "r1", ok_job)
+    drain(service)
+
+    assert box.poweroffs == ["pbs1"]
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        step = next(s for s in run.steps if s.name == StepName.POWEROFF)
+        assert step.status == StepStatus.SUCCESS
+        assert step.detail_key == "suspended"
+        assert step.detail == "suspended"
+
+
 def test_stopping_a_run_mid_wake_honours_keeping_the_box_on(temp_config, temp_db):
     """The same path with the stop dialog's toggle off: the box is leased and released, but
     deliberately left running — the usual reason to stop a run is to go and work on it."""

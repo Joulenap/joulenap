@@ -15,6 +15,16 @@ class PowerError(ConnectorError):
     """SSH connection or poweroff command failed."""
 
 
+class SshPasswordRefusedError(PowerError):
+    """The PBS sshd turned down the password when installing the key.
+
+    By the time the wizard installs the key, the PBS API has already accepted this root
+    password, so a refusal here is sshd policy (``PermitRootLogin prohibit-password`` is the
+    Debian default), not a typo. Its own type so the wizard can switch to the paste-it-yourself
+    path instead of showing a dead-end error.
+    """
+
+
 class ApiError(ConnectorError):
     """A PVE/PBS API call failed.
 

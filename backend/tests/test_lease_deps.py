@@ -188,8 +188,35 @@ def test_poweroff_uses_the_devices_ssh_user_and_key(monkeypatch):
 
     lease._poweroff(make_pbs(ssh_user="backup", ssh_key_path="/data/key"))
 
-    assert built == {"host": "192.0.2.20", "user": "backup", "key_path": "/data/key"}
+    assert built == {
+        "host": "192.0.2.20",
+        "user": "backup",
+        "key_path": "/data/key",
+        "poweroff_command": "systemctl poweroff",
+    }
     assert calls == ["poweroff"]
+
+
+def test_poweroff_sends_suspend_when_the_device_asks_for_it(monkeypatch):
+    built = {}
+
+    class FakePower:
+        def __init__(self, **kwargs):
+            built.update(kwargs)
+
+        def poweroff(self):
+            pass
+
+    monkeypatch.setattr(lease, "PbsPower", FakePower)
+    lease._poweroff(make_pbs(power_action="suspend"))
+    assert built["poweroff_command"] == "systemctl suspend"
+
+
+def test_power_action_defaults_to_poweroff_and_rejects_anything_else():
+    # A config written before 1.5.0 has no power_action: it must keep powering off.
+    assert make_pbs().power_action == "poweroff"
+    with pytest.raises(ValueError):
+        make_pbs(power_action="hibernate")
 
 
 def test_poweroff_lets_the_error_out_for_the_lease_to_swallow(monkeypatch):

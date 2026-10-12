@@ -109,15 +109,18 @@ export function Dashboard({ status, refreshStatus }: DashboardProps) {
       onConfirm: (powerOff) => run(api.runRoute(route.id, !powerOff)),
     })
 
-  const openPower = (pbs: PbsDevice, online: boolean) =>
+  const openPower = (pbs: PbsDevice, online: boolean) => {
+    // The API action stays `poweroff` either way: it runs whatever the box is set to.
+    const off = pbs.power_action === 'suspend' ? 'suspend' : 'off'
     setAction({
-      title: t(online ? 'dashboard.confirm.offTitle' : 'dashboard.confirm.onTitle'),
+      title: t(online ? `dashboard.confirm.${off}Title` : 'dashboard.confirm.onTitle'),
       note: online
-        ? t('dashboard.confirm.offMsg')
+        ? t(`dashboard.confirm.${off}Msg`)
         : t('dashboard.confirm.onNote', { pbs: pbs.id }),
-      confirmLabel: t(online ? 'dashboard.confirm.offYes' : 'dashboard.confirm.onYes'),
+      confirmLabel: t(online ? `dashboard.confirm.${off}Yes` : 'dashboard.confirm.onYes'),
       onConfirm: () => run(api.pbsPower(pbs.id, online ? 'poweroff' : 'wake')),
     })
+  }
 
   const openStop = (run_: RunSummary) =>
     setAction({

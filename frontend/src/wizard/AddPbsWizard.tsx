@@ -17,7 +17,13 @@ import {
 import { WizardShell } from './WizardShell'
 import { tokenConflictMessage } from './tokenConflict'
 import { CredentialFields, ErrorText, NumField, TextField } from './fields'
-import { ManagedPowerToggle, SshKeyFields, WakeFields, usePbsSetup } from './pbsSetup'
+import {
+  ManagedPowerToggle,
+  SshKeyFields,
+  WakeFields,
+  isSshPasswordRefused,
+  usePbsSetup,
+} from './pbsSetup'
 
 /**
  * Flow B — Add a Proxmox Backup Server on its own (`design/overhaul/src/wiz2.html`).
@@ -104,12 +110,20 @@ export function AddPbsWizard({ onClose }: { onClose: () => void }) {
     }
     const key = await setup.loadKey()
     if (!key) return false
-    await api.wizardSshInstall({
-      host: draft.host.trim(),
-      user: draft.sshUser || 'root',
-      password: draft.password,
-      public_key: key.public_key,
-    })
+    try {
+      await api.wizardSshInstall({
+        host: draft.host.trim(),
+        user: draft.sshUser || 'root',
+        password: draft.password,
+        public_key: key.public_key,
+      })
+    } catch (e) {
+      if (!isSshPasswordRefused(e)) throw e
+      // Stay on this step, now showing the command to paste: the next Next goes through.
+      setDraft({ ...draft, autoInstall: false })
+      setErrors([{ key: 'wizard.err.sshPasswordRefused' }])
+      return false
+    }
     return true
   }
 

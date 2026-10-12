@@ -22,7 +22,13 @@ import {
 import { WizardShell } from './WizardShell'
 import { tokenConflictMessage } from './tokenConflict'
 import { CredentialFields, ErrorText, NumField, TextField } from './fields'
-import { ManagedPowerToggle, SshKeyFields, WakeFields, usePbsSetup } from './pbsSetup'
+import {
+  ManagedPowerToggle,
+  SshKeyFields,
+  WakeFields,
+  isSshPasswordRefused,
+  usePbsSetup,
+} from './pbsSetup'
 
 /**
  * Flow A — Add a Proxmox VE, and optionally the PBS it already backs up to
@@ -114,6 +120,8 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
   /** Fill the PBS draft from a discovered storage: everything but its credentials is known,
    *  including the fingerprint PVE already pinned. */
   function seedPbsFrom(storage: WizardStorage) {
+    // A token minted for the box picked before is not this box's token.
+    landed.current.pbsToken = null
     setPbs((d) => ({
       ...d,
       id: defaultDeviceId('pbs', pbsIds, storage.storage),
@@ -146,12 +154,12 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       setErrors(problems)
       return null
     }
-    // A retry after a half-failed save must not mint a second token on the PBS: this step is
-    // reached again whenever the *PVE* create was the thing that failed, and each pass would
-    // otherwise leave another orphan `joulenap` token behind on the box.
-    if (landed.current.pbsToken) return landed.current.pbsToken
-    let token = { id: pbs.tokenId.trim(), secret: pbs.tokenSecret }
-    if (pbs.cred === 'root') {
+    // A retry must not mint a second token on the PBS: this step is reached again whenever the
+    // *PVE* create failed, or a check below sent the user back here, and each pass would
+    // otherwise leave another orphan `joulenap` token behind on the box (or trip over the name
+    // the first one took). So a minted token is kept the moment it exists.
+    let token = landed.current.pbsToken ?? { id: pbs.tokenId.trim(), secret: pbs.tokenSecret }
+    if (!landed.current.pbsToken && pbs.cred === 'root') {
       token = await api.wizardPbsProvision({
         host: pbs.host.trim(),
         port: pbs.port,
@@ -161,6 +169,7 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
         fingerprint: pbs.fingerprint.trim(),
         replace_token: replaceToken.current.pbs,
       })
+      landed.current.pbsToken = token
     }
     if (pbs.managedPower && pbs.autoInstall) {
       if (pbs.cred !== 'root') {
@@ -173,12 +182,20 @@ export function AddPveWizard({ onClose }: { onClose: () => void }) {
       }
       const key = await setup.loadKey()
       if (!key) return null
-      await api.wizardSshInstall({
-        host: pbs.host.trim(),
-        user: pbs.sshUser || 'root',
-        password: pbs.password,
-        public_key: key.public_key,
-      })
+      try {
+        await api.wizardSshInstall({
+          host: pbs.host.trim(),
+          user: pbs.sshUser || 'root',
+          password: pbs.password,
+          public_key: key.public_key,
+        })
+      } catch (e) {
+        if (!isSshPasswordRefused(e)) throw e
+        // Stay on this step, now showing the command to paste: the next Next goes through.
+        setPbs({ ...pbs, autoInstall: false })
+        setErrors([{ key: 'wizard.err.sshPasswordRefused' }])
+        return null
+      }
     }
     landed.current.pbsToken = token
     return token
