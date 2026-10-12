@@ -5,7 +5,7 @@
 // a new device is called, which discovered storage is already registered, what gets POSTed and
 // whether the result is an orphan all live here; the two flow components only render answers.
 
-import type { PbsDevice, PveDevice, WizardStorage } from '../api/types.ts'
+import type { PbsDevice, PowerAction, PveDevice, WizardStorage } from '../api/types.ts'
 import { type DeviceError, validateDevice } from './deviceForm.ts'
 
 export type Flow = 'pve' | 'pbs'
@@ -199,6 +199,7 @@ export interface PbsDraft {
   sshKeyPath: string
   /** Install the public key over SSH with the root password, vs the user pasting it themselves. */
   autoInstall: boolean
+  powerAction: PowerAction
 }
 
 export function freshPveDraft(existing: string[]): PveDraft {
@@ -232,6 +233,7 @@ export function freshPbsDraft(existing: string[], hint = ''): PbsDraft {
     sshUser: 'root',
     sshKeyPath: '',
     autoInstall: true,
+    powerAction: 'poweroff',
   }
 }
 
@@ -277,6 +279,7 @@ export function pbsDeviceFrom(draft: PbsDraft, token: { id: string; secret: stri
     wait_timeout: 180,
     wol_retries: 2,
     poweroff_task_wait: 600,
+    power_action: managed ? draft.powerAction : 'poweroff',
     ssh_user: managed ? draft.sshUser.trim() || 'root' : 'root',
     ssh_key_path: managed ? draft.sshKeyPath : '',
     external: { first_task_wait: 900, idle_wait: 300 },

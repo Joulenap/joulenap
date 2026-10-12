@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from .. import paths
 from ..connectors import net
-from ..connectors.errors import ConnectorError, TokenExistsError
+from ..connectors.errors import ConnectorError, SshPasswordRefusedError, TokenExistsError
 from ..connectors.provision import pbs_token_name
 from ..core import wizard
 from .deps import require_auth
@@ -35,6 +35,13 @@ def _connector_call(func, **kwargs) -> Any:
         return func(**kwargs)
     except TokenExistsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SshPasswordRefusedError as exc:
+        # Still a 502, but with a code: the wizard answers it by switching to the
+        # paste-it-yourself path rather than showing the raw error as a dead end.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "ssh_password_refused", "message": str(exc)},
+        ) from exc
     except ConnectorError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 

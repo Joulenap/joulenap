@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../../api/client'
 import { ConfirmModal, type ConfirmState } from '../../components/ConfirmModal'
+import { CopyButton } from '../../components/CopyButton'
 import { useConfig } from '../../config/ConfigContext'
-import { copyToClipboard } from '../../utils/clipboard'
 
 type Dashboard = 'homepage' | 'glance' | 'homarr' | 'dashy'
 const DASHBOARDS: Dashboard[] = ['homepage', 'glance', 'homarr', 'dashy']
@@ -147,25 +147,6 @@ scrape_configs:
     scrape_interval: 60s
     static_configs:
       - targets: ["${window.location.host}"]`
-}
-
-/** Copy button that reports the outcome in its own label, as the mockup does. */
-function CopyButton({ text, small }: { text: string; small?: boolean }) {
-  const { t } = useTranslation()
-  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  return (
-    <button
-      type="button"
-      className={`btn${small ? ' btn-sm' : ''}`}
-      onClick={async () => {
-        const ok = await copyToClipboard(text)
-        setState(ok ? 'copied' : 'failed')
-        setTimeout(() => setState('idle'), ok ? 1500 : 3000)
-      }}
-    >
-      {state === 'copied' ? t(`${ns}.copied`) : state === 'failed' ? t(`${ns}.copyFailed`) : t(`${ns}.copy`)}
-    </button>
-  )
 }
 
 export function Integrations() {

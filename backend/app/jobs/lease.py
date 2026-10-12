@@ -24,7 +24,7 @@ from enum import StrEnum
 from ..config import PbsDevice
 from ..connectors import net, tls
 from ..connectors.pbs import PbsClient
-from ..connectors.power import PbsPower
+from ..connectors.power import POWER_COMMANDS, PbsPower
 from ..connectors.wol import send_magic_packet
 from ..notify.messages import LocalizedError
 
@@ -97,7 +97,12 @@ def _wait_idle(pbs: PbsDevice) -> bool:
 
 
 def _poweroff(pbs: PbsDevice) -> None:
-    PbsPower(host=pbs.host, user=pbs.ssh_user, key_path=pbs.ssh_key_path).poweroff()
+    PbsPower(
+        host=pbs.host,
+        user=pbs.ssh_user,
+        key_path=pbs.ssh_key_path,
+        poweroff_command=POWER_COMMANDS[pbs.power_action],
+    ).poweroff()
 
 
 @dataclass

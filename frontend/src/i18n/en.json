@@ -20,7 +20,10 @@
     "retry": "Retry",
     "close": "Close",
     "remove": "Remove",
-    "unsavedChanges": "Unsaved changes"
+    "unsavedChanges": "Unsaved changes",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Couldn't copy automatically. Select the text and copy it manually."
   },
   "auth": {
     "brand": "Joulenap · Scheduler PBS",
@@ -68,6 +71,7 @@
   "dashboard": {
     "powerOn": "Power on PBS",
     "powerOff": "Power off PBS",
+    "suspend": "Suspend PBS",
     "neverRun": "never run",
     "noRecentRuns": "No recent runs",
     "lastBackupTitle": "Last backup per guest",
@@ -120,6 +124,9 @@
       "offTitle": "Power off the PBS?",
       "offMsg": "The PBS will be shut down now. The scheduler will wake it automatically for the next scheduled backup.",
       "offYes": "Power off PBS",
+      "suspendTitle": "Suspend the PBS?",
+      "suspendMsg": "The PBS will be put to sleep now. The scheduler will wake it automatically for the next scheduled backup.",
+      "suspendYes": "Suspend PBS",
       "routeYes": "Run",
       "runRouteTitle": "Run route · {{name}}",
       "gcNote": "If the PBS is sleeping, it is woken before the GC.",
@@ -381,7 +388,8 @@
       "autoInstall": "Install automatically with the (transient) root credentials",
       "hostKeyWhy": "Confirm the PBS host key before the root password is sent; it is then stored in known_hosts.",
       "hostKeyTrusted": "Host key stored",
-      "manualHint": "Add the line below to /root/.ssh/authorized_keys on the PBS, then mark as installed.",
+      "manualHint": "Open the Shell of the PBS (Administration → Shell in its web interface), paste this command and press Enter. It installs the line below, replacing an older Joulenap line if there is one.",
+      "manualLine": "Or add this line to /root/.ssh/authorized_keys on the PBS yourself:",
       "scanning": "Detecting…",
       "scanHostKey": "Detect host key",
       "confirmHostKey": "Confirm & trust"
@@ -392,7 +400,7 @@
       "pbsApi": "API reachable · datastore {{datastore}} ok",
       "wake": "Wake-on-LAN armed · MAC {{mac}}",
       "sshInstalled": "SSH key installed · host key stored",
-      "sshManual": "SSH key ready — paste the line above into the PBS's authorized_keys",
+      "sshManual": "SSH key ready · run the install command in the PBS Shell if you haven't yet",
       "unmanaged": "Always-on PBS: Joulenap never wakes or powers it off",
       "linked": "PVE storages linked: {{list}}"
     },
@@ -404,6 +412,7 @@
       "tokenRequired": "Both the token ID and its secret are required.",
       "installNeedsRoot": "Installing the key automatically needs the root credentials. Switch to transient root, or turn the toggle off and paste the line yourself.",
       "hostKeyNotTrusted": "Confirm the PBS host key first — the root password is only sent over a connection whose host key you have checked.",
+      "sshPasswordRefused": "The PBS doesn't accept root password login over SSH. That is the Debian default and fine to keep. Install the key yourself instead: paste the command below into the PBS Shell, then continue.",
       "pbsUnreachable": "PBS is not reachable at that host and port. Check it is powered on and the address is correct, then try again.",
       "macNotDetected": "Couldn't auto-detect the MAC address — enter it manually.",
       "alreadyRegistered": "This address is already registered as “{{id}}”. Edit that device instead — adding it again would replace its API token and leave the original unable to connect."
@@ -475,9 +484,6 @@
       "regenerate": "Regenerate key",
       "disable": "Disable",
       "keyShownOnce": "The full key is shown only right after generation. Regenerating invalidates the previous one.",
-      "copy": "Copy",
-      "copied": "Copied",
-      "copyFailed": "Couldn't copy automatically — select the text and copy it manually.",
       "snippetHint": "Paste it into your dashboard's config, indentation intact. With routes the response is a list — one entry per route and one per backup server.",
       "dashboardLabel": "Dashboard widget",
       "regenerateConfirmTitle": "Regenerate API key?",
@@ -604,6 +610,11 @@
       "sshKey": "Key",
       "poweroffWait": "Wait for tasks before power-off (s)",
       "poweroffWaitHint": "A running PBS task is given this long to finish, so a shutdown never cuts one off. 0 powers off immediately.",
+      "powerAction": "When done",
+      "powerPoweroff": "Power off",
+      "powerSuspend": "Suspend (sleep)",
+      "powerActionHint": "Suspend is for boxes whose network card only wakes up from sleep. Try it once by hand first: run systemctl suspend on the PBS and check that Wake-on-LAN brings it back.",
+      "suspendLineWarn": "If this PBS was set up before Joulenap 1.5.0, its key still allows only a power-off. Update it once: open the PBS Shell (Administration → Shell in its web interface), paste this command and press Enter.",
       "firstTaskWait": "Wait for first task (s)",
       "firstTaskWaitHint": "How long to wait for the first task to appear after wake-up.",
       "idleWait": "Silence before power-off (s)",

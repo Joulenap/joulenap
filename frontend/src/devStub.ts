@@ -162,6 +162,7 @@ const DEVICES: DeviceLists = {
       wait_timeout: 180,
       wol_retries: 3,
       poweroff_task_wait: 600,
+      power_action: 'poweroff',
       ssh_user: 'root',
       ssh_key_path: '/app/data/id_ed25519',
       external: { first_task_wait: 900, idle_wait: 300 },
@@ -180,6 +181,7 @@ const DEVICES: DeviceLists = {
       wait_timeout: 180,
       wol_retries: 2,
       poweroff_task_wait: 600,
+      power_action: 'suspend',
       ssh_user: 'root',
       ssh_key_path: '/app/data/id_ed25519',
       external: { first_task_wait: 900, idle_wait: 300 },
@@ -824,11 +826,11 @@ function demoRoute(key: string, search: URLSearchParams, init?: RequestInit): un
     // The stub's "-stub" marker and its pending-update badge are dev affordances; a public
     // demo should look like a current, healthy install.
     case 'GET /health':
-      return { status: 'ok', version: '1.4.0' }
+      return { status: 'ok', version: '1.5.0' }
     case 'GET /update':
       return {
-        current: '1.4.0',
-        latest: '1.4.0',
+        current: '1.5.0',
+        latest: '1.5.0',
         update_available: false,
         url: 'https://github.com/Joulenap/joulenap/releases',
       }
@@ -1052,16 +1054,25 @@ const WIZARD_DETECT_MAC: { mac: string | null } = { mac: 'AA:BB:CC:DD:EE:FF' }
 
 // `created: false` — the stub always answers as if a key were already on disk, which is the
 // second-PBS case and the one whose wording ("reusing the existing key") needs looking at.
+const STUB_KEY_LINE =
+  'command="case $SSH_ORIGINAL_COMMAND in systemctl\\ poweroff|systemctl\\ suspend) ' +
+  'exec $SSH_ORIGINAL_COMMAND;; *) exit 1;; esac",no-port-forwarding,no-x11-forwarding,' +
+  'no-agent-forwarding,no-pty ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly joulenap'
+
 const WIZARD_KEYGEN: {
   public_key: string
   authorized_keys_line: string
+  install_command: string
   key_path: string
   created: boolean
 } = {
   public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly stub',
-  authorized_keys_line:
-    'command="systemctl poweroff",no-port-forwarding,no-x11-forwarding,no-agent-forwarding,' +
-    'no-pty ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly joulenap',
+  authorized_keys_line: STUB_KEY_LINE,
+  install_command:
+    '(set -e; umask 077; mkdir -p ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; ' +
+    "t=$(mktemp); { grep -vF 'AAAAC3NzaC1lZDI1NTE5AAAAIStubKeyMaterialForDevPreviewOnly' " +
+    `~/.ssh/authorized_keys || [ $? -eq 1 ]; } > "$t"; echo '${STUB_KEY_LINE}' >> "$t"; ` +
+    'cat "$t" > ~/.ssh/authorized_keys; rm -f "$t"; chmod 600 ~/.ssh/authorized_keys)',
   key_path: '/app/data/id_ed25519',
   created: false,
 }
@@ -1083,10 +1094,10 @@ const WIZARD_WOL_TEST: { sent: boolean; mac: string; broadcast: string } = {
 }
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '1.4.0-stub' },
+  'GET /health': { status: 'ok', version: '1.5.0-stub' },
   'GET /update': {
-    current: '1.4.0-stub',
-    latest: '1.4.0',
+    current: '1.5.0-stub',
+    latest: '1.5.0',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },

@@ -45,13 +45,14 @@ Joulenap fills that gap with a friendly UI: draw the routes, pick the times, pic
 
 <center><img src="assets/howitworks.png" width="500" title="Wizard"></center>
 
-Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Proxmox host needs to be modified. It talks to every PVE and PBS through their **APIs** (scoped tokens, one per device) and uses a single **SSH** command only for the power-off, which has no API.
+Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Proxmox host needs to be modified. It talks to every PVE and PBS through their **APIs** (scoped tokens, one per device) and uses a single **SSH** command only to power the backup server off (or suspend it), which has no API.
 
 ## Features
 
 - 🔀 **Routes**: any number of Proxmox hosts and backup servers, wired together explicitly — fan several PVEs into one PBS, or copy one PBS to another (**off-site sync**, pull or push)
 - ⏰ A schedule per route, with its own retention, guest selection and options — plus a global pause switch
 - 🔌 Wake-on-LAN of every backup server a route touches, with readiness wait, retries and timeout; boxes you keep always on are supported too
+- 💤 Power off or **suspend** each backup server when it's done, for machines whose network card only wakes from sleep
 - 🧵 One run at a time, the rest queued — and a box stays awake between two runs that both need it instead of being woken twice
 - 🗂️ Per-source guest selection: back up **all** guests of a host (new ones included automatically) or an explicit **include** list
 - ♻️ Retention (last/daily/weekly/monthly/yearly), plus optional Garbage Collection and verification after a route runs
@@ -65,7 +66,7 @@ Joulenap **owns the schedule** itself (internal scheduler), so nothing on the Pr
 
 ## Status
 
-**v1.4.0.** Built around routes over any number of PVE and PBS devices: backup, PBS→PBS sync,
+**v1.5.0.** Built around routes over any number of PVE and PBS devices: backup, PBS→PBS sync,
 external-schedule watching and verification, driven by a run queue and a per-server power lease
 so a box is woken once and slept once no matter how many routes need it. Packaged as a Docker
 image, with transport hardening (per-device PBS TLS pinning + SSH host-key verification) and auth
@@ -175,7 +176,7 @@ buy an evening, not a place to stay — please open an issue for whatever sent y
 Joulenap can trigger backups and power machines on/off, so treat it as privileged:
 
 - Use **scoped API tokens** for each PVE and each PBS, not root passwords — the exact privileges each one needs are listed in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#permissions-cheat-sheet).
-- The SSH key to a backup server should be dedicated and, ideally, restricted to the power-off command — the wizard offers exactly such a line.
+- The SSH key to a backup server should be dedicated and restricted to the power-off and suspend commands: the wizard installs exactly such a line.
 - **A PBS API connection is TLS-pinned** to that device's stored certificate fingerprint, so a swapped/MITM cert is rejected; a legitimately renewed cert is accepted after you re-run that device's connect step in the wizard. The wizard always captures the fingerprint — but a device left without one is **not pinned and not validated**, so keep it set.
 - **A PBS SSH host key is verified** against `data/known_hosts`. The wizard's automatic key-install path confirms it with you first; a server added straight from Settings → Devices, or one where you installed the key yourself, is trusted on first use and recorded, with a warning in the log. Details in [`docs/CONFIG-WIZARD.md`](docs/CONFIG-WIZARD.md#security).
 - Keep the UI on your LAN/VPN and behind its login. Don't expose it to the internet.

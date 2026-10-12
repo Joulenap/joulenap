@@ -5,6 +5,40 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0]
+
+### Added
+
+- A backup server can now be **suspended** instead of powered off when Joulenap is done with it.
+  Some machines, older Mac minis among them, keep Wake-on-LAN alive only from sleep, so once
+  powered off they never wake up again. The choice is a new "When done" setting on each backup
+  server, in the Add PBS wizard and in Settings → Devices, and the dashboard's power button and
+  the run timeline follow it. It defaults to power off, and a config written by an earlier
+  version has no such setting, so every existing server keeps powering off until you switch it.
+  Try suspend by hand once before relying on it: the install guide has a short section on it.
+  Thanks to @bouton for the idea (#75).
+
+### Changed
+
+- The SSH key Joulenap installs on a backup server is now restricted to exactly
+  `systemctl poweroff` and `systemctl suspend`, so switching between the two needs nothing on
+  the server. A key installed by an earlier version still allows only the power-off: it keeps
+  working, and switching that server to suspend shows a one-line command to update it once.
+- Installing the key, by hand or automatically, now replaces a line an earlier version left for
+  the same key instead of adding a second one, and leaves every other key in the file alone.
+- Frontend dependencies updated, Vite to 8.3.4 among them. It brings `source-map-js` 1.2.2
+  (GHSA-68fv-2mgg-jv7q), a build-time dependency that never ships in the image.
+
+### Fixed
+
+- The wizards no longer stop at a raw error when the backup server refuses root password login
+  over SSH, which is the Debian default. They switch to installing the key by hand and show a
+  ready-made command to paste into the server's web Shell, with a copy button, so there is no
+  need to enable password login just for the setup.
+- The Add PVE wizard no longer creates a second token on the backup server when a check on the
+  power-off step (root credentials missing, host key not yet confirmed) sends you back and you
+  try again. The retry used to fail because the first token had already taken the name.
+
 ## [1.4.0]
 
 ### Added

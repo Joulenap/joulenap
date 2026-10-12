@@ -242,10 +242,14 @@ export interface PbsDevice {
   wait_timeout: number
   wol_retries: number
   poweroff_task_wait: number
+  // What the SSH command does. The key's forced command on the PBS accepts both.
+  power_action: PowerAction
   ssh_user: string
   ssh_key_path: string
   external: PbsExternalConfig
 }
+
+export type PowerAction = 'poweroff' | 'suspend'
 
 export type DeviceKind = 'pves' | 'pbss'
 

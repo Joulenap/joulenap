@@ -36,6 +36,7 @@ const pbs = (id: string, over: Partial<PbsDevice> = {}): PbsDevice => ({
   wait_timeout: 180,
   wol_retries: 2,
   poweroff_task_wait: 600,
+  power_action: 'poweroff',
   ssh_user: 'root',
   ssh_key_path: '/app/data/id_ed25519',
   external: { first_task_wait: 900, idle_wait: 300 },
@@ -228,7 +229,15 @@ test('a managed PBS keeps the wake and power-off fields', () => {
   const device = pbsDeviceFrom(draft, { id: 'tok', secret: 'sec' })
   assert.equal(device.mac, 'AA:BB:CC:DD:EE:FF')
   assert.equal(device.ssh_key_path, '/app/data/id_ed25519')
+  assert.equal(device.power_action, 'poweroff') // the default, as for every upgraded box
   assert.deepEqual(validateFinalDevice(device, []), [])
+})
+
+test('the power action chosen in the wizard is saved, unless Joulenap does not manage power', () => {
+  const draft = { ...freshPbsDraft([]), host: 'pbs.lan', powerAction: 'suspend' as const }
+  assert.equal(pbsDeviceFrom(draft, { id: 't', secret: 's' }).power_action, 'suspend')
+  const unmanaged = pbsDeviceFrom({ ...draft, managedPower: false }, { id: 't', secret: 's' })
+  assert.equal(unmanaged.power_action, 'poweroff')
 })
 
 test('a managed PBS with no MAC is refused before the POST', () => {

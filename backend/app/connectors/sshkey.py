@@ -11,21 +11,30 @@ import os
 import stat
 from pathlib import Path
 
+import paramiko
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from . import ssh
-from .errors import PowerError
-from .power import POWEROFF_COMMAND
+from .errors import PowerError, SshPasswordRefusedError
+from .power import POWER_COMMANDS
 
 _KEY_COMMENT = "joulenap"
 
-# The one thing Joulenap needs from PBS over SSH is a shutdown, so the key is installed
-# with a forced command: the PBS runs *only* this, ignoring whatever the client asks for,
-# and the extra restrictions strip port/agent/x11 forwarding and PTY allocation. So even if
-# the private key leaked, it could do nothing on the PBS but power it off. Surfaced in the
-# wizard as the trust story; also used for the manual-paste authorized_keys line.
-_FORCED_COMMAND = POWEROFF_COMMAND
+# All Joulenap needs from PBS over SSH is to power it off or suspend it, so the key is
+# installed with a forced command: sshd runs *only* this, whatever the client asks for. It
+# runs the client's command when it is exactly one of POWER_COMMANDS and refuses anything
+# else, so the per-device poweroff/suspend choice needs no change on the PBS. The extra
+# restrictions strip port/agent/x11 forwarding and PTY allocation. So even a leaked private
+# key can do nothing on the PBS but power it off or suspend it. Deliberately no hibernate and
+# no user-defined command: the second would undo the whole lockdown.
+#
+# No double quotes inside (sshd only unescapes \"), and the space in each pattern is
+# backslash-escaped for the shell, so the line needs no further quoting anywhere.
+_ALLOWED = "|".join(c.replace(" ", "\\ ") for c in POWER_COMMANDS.values())
+_FORCED_COMMAND = (
+    f"case $SSH_ORIGINAL_COMMAND in {_ALLOWED}) exec $SSH_ORIGINAL_COMMAND;; *) exit 1;; esac"
+)
 _KEY_OPTIONS = (
     f'command="{_FORCED_COMMAND}",no-port-forwarding,'
     "no-x11-forwarding,no-agent-forwarding,no-pty"
@@ -33,10 +42,43 @@ _KEY_OPTIONS = (
 
 
 def authorized_keys_line(public_key: str) -> str:
-    """The restricted ``authorized_keys`` line for ``public_key`` — the forced-poweroff
+    """The restricted ``authorized_keys`` line for ``public_key``: the forced-command
     options prefixed to the key. This is what gets installed on the PBS (and what the
     manual-setup UI tells the user to paste), so both paths get the same lockdown."""
     return f"{_KEY_OPTIONS} {public_key.strip()}"
+
+
+def _sq(s: str) -> str:
+    """``s`` single-quoted for a POSIX shell."""
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def install_command(public_key: str) -> str:
+    """The one-line shell command that installs ``public_key`` on the PBS.
+
+    Run by the wizard over SSH, and shown to the user to paste into the PBS web Shell when
+    sshd won't take the root password. It *replaces* any line already holding this key
+    rather than appending: a line installed before 1.5.0 forces a bare poweroff, and sshd
+    uses the first line that matches the key, so an appended one would never take effect.
+    Every other key in the file is kept.
+
+    Written back with ``cat >`` rather than ``mv`` so a symlinked authorized_keys (a PBS
+    sharing its host with PVE links it into /etc/pve) stays a symlink. grep's exit 1 means
+    "no other lines", which is fine; anything above that aborts before the file is touched.
+    The subshell keeps ``set -e`` from leaking into the interactive shell it is pasted into.
+    """
+    key = public_key.strip()
+    parts = key.split()
+    if len(parts) < 2:
+        raise PowerError("Not an OpenSSH public key")
+    blob = parts[1]  # the base64 key itself: matches our line whatever options precede it
+    return (
+        "(set -e; umask 077; mkdir -p ~/.ssh; chmod 700 ~/.ssh; touch ~/.ssh/authorized_keys; "
+        "t=$(mktemp); "
+        f'{{ grep -vF {_sq(blob)} ~/.ssh/authorized_keys || [ $? -eq 1 ]; }} > "$t"; '
+        f'echo {_sq(authorized_keys_line(key))} >> "$t"; '
+        'cat "$t" > ~/.ssh/authorized_keys; rm -f "$t"; chmod 600 ~/.ssh/authorized_keys)'
+    )
 
 
 def public_key_from(key_path: Path, comment: str = _KEY_COMMENT) -> str:
@@ -87,9 +129,11 @@ def install_public_key(
     port: int = 22,
     timeout: float = 10.0,
 ) -> None:
-    """Append ``public_key`` (as the restricted, forced-poweroff line) to ``user``'s
-    authorized_keys on ``host`` over a password-authenticated SSH session (idempotent).
-    Raises :class:`PowerError`."""
+    """Install ``public_key`` (as the restricted, forced-command line) into ``user``'s
+    authorized_keys on ``host`` over a password-authenticated SSH session, replacing any
+    line that already holds this key (idempotent). Raises :class:`SshPasswordRefusedError`
+    when sshd turns the password down, :class:`PowerError` for anything else."""
+    command = install_command(public_key)
     client = ssh.strict_client()
     try:
         client.connect(
@@ -101,20 +145,15 @@ def install_public_key(
             look_for_keys=False,
             allow_agent=False,
         )
+    except paramiko.AuthenticationException as exc:
+        client.close()
+        raise SshPasswordRefusedError(
+            f"{user}@{host} refused password login over SSH: {exc}"
+        ) from exc
     except Exception as exc:
         client.close()
         raise PowerError(f"SSH connection to {user}@{host} failed: {exc}") from exc
 
-    # Install the restricted line (forced poweroff command + no forwarding), not the bare
-    # key, so the installed access can only shut the PBS down. Single-quote for the remote
-    # shell; append only if not already present.
-    safe_key = authorized_keys_line(public_key).replace("'", "'\\''")
-    command = (
-        "set -e; mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys "
-        "&& chmod 600 ~/.ssh/authorized_keys "
-        f"&& grep -qxF '{safe_key}' ~/.ssh/authorized_keys "
-        f"|| echo '{safe_key}' >> ~/.ssh/authorized_keys"
-    )
     try:
         _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
         exit_status = stdout.channel.recv_exit_status()

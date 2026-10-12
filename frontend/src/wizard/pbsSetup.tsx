@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../api/client'
+import type { PowerAction } from '../api/types'
+import { CopyButton } from '../components/CopyButton'
 import { Toggle } from '../components/Toggle'
 import { useWolInterfaces } from '../hooks/useWolInterfaces'
 import type { PbsDraft } from '../utils/wizardFlow'
@@ -18,10 +20,21 @@ import { Field, type ErrorFor, TextField } from './fields'
 export interface KeyInfo {
   public_key: string
   authorized_keys_line: string
+  /** The one-liner that installs `authorized_keys_line` (replacing an older Joulenap line):
+   *  what the auto-install runs over SSH, and what the user pastes into the PBS Shell. */
+  install_command: string
   key_path: string
   /** False when the wizard reused the key that was already on disk — which is what adding a
    *  second PBS does, and what keeps the first one's power-off working. */
   created: boolean
+}
+
+/** True when sshd turned the root password down while installing the key. The PBS API took
+ *  that same password a step earlier, so this is sshd policy (the Debian default), and the
+ *  answer is the paste-it-yourself path rather than a dead-end error. */
+export function isSshPasswordRefused(e: unknown): boolean {
+  const code = e instanceof ApiError ? (e.raw as { code?: unknown } | undefined)?.code : null
+  return code === 'ssh_password_refused'
 }
 
 interface HostKey {
@@ -238,76 +251,124 @@ export function WakeFields({ setup, errorFor }: { setup: PbsSetup; errorFor: Err
   )
 }
 
+/** Power off or suspend: the one choice the SSH command makes. Shared with `DeviceModal`. */
+export function PowerActionField({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: PowerAction
+  onChange: (v: PowerAction) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <Field
+      id={id}
+      label={t('settings.devices.powerAction')}
+      help={t('settings.devices.powerActionHint')}
+    >
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value as PowerAction)}>
+        <option value="poweroff">{t('settings.devices.powerPoweroff')}</option>
+        <option value="suspend">{t('settings.devices.powerSuspend')}</option>
+      </select>
+    </Field>
+  )
+}
+
+/** The command to paste into the PBS Shell, with its copy button. Shared with `DeviceModal`. */
+export function InstallCommand({ command }: { command: string }) {
+  return (
+    <>
+      <div className="keyblock">{command}</div>
+      <div className="inline-row">
+        <CopyButton text={command} small />
+      </div>
+    </>
+  )
+}
+
 /** The power-off key: what will be installed, how, and the host key that gets pinned first. */
 export function SshKeyFields({ setup }: { setup: PbsSetup }) {
   const { t } = useTranslation()
   const { draft, patch, key, hostKey, hostTrusted, busy } = setup
 
   return (
-    <div className="field">
-      <span className="lab">{t('wizard.ssh.title')}</span>
-      {/* Only in auto-install mode. In manual mode the block below shows the *restricted*
-          authorized_keys line, and rendering the bare public key above it invited copying
-          the wrong one — which installs this key as an unrestricted root key. One keypair
-          serves every managed box, so that single mistake plus a leaked private key is root
-          on that PBS, exactly what the forced-command line exists to prevent. */}
-      {draft.autoInstall && (
-        <div className="keyblock">{key ? key.public_key : t('common.loading')}</div>
-      )}
-      {/* Reusing the existing key is the *correct* outcome for a second PBS — say so, or it
-          looks like the wizard failed to make a fresh one. */}
-      {key && !key.created && <span className="help">{t('wizard.ssh.reused')}</span>}
+    <>
+      <PowerActionField
+        id="wiz-power-action"
+        value={draft.powerAction}
+        onChange={(v) => patch({ powerAction: v })}
+      />
+      <div className="field">
+        <span className="lab">{t('wizard.ssh.title')}</span>
+        {/* Only in auto-install mode. In manual mode the block below shows the *restricted*
+            authorized_keys line, and rendering the bare public key above it invited copying
+            the wrong one, which installs this key as an unrestricted root key. One keypair
+            serves every managed box, so that single mistake plus a leaked private key is root
+            on that PBS, exactly what the forced-command line exists to prevent. */}
+        {draft.autoInstall && (
+          <div className="keyblock">{key ? key.public_key : t('common.loading')}</div>
+        )}
+        {/* Reusing the existing key is the *correct* outcome for a second PBS: say so, or it
+            looks like the wizard failed to make a fresh one. */}
+        {key && !key.created && <span className="help">{t('wizard.ssh.reused')}</span>}
 
-      <label className="tglrow" style={{ marginTop: 4 }}>
-        <Toggle
-          on={draft.autoInstall}
-          onClick={() => patch({ autoInstall: !draft.autoInstall })}
-          size="sm"
-        />
-        <span>{t('wizard.ssh.autoInstall')}</span>
-      </label>
+        <label className="tglrow" style={{ marginTop: 4 }}>
+          <Toggle
+            on={draft.autoInstall}
+            onClick={() => patch({ autoInstall: !draft.autoInstall })}
+            size="sm"
+          />
+          <span>{t('wizard.ssh.autoInstall')}</span>
+        </label>
 
-      {draft.autoInstall ? (
-        <>
-          <span className="help">{t('wizard.ssh.hostKeyWhy')}</span>
-          <div className="inline-row" style={{ alignItems: 'center', gap: 10 }}>
-            <button
-              type="button"
-              className="btn"
-              disabled={!draft.host || busy !== null}
-              onClick={() => void setup.scanHostKey()}
-            >
-              {t(
-                busy === 'hostkey'
-                  ? 'wizard.ssh.scanning'
-                  : 'wizard.ssh.scanHostKey',
-              )}
-            </button>
-            {hostKey && !hostTrusted && (
+        {draft.autoInstall ? (
+          <>
+            <span className="help">{t('wizard.ssh.hostKeyWhy')}</span>
+            <div className="inline-row" style={{ alignItems: 'center', gap: 10 }}>
               <button
                 type="button"
-                className="btn btn-accent"
-                disabled={busy !== null}
-                onClick={() => void setup.trustHostKey()}
+                className="btn"
+                disabled={!draft.host || busy !== null}
+                onClick={() => void setup.scanHostKey()}
               >
-                {t('wizard.ssh.confirmHostKey')}
+                {t(
+                  busy === 'hostkey'
+                    ? 'wizard.ssh.scanning'
+                    : 'wizard.ssh.scanHostKey',
+                )}
               </button>
-            )}
-            {hostTrusted && <span className="okline">✓ {t('wizard.ssh.hostKeyTrusted')}</span>}
-          </div>
-          {hostKey && (
-            <div className="keyblock">
-              {hostKey.key_type} · {hostKey.fingerprint}
+              {hostKey && !hostTrusted && (
+                <button
+                  type="button"
+                  className="btn btn-accent"
+                  disabled={busy !== null}
+                  onClick={() => void setup.trustHostKey()}
+                >
+                  {t('wizard.ssh.confirmHostKey')}
+                </button>
+              )}
+              {hostTrusted && <span className="okline">✓ {t('wizard.ssh.hostKeyTrusted')}</span>}
             </div>
-          )}
-        </>
-      ) : (
-        <>
-          <span className="help">{t('wizard.ssh.manualHint')}</span>
-          <div className="keyblock">{key?.authorized_keys_line ?? ''}</div>
-        </>
-      )}
-    </div>
+            {hostKey && (
+              <div className="keyblock">
+                {hostKey.key_type} · {hostKey.fingerprint}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {/* The command first: it is one paste in the PBS web Shell, which needs no SSH
+                password login (refusing it is exactly how people end up here). */}
+            <span className="help">{t('wizard.ssh.manualHint')}</span>
+            {key ? <InstallCommand command={key.install_command} /> : <div className="keyblock" />}
+            <span className="help">{t('wizard.ssh.manualLine')}</span>
+            <div className="keyblock">{key?.authorized_keys_line ?? ''}</div>
+          </>
+        )}
+      </div>
+    </>
   )
 }
 
