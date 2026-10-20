@@ -45,7 +45,7 @@ The per-guest last-backup cache is filled by listing the target datastore's snap
 
 A route's `schedule` is a time plus seven weekday flags. `schedule.cron` is an escape hatch for anything richer (day-of-month, steps, ranges) and **wins over `time`/`days`** when set; the UI then shows it read-only. Weekdays are numbered as in cron (0 and 7 are Sunday). Unlike classic cron, when both day-of-month and day-of-week are restricted **both must match**: `0 4 1 * 1` runs only on a 1st that falls on a Monday. For "either", use two routes.
 
-`options` carries the per-route knobs: `mode` / `bwlimit` / `min_free_percent` (backup only, they are vzdump's), `gc` and `verify_after` (run on the target after the data lands), and `reverify_days` for a verify route. `retention` is vzdump's `prune-backups`, per route.
+`options` carries the per-route knobs: `mode` / `change_detection_mode` / `bwlimit` / `min_free_percent` (backup only, they are vzdump's; `change_detection_mode` is sent only when not `default`), `gc` and `verify_after` (run on the target after the data lands), and `reverify_days` for a verify route. `retention` is vzdump's `prune-backups`, per route.
 
 Cross-references are validated at load: ids are unique, every referenced device exists, a **backup** route's target must appear in every source PVE's `storages` map, and an **external** route's target must have `managed_power: true`.
 

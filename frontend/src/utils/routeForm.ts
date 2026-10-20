@@ -40,6 +40,7 @@ export const DEFAULT_RETENTION: RetentionConfig = {
 
 export const DEFAULT_OPTIONS: RouteOptions = {
   mode: 'snapshot',
+  change_detection_mode: 'default',
   bwlimit: 0,
   min_free_percent: 0,
   gc: true,

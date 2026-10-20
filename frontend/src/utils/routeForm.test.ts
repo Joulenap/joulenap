@@ -491,6 +491,7 @@ test('anything else falls back to the message the client already built', () => {
 test('a new route runs GC, does not verify, and does not remove vanished snapshots', () => {
   assert.deepEqual(DEFAULT_OPTIONS, {
     mode: 'snapshot',
+    change_detection_mode: 'default', // never sent, so the node's vzdump.conf decides
     bwlimit: 0,
     min_free_percent: 0, // the free-space preflight is opt-in
     gc: true, // reclaiming space is the point of an automated backup

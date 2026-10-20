@@ -5,6 +5,25 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0]
+
+### Added
+
+- Backup routes can now choose the **PBS change detection mode** for containers, in the route's
+  Advanced section: Default, Legacy, Data or Metadata (PVE 8.2 or later). With Metadata, the
+  backup server compares each container against its previous snapshot and skips the files that
+  did not change without reading them, so a container whose files barely change backs up in
+  seconds instead of minutes. Virtual machines are not affected. Default sends nothing, so the
+  node's own setting still applies and older PVE releases keep working; every existing route
+  stays on Default. The first backup after switching to Data or Metadata writes a new archive
+  format: it reads and uploads every container in full once, and the old snapshots keep their
+  data on the datastore until they age out of retention. Thanks to @iMord0 for the idea (#80).
+
+### Changed
+
+- Frontend dependencies updated: i18next 26.4.4, react-i18next 17.0.16, @codemirror/language
+  6.13.1, @codemirror/view 6.43.14.
+
 ## [1.5.0]
 
 ### Added
@@ -855,7 +874,9 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/Joulenap/joulenap/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/Joulenap/joulenap/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/Joulenap/joulenap/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/Joulenap/joulenap/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/Joulenap/joulenap/compare/v1.3.0...v1.3.1
