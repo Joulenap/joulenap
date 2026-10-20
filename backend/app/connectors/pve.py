@@ -156,6 +156,7 @@ class PveClient:
         mode: str = "snapshot",
         prune_backups: str | None = None,
         bwlimit: int = 0,
+        change_detection_mode: str = "default",
         node: str = "",
     ) -> str:
         """Start a vzdump backup; returns the task UPID to poll with :meth:`wait_task`.
@@ -184,6 +185,9 @@ class PveClient:
             params["prune-backups"] = prune_backups
         if bwlimit:
             params["bwlimit"] = bwlimit
+        # PVE < 8.2 rejects the key outright, so "default" leaves it out.
+        if change_detection_mode != "default":
+            params["pbs-change-detection-mode"] = change_detection_mode
         return self._api.request("POST", f"/nodes/{node or self.node}/vzdump", data=params)
 
     # --- tasks ---------------------------------------------------------------

@@ -26,6 +26,7 @@ const route = (over: Partial<Route>): Route => ({
   sync_direction: 'pull',
   options: {
     mode: 'snapshot',
+    change_detection_mode: 'default',
     bwlimit: 0,
     min_free_percent: 0,
     gc: true,

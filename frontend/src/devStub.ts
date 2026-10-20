@@ -93,6 +93,7 @@ const AMBER = '#e0a92b'
 const RETENTION = { keep_last: 0, keep_daily: 7, keep_weekly: 4, keep_monthly: 6, keep_yearly: 0 }
 const OPTIONS = {
   mode: 'snapshot' as const,
+  change_detection_mode: 'default' as const,
   bwlimit: 0,
   min_free_percent: 10,
   gc: true,

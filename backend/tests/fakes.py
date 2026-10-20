@@ -75,6 +75,7 @@ class FakePve:
         mode="snapshot",
         prune_backups=None,
         bwlimit=0,
+        change_detection_mode="default",
         node="",
     ) -> str:
         self.vzdump_args = {
@@ -85,6 +86,7 @@ class FakePve:
             "mode": mode,
             "prune_backups": prune_backups,
             "bwlimit": bwlimit,
+            "change_detection_mode": change_detection_mode,
             "node": node,
         }
         self.vzdump_calls.append(self.vzdump_args)

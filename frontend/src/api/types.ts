@@ -284,6 +284,9 @@ export interface RouteSchedule {
 export interface RouteOptions {
   // Inert on non-backup kinds, but still accepted, so one payload shape covers every route.
   mode: 'snapshot' | 'suspend' | 'stop'
+  // Backup routes only: vzdump's pbs-change-detection-mode (containers, PVE 8.2+).
+  // 'default' is never sent, so the node's vzdump.conf decides.
+  change_detection_mode: 'default' | 'legacy' | 'data' | 'metadata'
   bwlimit: number // KiB/s, 0 = unlimited
   min_free_percent: number
   gc: boolean

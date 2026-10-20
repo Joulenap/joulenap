@@ -12,7 +12,15 @@ import time
 from fakes import FakeBox, FakePbs, FakePve, UnreachablePve, make_deps
 from sqlalchemy import select
 
-from app.config import Config, PbsDevice, PveDevice, Route, RouteGuests, RouteSource
+from app.config import (
+    Config,
+    PbsDevice,
+    PveDevice,
+    Route,
+    RouteGuests,
+    RouteOptions,
+    RouteSource,
+)
 from app.connectors.pve import Guest
 from app.core.config_store import ConfigStore
 from app.db import session_scope
@@ -135,6 +143,16 @@ def test_all_mode_uses_vzdumps_own_all_flag(temp_db):
     # Not the vmids we just listed: PVE keeps deciding, so a guest excluded from backup on
     # the host is still honoured.
     assert all(c["all_guests"] is True and c["vmids"] is None for c in alpha.vzdump_calls)
+
+
+def test_change_detection_mode_reaches_every_vzdump(temp_db):
+    config = _config(options=RouteOptions(change_detection_mode="metadata"))
+    deps, alpha, beta, _pbs = _deps()
+
+    _run(config, deps)
+
+    calls = alpha.vzdump_calls + beta.vzdump_calls
+    assert {c["change_detection_mode"] for c in calls} == {"metadata"}
 
 
 def test_include_mode_groups_the_selection_per_node(temp_db):

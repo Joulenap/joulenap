@@ -148,6 +148,19 @@ def test_vzdump_all_guests():
     make_client(handler).vzdump(storage="pbs", all_guests=True)
     assert captured["body"]["all"] == ["1"]
     assert "vmid" not in captured["body"]
+    # Left out by default: PVE < 8.2 rejects the key, and vzdump.conf may set it already.
+    assert "pbs-change-detection-mode" not in captured["body"]
+
+
+def test_vzdump_sends_change_detection_mode_when_set():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = parse_qs(request.content.decode())
+        return json_data("UPID:pve:0003:vzdump::")
+
+    make_client(handler).vzdump(storage="pbs", all_guests=True, change_detection_mode="metadata")
+    assert captured["body"]["pbs-change-detection-mode"] == ["metadata"]
 
 
 def test_wait_task_success():

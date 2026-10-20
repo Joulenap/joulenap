@@ -57,6 +57,12 @@ const MODE_OPTIONS = [
   ['suspend', 'dashboard.routeModal.modeSuspend'],
   ['stop', 'dashboard.routeModal.modeStop'],
 ] as const
+const CHANGE_DETECTION_OPTIONS = [
+  ['default', 'dashboard.routeModal.changeDetectionDefault'],
+  ['legacy', 'dashboard.routeModal.changeDetectionLegacy'],
+  ['data', 'dashboard.routeModal.changeDetectionData'],
+  ['metadata', 'dashboard.routeModal.changeDetectionMetadata'],
+] as const
 
 interface RouteModalProps {
   /** `null` opens the create form. */
@@ -721,6 +727,30 @@ export function RouteModal({ route, routes, pves, pbss, groups, onClose, onSaved
                         </option>
                       ))}
                     </select>
+                  </div>
+                  )}
+                  {kind === 'backup' && (
+                  <div className="field">
+                    <label htmlFor="rm-cdm">{t('dashboard.routeModal.changeDetection')}</label>
+                    <select
+                      id="rm-cdm"
+                      value={draft.options.change_detection_mode}
+                      onChange={(e) =>
+                        patch({
+                          options: {
+                            ...draft.options,
+                            change_detection_mode: e.target.value as RouteDraft['options']['change_detection_mode'],
+                          },
+                        })
+                      }
+                    >
+                      {CHANGE_DETECTION_OPTIONS.map(([value, labelKey]) => (
+                        <option key={value} value={value}>
+                          {t(labelKey)}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="help">{t('dashboard.routeModal.changeDetectionHelp')}</span>
                   </div>
                   )}
                   <div className="field">

@@ -319,6 +319,7 @@ def _route_backup_source(
                     mode=route.options.mode,
                     prune_backups=prune,
                     bwlimit=route.options.bwlimit,
+                    change_detection_mode=route.options.change_detection_mode,
                 )
                 upids.append(upid)
                 step.detail = ", ".join(upids)

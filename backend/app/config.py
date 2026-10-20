@@ -253,6 +253,11 @@ class RouteOptions(_Base):
     reverify_days to verify routes; the last two to sync routes."""
 
     mode: Literal["snapshot", "suspend", "stop"] = "snapshot"
+    # Backup routes only. vzdump's ``pbs-change-detection-mode`` (PVE 8.2+), which only
+    # containers use: "metadata" reuses the previous snapshot's metadata archive to skip
+    # unchanged files without reading them. "default" is never sent, so the node's
+    # /etc/vzdump.conf (or PVE's legacy behaviour) decides and older PVE keeps working.
+    change_detection_mode: Literal["default", "legacy", "data", "metadata"] = "default"
     # KiB/s, 0 = unlimited. vzdump's --bwlimit on a backup route, and the sync job's
     # rate-in/rate-out on a sync route (see connectors.pbs.ensure_sync_job): one knob, because
     # "how fast may this route move data" is the same question either way.

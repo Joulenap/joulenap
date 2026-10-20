@@ -152,6 +152,8 @@ routes: []
 #       keep_yearly: 0
 #     options:
 #       mode: snapshot        # snapshot | suspend | stop
+#       change_detection_mode: default  # default | legacy | data | metadata (containers
+#                             # only, PVE 8.2+). default = not sent, the node decides.
 #       bwlimit: 0            # KiB/s, 0 = unlimited
 #       min_free_percent: 0   # abort if the target datastore has less than this % free (0 = disabled)
 #       gc: true              # garbage-collect the target once this route is done. Two routes
