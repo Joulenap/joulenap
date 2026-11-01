@@ -68,9 +68,12 @@ The release records a `poweroff` step whose detail says what actually happened:
 | `suspended` | the same, on a box whose `power_action` is `suspend` |
 | `left on: still needed by another run` | a queued run needs this box |
 | `left on: Joulenap does not manage this box's power` | `managed_power: false` |
-| `left powered on` | the run failed (left up for inspection), the user asked to keep it on, or the box was busy |
+| `left on for inspection: the run failed` | the run failed, so the box stays up to be looked at |
+| `left on as requested for this run` | a manual run or a stop dialog asked to keep it on |
+| `left on: a task was still running on it` | still busy after `poweroff_task_wait` |
+| `left on: the power-off or suspend command failed` | the SSH command failed |
 
-Only the last of those is worth a warning; the other three are the correct outcome and are recorded as *skipped*, not failed.
+The last four are worth a warning; `still needed` and `does not manage` are correct and need none. All six are recorded as *skipped*, not failed, and the activity log closes the step with the same reason.
 
 `managed_power: false` describes an always-on PBS. The lease is the single place that knows: acquiring degrades to a reachability check and releasing does nothing.
 
@@ -84,7 +87,7 @@ Because the key is the machine, a run holding one datastore of a box reports eve
 - **external** — wake, then watch: poll up to `external.first_task_wait` for the *first* task to appear, then wait for `external.idle_wait` seconds of continuous silence, restarting that countdown whenever a new task shows up (so a chained backup → prune → GC → sync is not cut short). Joulenap starts nothing itself. A wake where no task ever appears still powers the box back off and says so, so a misfiring PVE/PBS schedule is noticed instead of silently missed.
 - **verify** — wake, verify (`reverify_days` keeps it incremental; `0` re-verifies everything), power off.
 
-Every PVE/PBS task a route waits on is tailed (its log feeds the live Task-log panel) and watched with a **no-progress timeout**: the wait fails only after 6 hours *without a new log line*, never on total duration — a first full sync to an S3 datastore can take a day and keep talking; a task hung in silence still fails, as `timeout 6h` rather than an unknown status. Cancelling a run stops the remote task; a run whose worker died with the history row still open (an unwritable database at the wrong moment) is closed out by the next **Stop run** on it, not only by a restart.
+Every PVE/PBS task a route waits on is tailed (its log feeds the live Task-log panel) and watched with a **no-progress timeout**: the wait fails only after 6 hours *without a new log line*, never on total duration: a first full sync to an S3 datastore can take a day and keep talking; a task hung in silence still fails, as `timeout 6h` rather than an unknown status. For PBS tasks the limit is the device's `task_silence_timeout`, because slow hardware can keep a verify quiet for hours on one large disk. Cancelling a run stops the remote task; a run whose worker died with the history row still open (an unwritable database at the wrong moment) is closed out by the next **Stop run** on it, not only by a restart.
 - **ad-hoc GC / verify on a box** — the homepage's per-PBS buttons. The same steps, so the history reads identically; only the route column is empty.
 
 All steps are recorded in the DB and exposed on the run itself via `/api/runs/{id}` (the activity log — one line per event, not per step — is `/api/logs`); while a run is in progress the raw PVE/PBS task output is tailed into `/api/tasklog` for the UI's task-log panel.

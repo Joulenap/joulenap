@@ -282,6 +282,20 @@ def test_wait_task_success_and_failure():
         make_client(fail).wait_task("UPID:x", poll_interval=0, sleep=lambda _s: None)
 
 
+def test_wait_task_uses_the_clients_task_silence_timeout():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/log"):
+            return json_data([])
+        return json_data({"status": "running"})
+
+    def no_second_poll(_seconds):
+        raise AssertionError("the 6h default was used instead of the client's limit")
+
+    client = make_client(handler, task_silence_timeout=0)
+    with pytest.raises(TaskError, match="produced no output for 0s"):
+        client.wait_task("UPID:x", sleep=no_second_poll, on_log=lambda _lines: None)
+
+
 def test_start_verify_incremental_sends_window():
     seen = {}
 

@@ -162,6 +162,7 @@ const DEVICES: DeviceLists = {
       wol_broadcast_iface: 'eth0',
       wait_timeout: 180,
       wol_retries: 3,
+      task_silence_timeout: 21600,
       poweroff_task_wait: 600,
       power_action: 'poweroff',
       ssh_user: 'root',
@@ -181,6 +182,7 @@ const DEVICES: DeviceLists = {
       wol_broadcast_iface: 'eth0',
       wait_timeout: 180,
       wol_retries: 2,
+      task_silence_timeout: 21600,
       poweroff_task_wait: 600,
       power_action: 'suspend',
       ssh_user: 'root',
@@ -651,7 +653,7 @@ const RUN_DETAIL: Record<number, RunDetail> = {
       { name: 'wait:pbs-01', status: 'success', started_at: '2026-07-08T22:30:00Z', finished_at: '2026-07-08T22:30:43Z', detail: 'reachable after 41s' },
       { name: 'backup:pve-alpha', status: 'failure', started_at: '2026-07-08T22:30:43Z', finished_at: '2026-07-08T22:30:46Z', detail: 'vzdump exit 255' },
       { name: 'backup:pve-beta', status: 'success', started_at: '2026-07-08T22:30:46Z', finished_at: '2026-07-08T22:30:46Z', detail: '5 guests' },
-      { name: 'poweroff:pbs-01', status: 'skipped', started_at: '2026-07-08T22:30:46Z', finished_at: '2026-07-08T22:30:46Z', detail: 'left powered on' },
+      { name: 'poweroff:pbs-01', status: 'skipped', started_at: '2026-07-08T22:30:46Z', finished_at: '2026-07-08T22:30:46Z', detail: 'left on for inspection: the run failed' },
     ],
     logs: [
       { id: 91, run_id: 44, ts: '2026-07-08T22:30:43Z', level: 'INFO', message: 'Starting vzdump for 12 guests' },
@@ -827,11 +829,11 @@ function demoRoute(key: string, search: URLSearchParams, init?: RequestInit): un
     // The stub's "-stub" marker and its pending-update badge are dev affordances; a public
     // demo should look like a current, healthy install.
     case 'GET /health':
-      return { status: 'ok', version: '1.6.0' }
+      return { status: 'ok', version: '1.6.1' }
     case 'GET /update':
       return {
-        current: '1.6.0',
-        latest: '1.6.0',
+        current: '1.6.1',
+        latest: '1.6.1',
         update_available: false,
         url: 'https://github.com/Joulenap/joulenap/releases',
       }
@@ -1095,10 +1097,10 @@ const WIZARD_WOL_TEST: { sent: boolean; mac: string; broadcast: string } = {
 }
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '1.6.0-stub' },
+  'GET /health': { status: 'ok', version: '1.6.1-stub' },
   'GET /update': {
-    current: '1.6.0-stub',
-    latest: '1.6.0',
+    current: '1.6.1-stub',
+    latest: '1.6.1',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },

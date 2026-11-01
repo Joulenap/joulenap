@@ -29,6 +29,15 @@ def test_connect_pbs_pins_when_fingerprint_present(monkeypatch):
     assert recorded["verify"] is sentinel  # the pinned context is actually wired to verify=
 
 
+def test_connect_pbs_passes_the_devices_task_silence_timeout():
+    device = PbsDevice(
+        id="pbs-01", host="pbs.local", managed_power=False, task_silence_timeout=86400
+    )
+    client = deps._connect_pbs(device)
+    client.close()
+    assert client.task_silence_timeout == 86400
+
+
 def test_connect_pbs_no_fingerprint_leaves_verify_false(monkeypatch):
     device = PbsDevice(id="pbs-01", host="pbs.local", managed_power=False)  # fingerprint empty
 

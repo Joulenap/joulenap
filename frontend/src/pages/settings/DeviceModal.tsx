@@ -383,6 +383,17 @@ export function DeviceModal({ kind, device, onClose, onSaved }: DeviceModalProps
               </>
             )}
 
+            <span className="msec">{t(`${ns}.secTasks`)}</span>
+            <div className="frow">
+              {num(
+                'task_silence_timeout',
+                t(`${ns}.taskSilence`),
+                pbs.task_silence_timeout,
+                (n) => patch({ task_silence_timeout: n }),
+                { help: t(`${ns}.taskSilenceHint`) },
+              )}
+            </div>
+
             {/* The three power sections describe how to wake and sleep the box; with managed
                 power off Joulenap does neither, so they are omitted rather than shown inert. */}
             {pbs.managed_power && (

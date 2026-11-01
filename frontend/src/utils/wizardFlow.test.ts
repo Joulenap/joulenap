@@ -35,6 +35,7 @@ const pbs = (id: string, over: Partial<PbsDevice> = {}): PbsDevice => ({
   wol_broadcast_iface: '',
   wait_timeout: 180,
   wol_retries: 2,
+  task_silence_timeout: 21600,
   poweroff_task_wait: 600,
   power_action: 'poweroff',
   ssh_user: 'root',

@@ -467,7 +467,7 @@ class JobService:
         left_on: list[str] = []
         for device in devices:
             if recorder is None:
-                if self.lease.release(device, power_off=power_off) is ReleaseOutcome.LEFT_ON:
+                if self.lease.release(device, power_off=power_off).costs_power:
                     left_on.append(device.id)
                 continue
             with recorder.step(StepName.POWEROFF, label=device.id if multi else None) as step:
@@ -478,13 +478,21 @@ class JobService:
                     suspended = device.power_action == "suspend"
                     set_detail(step, "suspended" if suspended else outcome.key)
                     continue
-                set_detail(step, outcome.key)
+                # The lease only knows this run asked to keep the box on, not why.
+                chosen = outcome is ReleaseOutcome.LEFT_ON and not power_off
+                set_detail(step, self._left_on_reason(item) if chosen else outcome.key)
                 # Not a failure: leaving the box on is the *correct* outcome after a failed
                 # run, for an unmanaged device, or while another route still needs it — the
-                # detail says which. Only LEFT_ON costs the user power with nobody left to
-                # fix it, so only that one earns the notification's warning.
+                # detail says which. Only some outcomes cost the user power with nobody left
+                # to fix it, so only those earn the notification's warning.
                 step.status = StepStatus.SKIPPED
-                if outcome is ReleaseOutcome.LEFT_ON:
+                # A skipped step logs nothing on its way out, which left "poweroff: started"
+                # as the last word in the activity log (#88).
+                recorder.log(
+                    LogLevel.WARN if outcome.costs_power else LogLevel.INFO,
+                    f"{step.name}: skipped ({step.detail})",
+                )
+                if outcome.costs_power:
                     left_on.append(device.id)
         return left_on
 
@@ -510,6 +518,12 @@ class JobService:
         if self._cancel.is_set():
             return self._cancel_power_off
         return succeeded
+
+    def _left_on_reason(self, item: QueuedRun) -> str:
+        """Why :meth:`_power_off_policy` said no, as a ``_DETAILS`` key."""
+        if not item.power_off or self._cancel.is_set():
+            return "left_on_by_request"
+        return "left_on_run_failed"
 
     # --- history pruning -----------------------------------------------------
 

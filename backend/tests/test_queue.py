@@ -419,7 +419,44 @@ def test_stopping_a_run_mid_wake_honours_keeping_the_box_on(temp_config, temp_db
     with session_scope() as session:
         run = session.scalars(select(Run)).one()
         step = next(s for s in run.steps if s.name == StepName.POWEROFF)
-        assert step.detail_key == ReleaseOutcome.LEFT_ON.key
+        assert step.detail_key == "left_on_by_request"
+
+
+def poweroff_step_and_log(status=RunStatus.FAILURE, *, box=None, power_off=True):
+    """Run r1 to ``status``: the POWEROFF step's detail key, and what the activity log says."""
+    service, _box = make_service(box)
+    enqueue(service, "r1", notifying_job(status), trigger=RunTrigger.MANUAL, power_off=power_off)
+    drain(service)
+    with session_scope() as session:
+        run = session.scalars(select(Run)).one()
+        step = next(s for s in run.steps if s.name == StepName.POWEROFF)
+        return step.detail_key, [line.message for line in run.logs]
+
+
+def test_the_timeline_says_why_a_box_was_left_on(temp_config, temp_db):
+    # #88: a bare "left powered on" sent the user looking for a cause elsewhere.
+    assert poweroff_step_and_log()[0] == "left_on_run_failed"
+
+
+def test_keeping_the_box_on_by_choice_is_not_blamed_on_a_failure(temp_config, temp_db):
+    key, _ = poweroff_step_and_log(power_off=False)
+    assert key == "left_on_by_request"
+
+
+def test_a_box_that_could_not_go_down_says_what_stopped_it(temp_config, temp_db):
+    key, _ = poweroff_step_and_log(RunStatus.SUCCESS, box=FakeBox(idle=False))
+    assert key == ReleaseOutcome.BUSY.key
+
+
+def test_the_power_off_failure_is_named(temp_config, temp_db):
+    box = FakeBox(poweroff_error=RuntimeError("ssh refused"))
+    key, _ = poweroff_step_and_log(RunStatus.SUCCESS, box=box)
+    assert key == ReleaseOutcome.POWEROFF_FAILED.key
+
+
+def test_the_activity_log_closes_a_skipped_power_off_with_its_reason(temp_config, temp_db):
+    _, messages = poweroff_step_and_log()
+    assert "poweroff: skipped (left on for inspection: the run failed)" in messages
 
 
 # --- what the run reports as left powered on ---------------------------------
@@ -469,6 +506,16 @@ def test_a_failed_run_reports_the_box_it_left_awake(temp_config, temp_db):
 
     assert box.poweroffs == []  # left up for inspection
     assert seen[0].left_on == ["pbs1"]
+
+
+def test_a_busy_box_and_a_failed_power_off_still_warn(temp_config, temp_db):
+    # Both gained their own detail, and neither may lose the notification's energy warning.
+    for box in (FakeBox(idle=False), FakeBox(poweroff_error=RuntimeError("ssh refused"))):
+        service, _box = make_service(box)
+        seen = sent(service)
+        enqueue(service, "r1", notifying_job(), trigger=RunTrigger.SCHEDULED)
+        drain(service)
+        assert seen[0].left_on == ["pbs1"]
 
 
 def test_a_sync_route_reports_only_the_box_that_stayed_up(temp_config, temp_db):
