@@ -5,6 +5,27 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1]
+
+### Fixed
+
+- A long verify no longer fails just because its log goes quiet. A PBS task used to fail after 6
+  hours without a new log line, and that limit could not be changed, so on slower hardware the
+  verify of one large disk was reported as failed while PBS went on to finish it without errors,
+  and the backup server was left on. Each PBS now has a **Task silence limit** in the device
+  settings (`task_silence_timeout`, in seconds, minimum 60), which applies to verify, GC, prune and
+  sync. The default stays at 6 hours, so nothing changes until you raise it. Thanks to @CajonCP4
+  for the report and the logs (#88).
+- The power-off step now says why a backup server was left on: the run failed, it was kept on by
+  request, a task was still running, or the power-off or suspend command failed. A skipped power-off
+  also closes with its reason in the activity log, instead of stopping at "poweroff: started". Runs
+  already in the history keep the old text.
+
+### Changed
+
+- Frontend dependencies updated: react and react-dom 19.3.1, i18next 26.5.11, react-i18next 17.1.9,
+  @codemirror/view 6.43.15, vite 8.3.5.
+
 ## [1.6.0]
 
 ### Added
@@ -874,7 +895,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/Joulenap/joulenap/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/Joulenap/joulenap/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Joulenap/joulenap/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/Joulenap/joulenap/compare/v1.3.2...v1.4.0
