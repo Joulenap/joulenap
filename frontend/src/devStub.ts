@@ -653,7 +653,7 @@ const RUN_DETAIL: Record<number, RunDetail> = {
       { name: 'wait:pbs-01', status: 'success', started_at: '2026-07-08T22:30:00Z', finished_at: '2026-07-08T22:30:43Z', detail: 'reachable after 41s' },
       { name: 'backup:pve-alpha', status: 'failure', started_at: '2026-07-08T22:30:43Z', finished_at: '2026-07-08T22:30:46Z', detail: 'vzdump exit 255' },
       { name: 'backup:pve-beta', status: 'success', started_at: '2026-07-08T22:30:46Z', finished_at: '2026-07-08T22:30:46Z', detail: '5 guests' },
-      { name: 'poweroff:pbs-01', status: 'skipped', started_at: '2026-07-08T22:30:46Z', finished_at: '2026-07-08T22:30:46Z', detail: 'left powered on' },
+      { name: 'poweroff:pbs-01', status: 'skipped', started_at: '2026-07-08T22:30:46Z', finished_at: '2026-07-08T22:30:46Z', detail: 'left on for inspection: the run failed' },
     ],
     logs: [
       { id: 91, run_id: 44, ts: '2026-07-08T22:30:43Z', level: 'INFO', message: 'Starting vzdump for 12 guests' },

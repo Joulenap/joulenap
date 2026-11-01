@@ -214,7 +214,7 @@ def test_a_busy_pbs_is_not_interrupted():
     pbs = make_pbs()
 
     lease.acquire(pbs)
-    assert lease.release(pbs) is ReleaseOutcome.LEFT_ON
+    assert lease.release(pbs) is ReleaseOutcome.BUSY
     assert box.poweroffs == []
 
 
@@ -262,7 +262,7 @@ def test_a_failed_power_off_is_swallowed():
     pbs = make_pbs()
 
     lease.acquire(pbs)
-    assert lease.release(pbs) is ReleaseOutcome.LEFT_ON
+    assert lease.release(pbs) is ReleaseOutcome.POWEROFF_FAILED
     assert box.poweroffs == []
 
 

@@ -68,9 +68,12 @@ The release records a `poweroff` step whose detail says what actually happened:
 | `suspended` | the same, on a box whose `power_action` is `suspend` |
 | `left on: still needed by another run` | a queued run needs this box |
 | `left on: Joulenap does not manage this box's power` | `managed_power: false` |
-| `left powered on` | the run failed (left up for inspection), the user asked to keep it on, or the box was busy |
+| `left on for inspection: the run failed` | the run failed, so the box stays up to be looked at |
+| `left on as requested for this run` | a manual run or a stop dialog asked to keep it on |
+| `left on: a task was still running on it` | still busy after `poweroff_task_wait` |
+| `left on: the power-off or suspend command failed` | the SSH command failed |
 
-Only the last of those is worth a warning; the other three are the correct outcome and are recorded as *skipped*, not failed.
+The last four are worth a warning; `still needed` and `does not manage` are correct and need none. All six are recorded as *skipped*, not failed, and the activity log closes the step with the same reason.
 
 `managed_power: false` describes an always-on PBS. The lease is the single place that knows: acquiring degrades to a reachability check and releasing does nothing.
 

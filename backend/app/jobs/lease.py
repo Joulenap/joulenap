@@ -38,8 +38,8 @@ class PbsUnreachableError(LocalizedError):
 class ReleaseOutcome(StrEnum):
     """What became of a box when a run dropped its lease.
 
-    Only :attr:`LEFT_ON` means "still burning power, and nothing is going to fix that" —
-    the others are boxes Joulenap either put to sleep, never powers, or will power off at
+    :attr:`costs_power` marks "still burning power, and nothing is going to fix that": the
+    others are boxes Joulenap either put to sleep, never powers, or will power off at
     the end of the run that still holds them. The value doubles as the POWEROFF step's
     English detail in the run timeline; :attr:`key` is the same fact as a translatable
     code, which is what the step actually stores alongside it.
@@ -48,7 +48,17 @@ class ReleaseOutcome(StrEnum):
     POWERED_OFF = "powered off"
     STILL_NEEDED = "left on: still needed by another run"
     UNMANAGED = "left on: Joulenap does not manage this box's power"
+    BUSY = "left on: a task was still running on it"
+    POWEROFF_FAILED = "left on: the power-off or suspend command failed"
     LEFT_ON = "left powered on"
+
+    @property
+    def costs_power(self) -> bool:
+        return self in (
+            ReleaseOutcome.BUSY,
+            ReleaseOutcome.POWEROFF_FAILED,
+            ReleaseOutcome.LEFT_ON,
+        )
 
     @property
     def key(self) -> str:
@@ -245,9 +255,11 @@ class PowerLease:
         conditions the caller cannot see: no other holder, and no *queued* route that still
         needs this box.
 
-        Four outcomes rather than a bool because only two of them cost the user power, and
-        the lease is the only place that can tell them apart — a caller re-deriving "was
-        that a real 'left on'?" would have to duplicate every condition below.
+        Outcomes rather than a bool because only some of them cost the user power, and the
+        lease is the only place that can tell them apart: a caller re-deriving "was that a
+        real 'left on'?" would have to duplicate every condition below. ``LEFT_ON`` is what
+        ``power_off=False`` returns (the caller knows why it asked) and what a bug returns;
+        a box that could not go down says which of the two reasons stopped it.
         """
         key = lease_key(pbs)
         with self._lock:
@@ -276,9 +288,7 @@ class PowerLease:
             return ReleaseOutcome.STILL_NEEDED
         if not power_off:
             return ReleaseOutcome.LEFT_ON
-        # False here is a busy box we declined to cut off, or a poweroff that errored — both
-        # leave it burning power.
-        return ReleaseOutcome.POWERED_OFF if self._power_off(pbs) else ReleaseOutcome.LEFT_ON
+        return self._power_off(pbs)
 
     # --- internals -----------------------------------------------------------
 
@@ -344,7 +354,7 @@ class PowerLease:
             timeout=pbs.wait_timeout,
         )
 
-    def _power_off(self, pbs: PbsDevice) -> bool:
+    def _power_off(self, pbs: PbsDevice) -> ReleaseOutcome:
         """Wait for the box to go idle, then shut it down. Never raises: the run's data is
         already safe, so a failed power-off costs energy, not correctness."""
         if pbs.poweroff_task_wait > 0:
@@ -360,11 +370,11 @@ class PowerLease:
                     pbs.id,
                     pbs.poweroff_task_wait,
                 )
-                return False
+                return ReleaseOutcome.BUSY
         try:
             self._deps.poweroff(pbs)
         except Exception as exc:  # noqa: BLE001 — best effort, see the docstring
             log.warning("Power-off of PBS %s failed, box left on: %s", pbs.id, exc)
-            return False
+            return ReleaseOutcome.POWEROFF_FAILED
         log.info("Powered off PBS %s", pbs.id)
-        return True
+        return ReleaseOutcome.POWERED_OFF
