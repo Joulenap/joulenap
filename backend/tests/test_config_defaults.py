@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from app import paths
 from app.config import (
@@ -77,6 +78,12 @@ def test_power_management_defaults_match_what_the_docs_promise():
     assert pbs.managed_power is True
     assert (pbs.wait_timeout, pbs.wol_retries, pbs.poweroff_task_wait) == (180, 2, 600)
     assert pbs.port == 8007
+
+
+def test_task_silence_timeout_defaults_to_six_hours_and_has_a_floor():
+    assert PbsDevice(id="pbs-01", managed_power=False).task_silence_timeout == 21600
+    with pytest.raises(ValidationError):
+        PbsDevice(id="pbs-01", managed_power=False, task_silence_timeout=59)
 
 
 def test_route_options_default_to_gc_on_and_verify_off():

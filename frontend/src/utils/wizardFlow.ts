@@ -278,6 +278,7 @@ export function pbsDeviceFrom(draft: PbsDraft, token: { id: string; secret: stri
     wol_broadcast_iface: managed ? draft.wolIface.trim() : '',
     wait_timeout: 180,
     wol_retries: 2,
+    task_silence_timeout: 21600,
     poweroff_task_wait: 600,
     power_action: managed ? draft.powerAction : 'poweroff',
     ssh_user: managed ? draft.sshUser.trim() || 'root' : 'root',

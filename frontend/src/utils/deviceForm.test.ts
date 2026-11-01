@@ -39,6 +39,7 @@ const pbs = (id: string, over: Partial<PbsDevice> = {}): PbsDevice => ({
   wol_broadcast_iface: '',
   wait_timeout: 180,
   wol_retries: 2,
+  task_silence_timeout: 21600,
   poweroff_task_wait: 600,
   power_action: 'poweroff',
   ssh_user: 'root',
@@ -226,6 +227,14 @@ test('validateDevice checks the shared fields for both kinds', () => {
     validateDevice(pbs('pbs-01', { datastore: '' })).map((e) => e.field),
     ['datastore'],
   )
+  // Not tied to managed power: an always-on box runs the same tasks.
+  assert.deepEqual(
+    validateDevice(pbs('pbs-01', { managed_power: false, task_silence_timeout: 59 })).map(
+      (e) => e.field,
+    ),
+    ['task_silence_timeout'],
+  )
+  assert.deepEqual(validateDevice(pbs('pbs-01', { task_silence_timeout: 60 })), [])
 })
 
 test('deviceSaveErrors pins a 422 on its field and a whole-config error on the banner', () => {

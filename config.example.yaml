@@ -93,6 +93,7 @@ pbss: []
 #     # the same machine gets its own instead of replacing this one.
 #     api_token_id: "root@pam!joulenap-backup"
 #     api_token_secret: ""
+#     task_silence_timeout: 21600       # fail a verify/GC/prune/sync after N s with no new task-log line (minimum 60)
 #     # Set to false for an always-on PBS (a VM, or a cloud-hosted one): Joulenap then only
 #     # schedules routes onto it and never touches its power, so everything below is unused.
 #     managed_power: true

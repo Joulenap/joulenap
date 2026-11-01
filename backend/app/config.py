@@ -157,6 +157,9 @@ class PbsDevice(_Base):
     fingerprint: str = ""
     api_token_id: str = ""
     api_token_secret: str = ""
+    # Fail a verify/GC/prune/sync after this many seconds without a new task-log line. Slow
+    # hardware can keep a task quiet for hours on one large disk (#88).
+    task_silence_timeout: int = Field(default=6 * 3600, ge=60)
     # False = an always-on PBS (a VM, or a cloud-hosted one): Joulenap schedules routes
     # against it but never sends WoL and never powers it off, so mac/wol/ssh go unused.
     managed_power: bool = True

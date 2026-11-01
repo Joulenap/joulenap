@@ -47,6 +47,7 @@ def _connect_pbs(pbs: PbsDevice) -> PbsClient:
         token_secret=pbs.api_token_secret,
         port=pbs.port,
         verify=verify,
+        task_silence_timeout=pbs.task_silence_timeout,
     )
 
 

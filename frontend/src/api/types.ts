@@ -235,6 +235,8 @@ export interface PbsDevice {
   fingerprint: string
   api_token_id: string
   api_token_secret: string
+  // Seconds a PBS task may go without a new log line before the run fails it.
+  task_silence_timeout: number
   // false = an always-on box: no WoL, no SSH power-off, and no ⏻ button.
   managed_power: boolean
   mac: string

@@ -167,6 +167,9 @@ export function validateDevice(device: PveDevice | PbsDevice): DeviceError[] {
   if (!device.datastore.trim()) {
     errors.push({ field: 'datastore', key: 'settings.devices.errDatastore' })
   }
+  if (device.task_silence_timeout < 60) {
+    errors.push({ field: 'task_silence_timeout', key: 'settings.devices.errTaskSilence' })
+  }
   if (device.managed_power && device.host) {
     // Same three fields, same order, same reason as the pydantic validator: without them
     // Joulenap has no way to wake the box or put it back to sleep.

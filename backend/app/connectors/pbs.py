@@ -70,9 +70,11 @@ class PbsClient:
         verify: bool = False,
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
+        task_silence_timeout: float = 6 * 3600,
     ):
         self.datastore = datastore
         self.node = node
+        self.task_silence_timeout = task_silence_timeout
         self._api = ProxmoxApiClient(
             base_url=f"https://{host}:{port}/api2/json",
             auth_header=f"PBSAPIToken={token_id}:{token_secret}",
@@ -388,7 +390,7 @@ class PbsClient:
         self,
         upid: str,
         poll_interval: float = 5.0,
-        timeout: float = 6 * 3600,
+        timeout: float | None = None,
         sleep: Callable[[float], None] = time.sleep,
         *,
         on_log: Callable[[list[LogLine]], None] | None = None,
@@ -400,11 +402,13 @@ class PbsClient:
         Pass ``on_log`` to also tail the task log — each new batch of ``(line_no, text)``
         pairs is handed to it as the task runs. ``should_cancel`` makes the wait
         interruptible (raises ``TaskCancelled``), and ``on_error`` is called once when the
-        box stops answering, before the grace window; see :func:`poll_task`.
+        box stops answering, before the grace window; see :func:`poll_task`. ``timeout``
+        defaults to this box's ``task_silence_timeout``.
         """
         log_fn = (lambda start: self.task_log(upid, start)) if on_log else None
         return poll_task(
-            self.task_status, upid, poll_interval, timeout, sleep,
+            self.task_status, upid, poll_interval,
+            self.task_silence_timeout if timeout is None else timeout, sleep,
             log_fn=log_fn, on_lines=on_log, should_cancel=should_cancel, on_error=on_error,
         )
 
