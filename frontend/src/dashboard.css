@@ -217,6 +217,15 @@
   color: var(--jn-text-dim);
   margin-top: 2px;
 }
+/* Node names under a cluster's summary (#94): one line, the rest in the tooltip. */
+.device-nodes {
+  font-size: 11.5px;
+  color: var(--jn-text-faint);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .device-state {
   display: flex;
   align-items: center;

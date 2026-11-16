@@ -184,7 +184,12 @@ export function Devices({ status }: { status: StatusResponse | null }) {
         <div className="dev-meta">
           {!meta.unknown && (
             <>
-              {meta.badge === 'cluster' && `${t(`${ns}.nodes`, { count: meta.nodes })} · `}
+              {meta.badge === 'cluster' && (
+                <span title={meta.nodeNames.join(', ')}>
+                  {t(`${ns}.nodes`, { count: meta.nodes })}
+                </span>
+              )}
+              {meta.badge === 'cluster' && ' · '}
               {t(`${ns}.guests`, { count: meta.guests })} ·{' '}
             </>
           )}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useTranslation } from 'react-i18next'
 import type { PbsDevice, PveDevice, Route, StatusResponse } from '../../api/types'
 import { fmtBytesTB } from '../../utils/format'
-import type { PveGuests } from '../../utils/guestPanel'
+import { pveNodeNames, type PveGuests } from '../../utils/guestPanel'
 import {
   pbsNodeId,
   pveNodeId,
@@ -248,9 +248,10 @@ function PveCard({
     .find((r) => r && routeUsesPve(r, pve.id))
 
   // Cluster or standalone is not in the config (M01: nodes are discovered at runtime), so
-  // it is read off the guest listing — the same call the guest panel already makes. Falls
-  // back to the host when that PVE could not be listed.
-  const nodes = guests && !guests.error ? new Set(guests.guests.map((g) => g.node)).size : 0
+  // it is read off the node list fetched with the guests. Falls back to the host when that
+  // PVE could not be listed.
+  const nodeNames = guests && !guests.error ? pveNodeNames(guests) : []
+  const nodes = nodeNames.length
   const sub = nodes
     ? nodes > 1
       ? t('dashboard.pveCluster', { nodes, count: guests?.guests.length ?? 0 })
@@ -266,6 +267,11 @@ function PveCard({
         <span className="device-name">{pve.id}</span>
       </div>
       <div className="device-host mono">{sub}</div>
+      {nodes > 1 && (
+        <div className="device-nodes mono" title={nodeNames.join(', ')}>
+          {nodeNames.join(', ')}
+        </div>
+      )}
       <div className="device-state">
         <span className={`dot ${online ? 'on' : 'off'}${backingUp ? ' pulse' : ''}`} />
         <span className={online ? 'state-on' : 'state-off'}>

@@ -1199,6 +1199,18 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (body === undefined && key === 'GET /guests') {
     body = GUESTS[search.get('pve') ?? ''] ?? []
   }
+  // pve-alpha has a third node holding no guests (the wizard fixture lists it too), so the
+  // tile shows a node the guest listing alone would miss (#94).
+  if (body === undefined && key === 'GET /nodes') {
+    const pve = search.get('pve') ?? ''
+    body =
+      pve === 'pve-alpha'
+        ? WIZARD_PVE_CONNECT.nodes
+        : [...new Set((GUESTS[pve] ?? []).map((g) => g.node))].map((node) => ({
+            node,
+            status: 'online',
+          }))
+  }
   if (body === undefined && key === 'GET /tasklog') {
     const run = search.get('run')
     body = run

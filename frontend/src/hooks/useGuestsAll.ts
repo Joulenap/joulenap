@@ -33,7 +33,16 @@ export function useGuestsAll(pves: PveDevice[]) {
       const next = await Promise.all(
         list.map(async (pve): Promise<PveGuests> => {
           try {
-            return { pve, guests: await api.guests(pve) }
+            // The node list is a nicety on top of the guests: if only it fails, the card
+            // falls back to the nodes the guests sit on rather than erroring the group.
+            const [guests, nodes] = await Promise.all([
+              api.guests(pve),
+              api.nodes(pve).then(
+                (rows) => rows.map((n) => n.node),
+                () => undefined,
+              ),
+            ])
+            return { pve, guests, nodes }
           } catch {
             return { pve, guests: [], error: true }
           }

@@ -11,7 +11,7 @@
 
 import type { ApiError } from '../api/client'
 import type { PbsDevice, PveDevice, Route } from '../api/types'
-import type { PveGuests } from './guestPanel'
+import { pveNodeNames, type PveGuests } from './guestPanel.ts'
 
 // --- tabs ---------------------------------------------------------------------
 
@@ -87,6 +87,7 @@ export interface PveCardMeta {
   badge: 'cluster' | 'standalone'
   host: string
   nodes: number
+  nodeNames: string[]
   guests: number
   /** The guest listing failed, so node/guest counts are unknown and must not be shown. */
   unknown: boolean
@@ -103,13 +104,15 @@ export interface PveCardMeta {
 export function pveCardMeta(pve: PveDevice, group?: PveGuests): PveCardMeta {
   const host = `${pve.host}:${pve.port}`
   if (!group || group.error) {
-    return { badge: 'standalone', host, nodes: 0, guests: 0, unknown: true }
+    return { badge: 'standalone', host, nodes: 0, nodeNames: [], guests: 0, unknown: true }
   }
-  const nodes = new Set(group.guests.map((g) => g.node)).size
+  const nodeNames = pveNodeNames(group)
+  const nodes = nodeNames.length
   return {
     badge: nodes > 1 ? 'cluster' : 'standalone',
     host,
     nodes,
+    nodeNames,
     guests: group.guests.length,
     unknown: false,
   }

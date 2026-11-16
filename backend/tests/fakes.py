@@ -24,6 +24,9 @@ class UnreachablePve:
     def list_cluster_guests(self):
         raise ConnectorError("connection refused")
 
+    def list_nodes(self):
+        raise ConnectorError("connection refused")
+
     def list_pbs_storages(self):
         raise ConnectorError("connection refused")
 
@@ -37,8 +40,11 @@ class FakePve:
         pbs_storages: list[dict] | None = None,
         fail_exit_status: str = "job errors",
         fail_nodes: set[str] | None = None,
+        nodes: list[dict] | None = None,
     ):
         self.guests = guests or []
+        # Raw /nodes rows; defaults to the nodes the guests sit on.
+        self.nodes = nodes
         self.fail_task = fail_task
         # Fail only the tasks running on these cluster nodes (the UPID names the node).
         self.fail_nodes = fail_nodes or set()
@@ -61,6 +67,11 @@ class FakePve:
 
     def list_cluster_guests(self) -> list[Guest]:
         return self.guests
+
+    def list_nodes(self) -> list[dict]:
+        if self.nodes is not None:
+            return self.nodes
+        return [{"node": n, "status": "online"} for n in sorted({g.node for g in self.guests})]
 
     def list_pbs_storages(self) -> list[dict]:
         return self.pbs_storages

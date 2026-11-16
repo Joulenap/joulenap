@@ -161,11 +161,26 @@ test('a PVE is a cluster only when its guests span more than one node', () => {
     badge: 'cluster',
     host: '192.168.1.10:8006',
     nodes: 2,
+    nodeNames: ['alpha-1', 'alpha-2'],
     guests: 3,
     unknown: false,
   })
   assert.equal(pveCardMeta(pve('pve-beta'), single).badge, 'standalone')
   assert.equal(pveCardMeta(pve('pve-beta'), single).nodes, 1)
+})
+
+test('a node holding no guests still counts (#94)', () => {
+  // Four nodes, guests on three: the node list wins over the guests' nodes.
+  const group: PveGuests = {
+    pve: 'pve-alpha',
+    guests: [guest(100, 'a'), guest(101, 'b'), guest(102, 'c')],
+    nodes: ['a', 'b', 'c', 'd'],
+  }
+  const meta = pveCardMeta(pve('pve-alpha'), group)
+  assert.equal(meta.nodes, 4)
+  assert.deepEqual(meta.nodeNames, ['a', 'b', 'c', 'd'])
+  // Without the node list (that call failed) it falls back to the guests' nodes.
+  assert.equal(pveCardMeta(pve('pve-alpha'), { ...group, nodes: undefined }).nodes, 3)
 })
 
 test('an unlisted or unreachable PVE reports unknown, not "standalone, 0 guests"', () => {

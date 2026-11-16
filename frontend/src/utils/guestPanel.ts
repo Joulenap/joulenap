@@ -11,6 +11,16 @@ export interface PveGuests {
   guests: GuestInfo[]
   /** Set when this PVE could not be listed; the group renders one error row instead. */
   error?: boolean
+  /** Every cluster node, guests or not, sorted. Unset when the node listing failed. */
+  nodes?: string[]
+}
+
+/**
+ * The PVE's node names: the real node list when it came back, otherwise the nodes its
+ * guests sit on (which misses a node with no guests, issue #94, but beats nothing).
+ */
+export function pveNodeNames(group: PveGuests): string[] {
+  return group.nodes ?? [...new Set(group.guests.map((g) => g.node))].sort()
 }
 
 /**
