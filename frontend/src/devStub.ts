@@ -829,11 +829,11 @@ function demoRoute(key: string, search: URLSearchParams, init?: RequestInit): un
     // The stub's "-stub" marker and its pending-update badge are dev affordances; a public
     // demo should look like a current, healthy install.
     case 'GET /health':
-      return { status: 'ok', version: '1.6.1' }
+      return { status: 'ok', version: '1.7.0' }
     case 'GET /update':
       return {
-        current: '1.6.1',
-        latest: '1.6.1',
+        current: '1.7.0',
+        latest: '1.7.0',
         update_available: false,
         url: 'https://github.com/Joulenap/joulenap/releases',
       }
@@ -1097,10 +1097,10 @@ const WIZARD_WOL_TEST: { sent: boolean; mac: string; broadcast: string } = {
 }
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '1.6.1-stub' },
+  'GET /health': { status: 'ok', version: '1.7.0-stub' },
   'GET /update': {
-    current: '1.6.1-stub',
-    latest: '1.6.1',
+    current: '1.7.0-stub',
+    latest: '1.7.0',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },
