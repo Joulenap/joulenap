@@ -464,6 +464,37 @@ def test_guests_pve_unreachable_returns_502(app_ctx):
     assert client.get("/api/guests?pve=pve-alpha").status_code == 502
 
 
+def test_nodes_include_a_node_without_guests(app_ctx):
+    # Issue #94: a node holding no guests (or only templates) used to vanish from the count.
+    client, app = app_ctx
+    _inject(
+        app,
+        pves={
+            "pve-alpha": FakePve(
+                guests=[Guest(vmid=100, name="ct", type="lxc", status="running", node="n1")],
+                nodes=[
+                    {"node": "n2", "status": "online"},
+                    {"node": "n1", "status": "online"},
+                    {"node": "n3", "status": "offline"},
+                ],
+            )
+        },
+    )
+    assert client.get("/api/nodes?pve=pve-alpha").json() == [
+        {"node": "n1", "status": "online"},
+        {"node": "n2", "status": "online"},
+        {"node": "n3", "status": "offline"},
+    ]
+
+
+def test_nodes_require_a_known_reachable_pve(app_ctx):
+    client, app = app_ctx
+    assert client.get("/api/nodes").status_code == 422
+    assert client.get("/api/nodes?pve=nope").status_code == 404
+    _inject(app, pves={"pve-alpha": UnreachablePve()})
+    assert client.get("/api/nodes?pve=pve-alpha").status_code == 502
+
+
 # --- stopping a run ----------------------------------------------------------
 
 

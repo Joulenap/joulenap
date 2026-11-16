@@ -137,6 +137,11 @@ export interface GuestInfo {
   pbs_ids: string[]
 }
 
+export interface NodeInfo {
+  node: string
+  status: string // online | offline | unknown
+}
+
 // --- dashboard (frozen public contract, also read by Homepage/Homarr/Dashy/Glance) ---------
 
 export interface DashboardRoute {

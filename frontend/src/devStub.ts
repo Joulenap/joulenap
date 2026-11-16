@@ -829,11 +829,11 @@ function demoRoute(key: string, search: URLSearchParams, init?: RequestInit): un
     // The stub's "-stub" marker and its pending-update badge are dev affordances; a public
     // demo should look like a current, healthy install.
     case 'GET /health':
-      return { status: 'ok', version: '1.6.1' }
+      return { status: 'ok', version: '1.7.0' }
     case 'GET /update':
       return {
-        current: '1.6.1',
-        latest: '1.6.1',
+        current: '1.7.0',
+        latest: '1.7.0',
         update_available: false,
         url: 'https://github.com/Joulenap/joulenap/releases',
       }
@@ -1097,10 +1097,10 @@ const WIZARD_WOL_TEST: { sent: boolean; mac: string; broadcast: string } = {
 }
 
 const ROUTES: Record<string, unknown> = {
-  'GET /health': { status: 'ok', version: '1.6.1-stub' },
+  'GET /health': { status: 'ok', version: '1.7.0-stub' },
   'GET /update': {
-    current: '1.6.1-stub',
-    latest: '1.6.1',
+    current: '1.7.0-stub',
+    latest: '1.7.0',
     update_available: true,
     url: 'https://github.com/Joulenap/joulenap/releases',
   },
@@ -1198,6 +1198,18 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // for one run's task log rather than the newest.
   if (body === undefined && key === 'GET /guests') {
     body = GUESTS[search.get('pve') ?? ''] ?? []
+  }
+  // pve-alpha has a third node holding no guests (the wizard fixture lists it too), so the
+  // tile shows a node the guest listing alone would miss (#94).
+  if (body === undefined && key === 'GET /nodes') {
+    const pve = search.get('pve') ?? ''
+    body =
+      pve === 'pve-alpha'
+        ? WIZARD_PVE_CONNECT.nodes
+        : [...new Set((GUESTS[pve] ?? []).map((g) => g.node))].map((node) => ({
+            node,
+            status: 'online',
+          }))
   }
   if (body === undefined && key === 'GET /tasklog') {
     const run = search.get('run')

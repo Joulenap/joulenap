@@ -1,4 +1,4 @@
-"""GET /api/guests — list one PVE's CTs/VMs for the route editor's guest selection.
+"""GET /api/guests and /api/nodes: one PVE's CTs/VMs, and the cluster nodes behind it.
 
 Scoped to a single PVE by query parameter: vmids collide across PVEs, so a flat list could
 not say which "100" it meant — which is also why a route stores its guest selection per
@@ -8,6 +8,7 @@ source.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -38,13 +39,12 @@ class GuestInfo(BaseModel):
     pbs_ids: list[str] = []
 
 
-@router.get("/guests", response_model=list[GuestInfo])
-def list_guests(
-    pve: str = Query(description="Which configured PVE to list"),
-    store: ConfigStore = Depends(get_config_store),
-    job_service: JobService = Depends(get_job_service),
-    session: Session = Depends(get_session),
-) -> list[GuestInfo]:
+class NodeInfo(BaseModel):
+    node: str
+    status: str  # "online" | "offline" | "unknown"
+
+
+def _ask_pve(store: ConfigStore, job_service: JobService, pve: str, call: Any) -> Any:
     device = next((p for p in store.config.pves if p.id == pve), None)
     if device is None:
         raise HTTPException(
@@ -52,11 +52,39 @@ def list_guests(
         )
     try:
         with job_service.deps.connect_pve(device) as client:
-            guests = client.list_cluster_guests()
+            return call(client)
     except ConnectorError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not reach PVE: {exc}"
         ) from exc
+
+
+@router.get("/nodes", response_model=list[NodeInfo])
+def list_nodes(
+    pve: str = Query(description="Which configured PVE to list"),
+    store: ConfigStore = Depends(get_config_store),
+    job_service: JobService = Depends(get_job_service),
+) -> list[NodeInfo]:
+    """Every node of the cluster, guests or not.
+
+    The node count used to be read off the guest listing, which misses a node that holds
+    no guests (or only templates): a 4-node cluster read as 3 (issue #94).
+    """
+    rows = _ask_pve(store, job_service, pve, lambda c: c.list_nodes())
+    return sorted(
+        (NodeInfo(node=r.get("node", ""), status=r.get("status") or "unknown") for r in rows),
+        key=lambda n: n.node,
+    )
+
+
+@router.get("/guests", response_model=list[GuestInfo])
+def list_guests(
+    pve: str = Query(description="Which configured PVE to list"),
+    store: ConfigStore = Depends(get_config_store),
+    job_service: JobService = Depends(get_job_service),
+    session: Session = Depends(get_session),
+) -> list[GuestInfo]:
+    guests = _ask_pve(store, job_service, pve, lambda c: c.list_cluster_guests())
     # Per-(pve, pbs) rows, not the collapsed newest-per-vmid view: a vmid can exist on two
     # PVEs, and the panel names the PBSs holding each backup.
     cached: dict[int, list[tuple[str, datetime]]] = {}

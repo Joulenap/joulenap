@@ -5,6 +5,25 @@ All notable changes to Joulenap are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0]
+
+### Added
+
+- The Proxmox VE tile on the dashboard lists the cluster's node names under its summary, and the
+  device card in Settings shows them when you hover the node count, so you can check at a glance
+  that Joulenap sees every node. Thanks to @Yuelows for the suggestion (#94).
+
+### Fixed
+
+- A cluster node that holds no guests, or only templates, is now counted. The node count was read
+  off the guest list, so such a node was left out and a 4-node cluster showed as 3 nodes. Joulenap
+  now asks PVE for its real node list. Thanks to @Yuelows for the report (#94).
+
+### Changed
+
+- Frontend dependencies updated: i18next 26.7.1, react-i18next 17.1.11, vite 8.3.6,
+  @vitejs/plugin-react 6.3.0.
+
 ## [1.6.1]
 
 ### Fixed
@@ -895,7 +914,8 @@ Backup Server, all from a web UI.
 - Config-driven via `config.yaml` (pydantic-validated); secrets stay in `config.yaml` and are
   redacted from API responses.
 
-[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/Joulenap/joulenap/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/Joulenap/joulenap/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/Joulenap/joulenap/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/Joulenap/joulenap/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Joulenap/joulenap/compare/v1.4.0...v1.5.0

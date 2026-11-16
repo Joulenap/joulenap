@@ -9,6 +9,7 @@ import type {
   DeviceLists,
   DeviceTestResult,
   GuestInfo,
+  NodeInfo,
   LogLine,
   MaintenanceQueued,
   NetInterface,
@@ -160,6 +161,7 @@ export const api = {
   deleteApiKey: () => req<void>('DELETE', '/config/api-key'),
   // vmids collide across PVEs, so the backend refuses to guess which one you meant.
   guests: (pve: string) => req<GuestInfo[]>('GET', `/guests?pve=${encodeURIComponent(pve)}`),
+  nodes: (pve: string) => req<NodeInfo[]>('GET', `/nodes?pve=${encodeURIComponent(pve)}`),
   toggleScheduler: (enabled: boolean) =>
     req<ToggleResponse>('POST', '/scheduler/toggle', { enabled }),
   notifyTest: () => req<NotifyTestResult>('POST', '/notify/test'),
